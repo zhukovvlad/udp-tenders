@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { CheckCircle2, AlertTriangle, Loader2, FileText } from "lucide-react";
+
 import {
   Select,
   SelectContent,
@@ -10,288 +9,199 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Upload as UploadIcon, Trash2, FileEdit, RefreshCw } from "lucide-react";
-import { Link } from "react-router-dom";
-import api from "@/lib/api";
+import { Label } from "@/components/ui/label";
 
-interface Project {
-  id: number;
-  name: string;
-}
+import { PageHeader } from "@/components/ui-domain/PageHeader";
+import { Surface } from "@/components/ui-domain/Surface";
+import { Dropzone } from "@/components/ui-domain/Dropzone";
+import { StatusPill } from "@/components/ui-domain/StatusPill";
+import { ConfidenceBadge } from "@/components/ui-domain/ConfidenceBadge";
+import { Button } from "@/components/ui-domain/Button";
+import { EmptyState } from "@/components/ui-domain/EmptyState";
 
-interface UploadResult {
-  filename: string;
-  status: string;
+import { useProjects, useUploadInvoice } from "@/services/queries";
+import type { ID } from "@/types/common";
+import type { DocumentDetail } from "@/types/invoice";
+
+interface JobState {
+  id: string;
+  file: File;
+  status: "pending" | "uploading" | "ready" | "error";
+  progress: number;
+  result?: DocumentDetail;
   error?: string;
 }
 
-interface Document {
-  id: number;
-  project_id: number;
-  filename: string;
-  doc_type: string;
-  status: string;
-  uploaded_at: string;
-  invoice_count: number;
-  has_issues: boolean;
-  ai_confidence: number | null;
-}
-
-const statusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  processed: "default",
-  processing: "secondary",
-  error: "destructive",
-  pending: "outline",
-  queue: "outline",
-};
-
-const statusLabel: Record<string, string> = {
-  processed: "Обработан",
-  processing: "Обрабатывается",
-  error: "Ошибка",
-  pending: "Ожидание",
-  queue: "В очереди",
-};
-
 export default function UploadPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string>("");
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [results, setResults] = useState<UploadResult[]>([]);
-  const [dragOver, setDragOver] = useState(false);
+  const projectsQ = useProjects();
+  const upload = useUploadInvoice();
 
-  useEffect(() => {
-    api.get("/projects").then((res) => setProjects(res.data));
-  }, []);
+  const [projectId, setProjectId] = useState<ID | null>(null);
+  const [jobs, setJobs] = useState<JobState[]>([]);
 
-  const loadDocuments = (projectId: string) => {
+  const handleDrop = async (files: File[]) => {
     if (!projectId) return;
-    api.get("/invoices/documents", { params: { project_id: projectId } })
-      .then((res) => setDocuments(res.data));
-  };
+    const newJobs: JobState[] = files.map((f, i) => ({
+      id: `${Date.now()}-${i}-${f.name}`,
+      file: f,
+      status: "pending",
+      progress: 0,
+    }));
+    setJobs((prev) => [...newJobs, ...prev]);
 
-  const handleProjectChange = (val: string) => {
-    setSelectedProject(val);
-    setResults([]);
-    loadDocuments(val);
-  };
-
-  const uploadFile = async (file: File) => {
-    if (!selectedProject) return;
-    setResults((prev) => [...prev, { filename: file.name, status: "queue" }]);
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-      await api.post("/invoices/upload", formData, {
-        params: { project_id: selectedProject },
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      setResults((prev) =>
-        prev.map((r) => r.filename === file.name ? { ...r, status: "processed" } : r)
+    for (const job of newJobs) {
+      setJobs((prev) =>
+        prev.map((j) => (j.id === job.id ? { ...j, status: "uploading" } : j))
       );
-      loadDocuments(selectedProject);
-    } catch {
-      setResults((prev) =>
-        prev.map((r) => r.filename === file.name ? { ...r, status: "error", error: "Ошибка загрузки" } : r)
-      );
+      try {
+        const result = await upload.mutateAsync({
+          projectId,
+          file: job.file,
+          onProgress: (pct) =>
+            setJobs((prev) =>
+              prev.map((j) => (j.id === job.id ? { ...j, progress: pct } : j))
+            ),
+        });
+        setJobs((prev) =>
+          prev.map((j) =>
+            j.id === job.id ? { ...j, status: "ready", result, progress: 100 } : j
+          )
+        );
+      } catch (err) {
+        setJobs((prev) =>
+          prev.map((j) =>
+            j.id === job.id
+              ? {
+                  ...j,
+                  status: "error",
+                  error: err instanceof Error ? err.message : "Ошибка загрузки",
+                }
+              : j
+          )
+        );
+      }
     }
-  };
-
-  const handleDelete = async (id: number) => {
-    if (!confirm("Удалить документ и все связанные данные?")) return;
-    await api.delete(`/invoices/documents/${id}`);
-    loadDocuments(selectedProject);
-  };
-
-  const [retrying, setRetrying] = useState<number | null>(null);
-  const handleReparse = async (id: number) => {
-    setRetrying(id);
-    try {
-      await api.post(`/invoices/documents/${id}/reparse`);
-      loadDocuments(selectedProject);
-    } finally {
-      setRetrying(null);
-    }
-  };
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setDragOver(false);
-      if (!selectedProject) return;
-      const files = Array.from(e.dataTransfer.files).filter((f) => f.name.endsWith(".pdf"));
-      files.forEach(uploadFile);
-    },
-    [selectedProject]
-  );
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    files.forEach(uploadFile);
-    e.target.value = "";
   };
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <Label>Объект *</Label>
-        <Select value={selectedProject} onValueChange={handleProjectChange}>
-          <SelectTrigger className="w-[320px]">
-            <SelectValue placeholder="Выберите объект для загрузки" />
-          </SelectTrigger>
-          <SelectContent>
-            {projects.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+    <div className="container-page py-8">
+      <PageHeader
+        serif
+        title="Загрузка документов"
+        subtitle="Перетащите счета-фактуры или УПД — система распарсит позиции автоматически"
+      />
 
-      <div
-        className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors ${
-          !selectedProject
-            ? "border-muted-foreground/15 opacity-50 cursor-not-allowed"
-            : dragOver
-            ? "border-primary bg-primary/5 cursor-pointer"
-            : "border-muted-foreground/25 hover:border-primary/50 cursor-pointer"
-        }`}
-        onDragOver={(e) => { e.preventDefault(); if (selectedProject) setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        onClick={() => { if (selectedProject) document.getElementById("file-input")?.click(); }}
-      >
-        <UploadIcon className="h-10 w-10 mx-auto mb-4 text-muted-foreground" />
-        {selectedProject ? (
-          <>
-            <p className="text-lg font-medium">Перетащите PDF-файлы УПД сюда</p>
-            <p className="text-sm text-muted-foreground mt-1">или нажмите для выбора файлов</p>
-          </>
+      {/* Контекст: объект */}
+      <Surface className="mt-6">
+        <div className="flex items-end gap-4">
+          <div className="space-y-1.5">
+            <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
+              Объект *
+            </Label>
+            <Select
+              value={projectId ? String(projectId) : ""}
+              onValueChange={(v) => setProjectId(v ? Number(v) : null)}
+            >
+              <SelectTrigger className="w-[320px]">
+                <SelectValue placeholder="Выберите объект" />
+              </SelectTrigger>
+              <SelectContent>
+                {(projectsQ.data ?? []).map((p) => (
+                  <SelectItem key={p.id} value={String(p.id)}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </Surface>
+
+      {/* Dropzone */}
+      <div className="mt-4">
+        {projectId ? (
+          <Dropzone
+            onDrop={handleDrop}
+            multiple
+            accept={{
+              "application/pdf": [".pdf"],
+              "image/jpeg": [".jpg", ".jpeg"],
+              "image/png": [".png"],
+            }}
+          />
         ) : (
-          <p className="text-lg font-medium text-muted-foreground">Сначала выберите объект</p>
+          <EmptyState
+            title="Сначала выберите объект"
+            description="К объекту привязываются загружаемые документы."
+          />
         )}
-        <input
-          id="file-input"
-          type="file"
-          accept=".pdf"
-          multiple
-          className="hidden"
-          onChange={handleFileSelect}
-        />
       </div>
 
-      {results.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle>Результаты загрузки</CardTitle></CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {results.map((item, i) => (
-                <div key={i} className="flex items-center justify-between py-2 border-b last:border-0">
-                  <div>
-                    <p className="font-medium">{item.filename}</p>
-                    {item.error && <p className="text-sm text-destructive">{item.error}</p>}
+      {/* Список заданий */}
+      {jobs.length > 0 && (
+        <section className="mt-8">
+          <h2 className="mb-3 font-serif text-xl font-medium text-fg">
+            История загрузки
+          </h2>
+          <div className="space-y-2">
+            {jobs.map((j) => (
+              <Surface key={j.id} padding="sm">
+                <div className="flex items-start gap-4">
+                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-surface-sunken">
+                    {j.status === "uploading" && (
+                      <Loader2 size={16} className="animate-spin text-accent" />
+                    )}
+                    {j.status === "ready" && (
+                      <CheckCircle2 size={16} className="text-accent" />
+                    )}
+                    {j.status === "error" && (
+                      <AlertTriangle size={16} className="text-danger" />
+                    )}
+                    {j.status === "pending" && (
+                      <FileText size={16} className="text-fg-tertiary" />
+                    )}
                   </div>
-                  <Badge variant={statusVariant[item.status] ?? "outline"}>
-                    {statusLabel[item.status] ?? item.status}
-                  </Badge>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium text-fg">
+                        {j.file.name}
+                      </span>
+                      {j.status === "uploading" && (
+                        <StatusPill tone="info" label={`${j.progress}%`} />
+                      )}
+                      {j.status === "ready" && (
+                        <StatusPill tone="success" label="готово" dot />
+                      )}
+                      {j.status === "error" && (
+                        <StatusPill tone="danger" label="ошибка" dot />
+                      )}
+                    </div>
+                    {j.result && (
+                      <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-fg-secondary">
+                        {j.result.invoices.map((inv) => (
+                          <span key={inv.id} className="flex items-center gap-1.5">
+                            СФ № {inv.number} · {inv.items.length} позиций
+                            <ConfidenceBadge value={inv.ai_confidence} />
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {j.error && (
+                      <div className="mt-1 text-xs text-danger-text">{j.error}</div>
+                    )}
+                  </div>
+                  {j.result && (
+                    <Link to={`/documents/${j.result.id}`}>
+                      <Button variant="secondary" size="sm">
+                        Проверить
+                      </Button>
+                    </Link>
+                  )}
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {selectedProject && (
-        <Card>
-          <CardHeader><CardTitle>Документы объекта</CardTitle></CardHeader>
-          <CardContent>
-            {documents.length === 0 ? (
-              <p className="text-center text-muted-foreground py-6">Документы не загружены</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Файл</TableHead>
-                    <TableHead>Статус</TableHead>
-                    <TableHead>УПД в документе</TableHead>
-                    <TableHead>ИИ</TableHead>
-                    <TableHead>Загружен</TableHead>
-                    <TableHead className="w-12"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {documents.map((doc) => (
-                    <TableRow key={doc.id}>
-                      <TableCell className="font-medium">{doc.filename}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1 flex-wrap">
-                          <Badge variant={statusVariant[doc.status] ?? "outline"}>
-                            {statusLabel[doc.status] ?? doc.status}
-                          </Badge>
-                          {doc.has_issues && (
-                            <Badge variant="secondary" className="bg-amber-100 text-amber-800 hover:bg-amber-100">
-                              Требует проверки
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>{doc.invoice_count}</TableCell>
-                      <TableCell>
-                        {doc.ai_confidence != null ? (
-                          <Badge
-                            variant="outline"
-                            className={
-                              doc.ai_confidence >= 0.85
-                                ? "bg-green-50 text-green-700"
-                                : doc.ai_confidence >= 0.7
-                                ? "bg-amber-50 text-amber-700"
-                                : "bg-red-50 text-red-700"
-                            }
-                          >
-                            {Math.round(doc.ai_confidence * 100)}%
-                          </Badge>
-                        ) : "—"}
-                      </TableCell>
-                      <TableCell>{new Date(doc.uploaded_at).toLocaleString("ru-RU")}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          {doc.status === "error" && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleReparse(doc.id)}
-                              disabled={retrying === doc.id}
-                              title="Повторить парсинг"
-                            >
-                              <RefreshCw className={`h-4 w-4 ${retrying === doc.id ? "animate-spin" : ""}`} />
-                            </Button>
-                          )}
-                          <Button variant="ghost" size="icon" asChild title="Редактировать">
-                            <Link to={`/documents/${doc.id}`}>
-                              <FileEdit className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDelete(doc.id)} title="Удалить">
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+              </Surface>
+            ))}
+          </div>
+        </section>
       )}
     </div>
   );
