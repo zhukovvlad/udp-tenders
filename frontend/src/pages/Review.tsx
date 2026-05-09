@@ -38,7 +38,7 @@ export default function Review() {
   const reparse = useReparseDocument();
   const remove = useDeleteDocument();
 
-  const [tab, setTab] = useState<TabKey>("header");
+  const [tab, setTab] = useState<TabKey>("items");
   const [draft, setDraft] = useState<InvoiceRow | null>(null);
 
   // Загрузить первый СФ документа в draft при первом получении
