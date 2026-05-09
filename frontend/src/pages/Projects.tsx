@@ -1,167 +1,160 @@
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { useMemo, useState } from "react";
+import { Plus, Search, Building2 } from "lucide-react";
+
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
+  DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Pencil, Trash2 } from "lucide-react";
-import api from "@/lib/api";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
-interface Project {
-  id: number;
-  name: string;
-  contract_number: string;
-  doc_count: number;
-}
+import { Button } from "@/components/ui-domain/Button";
+import { PageHeader } from "@/components/ui-domain/PageHeader";
+import { EmptyState } from "@/components/ui-domain/EmptyState";
+import { Skeleton } from "@/components/ui-domain/Skeleton";
+import { ProjectCard } from "@/components/projects/ProjectCard";
 
-const emptyForm = { name: "", contract_number: "" };
+import { useProjects, useCreateProject } from "@/services/queries";
 
 export default function Projects() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editId, setEditId] = useState<number | null>(null);
-  const [form, setForm] = useState(emptyForm);
-  const [loading, setLoading] = useState(false);
+  const projectsQ = useProjects();
+  const create = useCreateProject();
 
-  const load = () => {
-    api.get("/projects").then((res) => setProjects(res.data));
-  };
+  const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [contract, setContract] = useState("");
 
-  useEffect(() => { load(); }, []);
+  const filtered = useMemo(() => {
+    const list = projectsQ.data ?? [];
+    if (!search.trim()) return list;
+    const q = search.trim().toLowerCase();
+    return list.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        (p.contract_number ?? "").toLowerCase().includes(q)
+    );
+  }, [projectsQ.data, search]);
 
-  const openAdd = () => {
-    setEditId(null);
-    setForm(emptyForm);
-    setDialogOpen(true);
-  };
-
-  const openEdit = (p: Project) => {
-    setEditId(p.id);
-    setForm({ name: p.name, contract_number: p.contract_number });
-    setDialogOpen(true);
-  };
-
-  const handleSave = async () => {
-    if (!form.name.trim()) return;
-    setLoading(true);
-    try {
-      if (editId !== null) {
-        await api.put(`/projects/${editId}`, form);
-      } else {
-        await api.post("/projects", form);
+  const submit = () => {
+    if (!name.trim()) return;
+    create.mutate(
+      { name: name.trim(), contract_number: contract.trim() || null },
+      {
+        onSuccess: () => {
+          setOpen(false);
+          setName("");
+          setContract("");
+        },
       }
-      setDialogOpen(false);
-      load();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDelete = async (id: number) => {
-    if (!confirm("Удалить объект? Это действие необратимо.")) return;
-    await api.delete(`/projects/${id}`);
-    load();
+    );
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Объекты</h2>
-        <Button onClick={openAdd}>
-          <Plus className="h-4 w-4 mr-2" />
-          Добавить объект
-        </Button>
+    <div className="container-page py-8">
+      <PageHeader
+        serif
+        title="Объекты"
+        subtitle={
+          (projectsQ.data ?? []).length > 0
+            ? `${(projectsQ.data ?? []).length} объектов в портфеле`
+            : "Здесь появится ваш портфель объектов"
+        }
+        actions={
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger render={<Button leftIcon={<Plus size={14} />}>Новый объект</Button>} />
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Создать объект</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
+                    Название *
+                  </Label>
+                  <Input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="ЖК «Северный», корпус 1"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
+                    Номер договора
+                  </Label>
+                  <Input
+                    value={contract}
+                    onChange={(e) => setContract(e.target.value)}
+                    placeholder="Опционально"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setOpen(false)}>
+                  Отмена
+                </Button>
+                <Button
+                  onClick={submit}
+                  loading={create.isPending}
+                  disabled={!name.trim()}
+                >
+                  Создать
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        }
+      />
+
+      <div className="mt-6 relative w-full max-w-md">
+        <Search
+          size={14}
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-tertiary"
+        />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Поиск по названию или договору"
+          className="w-full rounded-md border border-border-subtle bg-surface py-2 pl-9 pr-3 text-sm text-fg placeholder:text-fg-tertiary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+        />
       </div>
 
-      <Card>
-        <CardContent className="pt-4">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Название</TableHead>
-                <TableHead>Номер договора</TableHead>
-                <TableHead>Документов</TableHead>
-                <TableHead className="w-24"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {projects.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                    Объекты не добавлены
-                  </TableCell>
-                </TableRow>
-              ) : (
-                projects.map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell className="font-medium">{p.name}</TableCell>
-                    <TableCell>{p.contract_number || "—"}</TableCell>
-                    <TableCell>{p.doc_count}</TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDelete(p.id)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editId !== null ? "Редактировать объект" : "Добавить объект"}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="proj-name">Название *</Label>
-              <Input
-                id="proj-name"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Название объекта"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="proj-contract">Номер договора</Label>
-              <Input
-                id="proj-contract"
-                value={form.contract_number}
-                onChange={(e) => setForm({ ...form, contract_number: e.target.value })}
-                placeholder="Например: 123/2024"
-              />
-            </div>
+      <div className="mt-6">
+        {projectsQ.isLoading ? (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-[120px]" />
+            ))}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Отмена</Button>
-            <Button onClick={handleSave} disabled={loading || !form.name.trim()}>
-              {loading ? "Сохранение..." : "Сохранить"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        ) : (projectsQ.data ?? []).length === 0 ? (
+          <EmptyState
+            icon={<Building2 size={20} />}
+            title="Создайте первый объект"
+            description="Объект — это контейнер для договоров и счетов-фактур. С него начинается работа в УПД Трекере."
+            action={
+              <Button leftIcon={<Plus size={14} />} onClick={() => setOpen(true)}>
+                Новый объект
+              </Button>
+            }
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            title="Ничего не найдено"
+            description="Попробуйте изменить запрос."
+          />
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {filtered.map((p) => (
+              <ProjectCard key={p.id} project={p} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
