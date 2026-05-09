@@ -1,10 +1,8 @@
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { useEffect, useMemo, useState } from "react";
+import { cn } from "@/lib/utils";
+
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Slider } from "@/components/ui/slider";
 import {
   Select,
   SelectContent,
@@ -12,81 +10,184 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import api from "@/lib/api";
+
+import { PageHeader } from "@/components/ui-domain/PageHeader";
+import { Surface } from "@/components/ui-domain/Surface";
+import { Button } from "@/components/ui-domain/Button";
+import { Skeleton } from "@/components/ui-domain/Skeleton";
+
+import { useSettings, useUpdateSettings } from "@/services/queries";
+import type { AppSettings } from "@/services/api/settings";
+
+type SectionKey = "general" | "parsing" | "about";
+
+const SECTIONS: Array<{ key: SectionKey; label: string }> = [
+  { key: "general", label: "Общие" },
+  { key: "parsing", label: "Парсинг" },
+  { key: "about", label: "О приложении" },
+];
 
 export default function SettingsPage() {
-  const [apiKey, setApiKey] = useState("");
-  const [model, setModel] = useState("anthropic/claude-sonnet-4.6");
-  const [threshold, setThreshold] = useState([70]);
-  const [apiKeySet, setApiKeySet] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const settingsQ = useSettings();
+  const update = useUpdateSettings();
+
+  const [active, setActive] = useState<SectionKey>("general");
+  const [draft, setDraft] = useState<AppSettings | null>(null);
 
   useEffect(() => {
-    api.get("/settings").then((res) => {
-      setApiKeySet(res.data.api_key_set);
-      setModel(res.data.model);
-      setThreshold([res.data.confidence_threshold * 100]);
-    });
-  }, []);
+    if (settingsQ.data && !draft) setDraft(settingsQ.data);
+  }, [settingsQ.data, draft]);
 
-  const handleSave = async () => {
-    setSaving(true);
-    const payload: Record<string, string | number> = {};
-    if (apiKey) payload.api_key = apiKey;
-    payload.model = model;
-    payload.confidence_threshold = threshold[0] / 100;
+  const dirty = useMemo(() => {
+    if (!draft || !settingsQ.data) return false;
+    return JSON.stringify(draft) !== JSON.stringify(settingsQ.data);
+  }, [draft, settingsQ.data]);
 
-    await api.put("/settings", payload);
-    if (apiKey) setApiKeySet(true);
-    setApiKey("");
-    setSaving(false);
-  };
+  if (settingsQ.isLoading || !draft) {
+    return (
+      <div className="container-page py-8 space-y-4">
+        <Skeleton className="h-8 w-1/3" />
+        <Skeleton className="h-[300px]" />
+      </div>
+    );
+  }
 
   return (
-    <Card className="max-w-lg">
-      <CardHeader><CardTitle>Настройки</CardTitle></CardHeader>
-      <CardContent className="space-y-6">
-        <div className="space-y-2">
-          <Label>API-ключ OpenRouter</Label>
-          <Input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder={apiKeySet ? "••••••••••• (установлен)" : "sk-or-v1-..."}
-          />
-          <div>
-            {apiKeySet
-              ? <Badge variant="default">Ключ установлен</Badge>
-              : <Badge variant="destructive">Не установлен</Badge>
-            }
+    <div className="container-page py-8">
+      <PageHeader serif title="Настройки" subtitle="Параметры приложения и парсинга" />
+
+      <div className="mt-6 grid grid-cols-12 gap-6">
+        {/* Боковое меню */}
+        <aside className="col-span-12 md:col-span-3">
+          <nav className="md:sticky md:top-20 flex flex-row gap-1 md:flex-col">
+            {SECTIONS.map((s) => (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => setActive(s.key)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-left text-sm transition-colors duration-150",
+                  active === s.key
+                    ? "bg-surface-hover text-fg font-medium"
+                    : "text-fg-secondary hover:bg-surface-hover hover:text-fg"
+                )}
+              >
+                {s.label}
+              </button>
+            ))}
+          </nav>
+        </aside>
+
+        {/* Контент */}
+        <section className="col-span-12 md:col-span-9">
+          {active === "general" && (
+            <Surface>
+              <h3 className="text-md font-medium">Общие</h3>
+              <p className="mt-1 text-xs text-fg-tertiary">
+                Базовые параметры приложения. Расширяется по мере добавления
+                полей в backend.
+              </p>
+              <div className="mt-4 text-sm text-fg-secondary">
+                Дополнительных параметров пока нет.
+              </div>
+            </Surface>
+          )}
+
+          {active === "parsing" && (
+            <Surface>
+              <h3 className="text-md font-medium">Парсинг ИИ</h3>
+              <div className="mt-4 space-y-4">
+                <div className="space-y-1.5">
+                  <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
+                    Провайдер ИИ
+                  </Label>
+                  <Select
+                    value={String(draft.ai_provider ?? "off")}
+                    onValueChange={(v: string | null) =>
+                      setDraft({ ...draft, ai_provider: (v ?? "off") as AppSettings["ai_provider"] })
+                    }
+                  >
+                    <SelectTrigger className="w-[280px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="openrouter">OpenRouter</SelectItem>
+                      <SelectItem value="anthropic">Anthropic</SelectItem>
+                      <SelectItem value="off">Отключено</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-fg-tertiary">
+                    Сервис, который парсит таблицу позиций из СФ.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
+                    Модель
+                  </Label>
+                  <Input
+                    value={String(draft.ai_model ?? "")}
+                    onChange={(e) => setDraft({ ...draft, ai_model: e.target.value })}
+                    placeholder="например, anthropic/claude-haiku-4-5"
+                    className="max-w-md"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
+                    Порог уверенности (0..1)
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    max="1"
+                    value={String(draft.parse_threshold ?? 0.7)}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        parse_threshold: Number(e.target.value) || 0,
+                      })
+                    }
+                    className="w-[160px]"
+                  />
+                  <p className="text-xs text-fg-tertiary">
+                    Документы с уверенностью ниже порога отмечаются «требует
+                    проверки».
+                  </p>
+                </div>
+              </div>
+            </Surface>
+          )}
+
+          {active === "about" && (
+            <Surface>
+              <h3 className="text-md font-medium">О приложении</h3>
+              <div className="mt-4 space-y-1 text-sm text-fg-secondary">
+                <div>УПД Трекер цен</div>
+                <div>Версия: 2.0.0</div>
+              </div>
+            </Surface>
+          )}
+        </section>
+      </div>
+
+      {/* Sticky-bar */}
+      {dirty && (
+        <div className="sticky bottom-0 mt-8 -mx-6 border-t border-border-subtle bg-surface/95 px-6 py-3 backdrop-blur">
+          <div className="container-page flex items-center justify-end gap-2">
+            <Button variant="ghost" onClick={() => setDraft(settingsQ.data ?? null)}>
+              Отменить изменения
+            </Button>
+            <Button
+              loading={update.isPending}
+              onClick={() => update.mutate(draft)}
+            >
+              Сохранить
+            </Button>
           </div>
         </div>
-
-        <div className="space-y-2">
-          <Label>Модель (OpenRouter)</Label>
-          <Select value={model} onValueChange={setModel}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="anthropic/claude-sonnet-4.6">Claude Sonnet 4.6 (рекомендуется)</SelectItem>
-              <SelectItem value="anthropic/claude-sonnet-4">Claude Sonnet 4</SelectItem>
-              <SelectItem value="anthropic/claude-haiku-4">Claude Haiku 4 (быстрый)</SelectItem>
-              <SelectItem value="google/gemini-2.5-flash">Gemini 2.5 Flash (дешёвый)</SelectItem>
-              <SelectItem value="openai/gpt-4o">GPT-4o</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-2">
-          <Label>Порог уверенности: {threshold[0]}%</Label>
-          <Slider value={threshold} onValueChange={setThreshold} min={0} max={100} step={5} />
-        </div>
-
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? "Сохранение..." : "Сохранить"}
-        </Button>
-      </CardContent>
-    </Card>
+      )}
+    </div>
   );
 }
