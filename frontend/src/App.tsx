@@ -8,6 +8,7 @@ import Dashboard from "@/pages/Dashboard";
 import UploadPage from "@/pages/Upload";
 import Review from "@/pages/Review";
 import Projects from "@/pages/Projects";
+import ProjectPage from "@/pages/ProjectPage";
 import MaterialClasses from "@/pages/MaterialClasses";
 import ReferencePrices from "@/pages/ReferencePrices";
 import Reports from "@/pages/Reports";
@@ -45,6 +46,7 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/upload" element={<UploadPage />} />
               <Route path="/projects" element={<Projects />} />
+              <Route path="/projects/:id" element={<ProjectPage />} />
               <Route path="/material-classes" element={<MaterialClasses />} />
               <Route path="/reference-prices" element={<ReferencePrices />} />
               <Route path="/reports" element={<Reports />} />
