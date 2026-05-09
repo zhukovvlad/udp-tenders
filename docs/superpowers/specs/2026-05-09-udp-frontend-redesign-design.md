@@ -33,7 +33,7 @@
 
 ### 2.2 Удаляемые зависимости
 
-- `@base-ui/react` — не используется, удалить.
+Нет. Изначально планировалось удалить `@base-ui/react`, но при ревизии оказалось, что 11 shadcn-примитивов в `components/ui/*` используют его как primitive-слой (button, dialog, dropdown-menu, navigation-menu, select, switch, slider, separator, badge, tabs, input). Удаление сломало бы все эти компоненты. Оставляем `@base-ui/react` как primitive-слой (роль аналогична `radix-ui` в kpi-tenders).
 
 ### 2.3 Структура `frontend/src/`
 
@@ -290,7 +290,7 @@ Dark: `#EDEAE0 / #B5B2A8 / #8E8B82 / #6E6B65`.
 
 Каждая фаза — отдельный коммит, проверяется в браузере перед следующей.
 
-1. **Foundation** — `package.json` (новые зависимости, удалить `@base-ui/react`), `index.css` (полная замена). Проверка: `npm run dev`, цвета изменились во всех местах за счёт shadcn-маппинга.
+1. **Foundation** — `package.json` (новые зависимости), `index.css` (полная замена). Проверка: `npm run dev`, цвета изменились во всех местах за счёт shadcn-маппинга.
 2. **Providers + AppShell** — `ThemeProvider`, `QueryClientProvider`, `Toaster`. Новый `App.tsx`, `AppShell`, `TopNav`, `Logo`, `ThemeToggle`. Проверка: переключение темы, навигация, все страницы открываются (пусть в старом виде).
 3. **`ui-domain/`** — все компоненты из секции 5 без интеграции в страницы. Опц. dev-only страница `/dev/showcase` для прокликивания.
 4. **`services/api/*` + `types/*` + react-query** — переезд axios-вызовов в `useQuery`/`useMutation`. UI-изменений нет. Тосты на ошибки через глобальный `onError`.
