@@ -1,363 +1,204 @@
-import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { useState, useMemo, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
+
+import { PageHeader } from "@/components/ui-domain/PageHeader";
+import { Surface } from "@/components/ui-domain/Surface";
+import { Tabs } from "@/components/ui-domain/Tabs";
+import { Breadcrumbs } from "@/components/ui-domain/Breadcrumbs";
+import { Button } from "@/components/ui-domain/Button";
+import { StatusPill } from "@/components/ui-domain/StatusPill";
+import { ConfidenceBadge } from "@/components/ui-domain/ConfidenceBadge";
+import { EmptyState } from "@/components/ui-domain/EmptyState";
+import { Skeleton } from "@/components/ui-domain/Skeleton";
+
+import { ReviewHeader } from "@/components/review/ReviewHeader";
+import { ReviewItemsTable } from "@/components/review/ReviewItemsTable";
+import { ReviewIssues } from "@/components/review/ReviewIssues";
+
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Plus, Trash2, Save } from "lucide-react";
-import api from "@/lib/api";
+  useDocument,
+  useUpdateInvoice,
+  useReparseDocument,
+  useDeleteDocument,
+} from "@/services/queries";
+import { invoicesApi } from "@/services/api/invoices";
+import { formatDate } from "@/lib/format";
+import type { InvoiceRow } from "@/types/invoice";
 
-interface MaterialClass {
-  id: number;
-  name: string;
-  material_type: string;
-}
-
-interface InvoiceItem {
-  id: number | null;
-  raw_name: string;
-  item_type: string;
-  material_class: { id: number; name: string } | null;
-  material_class_id?: number | null;
-  quantity: number;
-  unit: string | null;
-  unit_price: number;
-  amount: number;
-  vat_amount: number | null;
-}
-
-interface Invoice {
-  id: number;
-  number: string;
-  date: string;
-  supplier_name: string | null;
-  supplier_inn: string | null;
-  vat_rate: number;
-  items: InvoiceItem[];
-}
-
-interface DocumentData {
-  id: number;
-  filename: string;
-  invoices: Invoice[];
-}
-
-const ITEM_TYPES = [
-  { value: "material", label: "Материал" },
-  { value: "delivery", label: "Доставка" },
-  { value: "other", label: "Прочее" },
-];
+type TabKey = "header" | "items" | "issues";
 
 export default function Review() {
-  const { id } = useParams();
-  const [doc, setDoc] = useState<DocumentData | null>(null);
-  const [classes, setClasses] = useState<MaterialClass[]>([]);
-  const [saving, setSaving] = useState<number | null>(null);
+  const { id } = useParams<{ id: string }>();
+  const docId = id ? Number(id) : null;
+  const navigate = useNavigate();
 
-  const loadDocument = () => {
-    if (!id) return;
-    api.get(`/invoices/documents/${id}`).then((res) => {
-      const docData: DocumentData = res.data;
-      // Маппим material_class в material_class_id для удобства редактирования
-      docData.invoices.forEach((inv) => {
-        inv.items.forEach((item) => {
-          item.material_class_id = item.material_class?.id ?? null;
-        });
-      });
-      setDoc(docData);
-    });
-  };
+  const docQ = useDocument(docId);
+  const update = useUpdateInvoice();
+  const reparse = useReparseDocument();
+  const remove = useDeleteDocument();
 
+  const [tab, setTab] = useState<TabKey>("header");
+  const [draft, setDraft] = useState<InvoiceRow | null>(null);
+
+  // Загрузить первый СФ документа в draft при первом получении
   useEffect(() => {
-    loadDocument();
-    api.get("/material-classes").then((res) => setClasses(res.data));
-  }, [id]);
-
-  const updateInvoice = (idx: number, patch: Partial<Invoice>) => {
-    if (!doc) return;
-    const next = { ...doc };
-    next.invoices[idx] = { ...next.invoices[idx], ...patch };
-    setDoc(next);
-  };
-
-  const updateItem = (invIdx: number, itemIdx: number, patch: Partial<InvoiceItem>) => {
-    if (!doc) return;
-    const next = { ...doc };
-    next.invoices[invIdx].items[itemIdx] = { ...next.invoices[invIdx].items[itemIdx], ...patch };
-    setDoc(next);
-  };
-
-  const addItem = (invIdx: number) => {
-    if (!doc) return;
-    const next = { ...doc };
-    next.invoices[invIdx].items.push({
-      id: null,
-      raw_name: "",
-      item_type: "material",
-      material_class: null,
-      material_class_id: null,
-      quantity: 0,
-      unit: "м3",
-      unit_price: 0,
-      amount: 0,
-      vat_amount: null,
-    });
-    setDoc(next);
-  };
-
-  const removeItem = (invIdx: number, itemIdx: number) => {
-    if (!doc) return;
-    const next = { ...doc };
-    next.invoices[invIdx].items.splice(itemIdx, 1);
-    setDoc(next);
-  };
-
-  const saveInvoice = async (invIdx: number) => {
-    if (!doc) return;
-    const inv = doc.invoices[invIdx];
-    setSaving(inv.id);
-    try {
-      await api.put(`/invoices/${inv.id}`, {
-        number: inv.number,
-        date: inv.date,
-        supplier_name: inv.supplier_name,
-        supplier_inn: inv.supplier_inn,
-        vat_rate: inv.vat_rate,
-        items: inv.items.map((item) => ({
-          id: item.id,
-          raw_name: item.raw_name,
-          item_type: item.item_type,
-          material_class_id: item.material_class_id,
-          quantity: item.quantity,
-          unit: item.unit,
-          unit_price: item.unit_price,
-          amount: item.amount,
-          vat_amount: item.vat_amount,
-        })),
-      });
-      loadDocument();
-    } finally {
-      setSaving(null);
+    const inv = docQ.data?.invoices[0];
+    if (inv && (!draft || draft.id !== inv.id)) {
+      setDraft(inv);
     }
-  };
+  }, [docQ.data, draft]);
 
-  const deleteInvoice = async (invId: number) => {
-    if (!confirm("Удалить эту счёт-фактуру?")) return;
-    await api.delete(`/invoices/${invId}`);
-    loadDocument();
-  };
+  const dirty = useMemo(() => {
+    const inv = docQ.data?.invoices[0];
+    if (!draft || !inv) return false;
+    return JSON.stringify(draft) !== JSON.stringify(inv);
+  }, [draft, docQ.data]);
 
-  if (!doc) return <div className="text-center py-20 text-muted-foreground">Загрузка...</div>;
+  if (docId === null) {
+    return (
+      <div className="container-page py-8">
+        <EmptyState title="Документ не найден" />
+      </div>
+    );
+  }
+
+  if (docQ.isLoading) {
+    return (
+      <div className="container-page py-8 space-y-4">
+        <Skeleton className="h-8 w-1/3" />
+        <Skeleton className="h-[400px]" />
+      </div>
+    );
+  }
+
+  if (!docQ.data || !draft) {
+    return (
+      <div className="container-page py-8">
+        <EmptyState title="Документ не найден" />
+      </div>
+    );
+  }
+
+  const doc = docQ.data;
+  const inv = draft;
+
+  const tabs: Array<{ value: TabKey; label: string }> = [
+    { value: "header", label: "Шапка" },
+    { value: "items", label: `Позиции · ${inv.items.length}` },
+    { value: "issues", label: "Проблемы" },
+  ];
 
   return (
-    <div className="grid grid-cols-2 gap-6 h-[calc(100vh-8rem)]">
-      <Card className="flex flex-col overflow-hidden">
-        <CardHeader className="shrink-0">
-          <CardTitle className="text-base">PDF: {doc.filename}</CardTitle>
-        </CardHeader>
-        <CardContent className="flex-1 p-0">
-          <iframe
-            src={`/api/invoices/documents/${id}/pdf`}
-            className="w-full h-full border-0"
-            title="PDF просмотр"
-          />
-        </CardContent>
-      </Card>
+    <div className="container-page py-6">
+      <Breadcrumbs
+        items={[
+          { label: "Дашборд", to: "/" },
+          { label: doc.filename },
+          { label: `СФ № ${inv.number || "—"}` },
+        ]}
+      />
 
-      <Card className="flex flex-col overflow-hidden">
-        <CardHeader className="shrink-0">
-          <CardTitle>Распознанные УПД ({doc.invoices.length})</CardTitle>
-        </CardHeader>
-        <CardContent className="flex-1 overflow-y-auto space-y-8">
-          {doc.invoices.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">УПД не найдены в документе</p>
-          ) : (
-            doc.invoices.map((inv, invIdx) => (
-              <div key={inv.id} className="space-y-3">
-                {invIdx > 0 && <Separator />}
+      <PageHeader
+        title={`СФ № ${inv.number || "—"} от ${formatDate(inv.date)}`}
+        subtitle={inv.supplier_name ?? "Поставщик не указан"}
+        actions={
+          <>
+            <ConfidenceBadge value={inv.ai_confidence} />
+            <StatusPill
+              tone={inv.has_issues ? "warning" : "success"}
+              label={inv.has_issues ? "требует проверки" : "готово"}
+              dot
+            />
+          </>
+        }
+      />
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Номер</Label>
-                    <Input
-                      value={inv.number}
-                      onChange={(e) => updateInvoice(invIdx, { number: e.target.value })}
-                      className="h-8"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Дата</Label>
-                    <Input
-                      type="date"
-                      value={inv.date}
-                      onChange={(e) => updateInvoice(invIdx, { date: e.target.value })}
-                      className="h-8"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Поставщик</Label>
-                    <Input
-                      value={inv.supplier_name || ""}
-                      onChange={(e) => updateInvoice(invIdx, { supplier_name: e.target.value })}
-                      className="h-8"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">ИНН</Label>
-                    <Input
-                      value={inv.supplier_inn || ""}
-                      onChange={(e) => updateInvoice(invIdx, { supplier_inn: e.target.value })}
-                      className="h-8"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">НДС, %</Label>
-                    <Input
-                      type="number"
-                      value={inv.vat_rate}
-                      onChange={(e) => updateInvoice(invIdx, { vat_rate: parseFloat(e.target.value) || 0 })}
-                      className="h-8"
-                    />
-                  </div>
-                </div>
+      {/* Двухколоночный layout */}
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Левая колонка — превью документа */}
+        <div className="lg:sticky lg:top-20 lg:self-start">
+          <Surface padding="none" className="overflow-hidden">
+            <iframe
+              title="Документ"
+              src={invoicesApi.documentPdfUrl(docId)}
+              className="h-[80vh] w-full border-0 bg-surface-sunken"
+            />
+          </Surface>
+          <div className="mt-2 flex items-center justify-between text-xs text-fg-tertiary">
+            <span>{doc.filename}</span>
+            <button
+              type="button"
+              onClick={() => reparse.mutate(docId)}
+              disabled={reparse.isPending}
+              className="text-fg-secondary underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
+            >
+              Переразобрать
+            </button>
+          </div>
+        </div>
 
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="min-w-[180px]">Наименование</TableHead>
-                      <TableHead>Тип</TableHead>
-                      <TableHead>Класс</TableHead>
-                      <TableHead>Кол-во</TableHead>
-                      <TableHead>Ед.</TableHead>
-                      <TableHead>Цена</TableHead>
-                      <TableHead>Сумма</TableHead>
-                      <TableHead className="w-8"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {inv.items.map((item, itemIdx) => {
-                      const hasIssue =
-                        (item.quantity || 0) <= 0 ||
-                        !(item.raw_name || "").trim();
-                      return (
-                      <TableRow key={item.id ?? `new-${itemIdx}`} className={hasIssue ? "bg-amber-50" : ""}>
-                        <TableCell>
-                          <Input
-                            value={item.raw_name}
-                            onChange={(e) => updateItem(invIdx, itemIdx, { raw_name: e.target.value })}
-                            className="h-8 text-xs"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Select
-                            value={item.item_type}
-                            onValueChange={(v) => updateItem(invIdx, itemIdx, { item_type: v ?? "" })}
-                          >
-                            <SelectTrigger className="h-8 w-[110px]">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {ITEM_TYPES.map((t) => (
-                                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell>
-                          <Select
-                            value={item.material_class_id ? String(item.material_class_id) : "none"}
-                            onValueChange={(v) =>
-                              updateItem(invIdx, itemIdx, {
-                                material_class_id: v === "none" ? null : parseInt(v ?? "0"),
-                              })
-                            }
-                          >
-                            <SelectTrigger className="h-8 w-[90px]">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">—</SelectItem>
-                              {classes.map((c) => (
-                                <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            value={item.quantity}
-                            onChange={(e) => updateItem(invIdx, itemIdx, { quantity: parseFloat(e.target.value) || 0 })}
-                            className="h-8 w-[80px]"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={item.unit || ""}
-                            onChange={(e) => updateItem(invIdx, itemIdx, { unit: e.target.value })}
-                            className="h-8 w-[60px]"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            value={item.unit_price}
-                            onChange={(e) => updateItem(invIdx, itemIdx, { unit_price: parseFloat(e.target.value) || 0 })}
-                            className="h-8 w-[100px]"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            value={item.amount}
-                            onChange={(e) => updateItem(invIdx, itemIdx, { amount: parseFloat(e.target.value) || 0 })}
-                            className="h-8 w-[110px]"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="icon" onClick={() => removeItem(invIdx, itemIdx)}>
-                            <Trash2 className="h-3 w-3 text-destructive" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+        {/* Правая колонка — редактирование */}
+        <div>
+          <Tabs<TabKey> value={tab} onValueChange={setTab} tabs={tabs}>
+            {tab === "header" && (
+              <Surface>
+                <ReviewHeader
+                  invoice={inv}
+                  onChange={(patch) => setDraft({ ...inv, ...patch })}
+                />
+              </Surface>
+            )}
+            {tab === "items" && (
+              <ReviewItemsTable
+                items={inv.items}
+                onChange={(items) => setDraft({ ...inv, items })}
+              />
+            )}
+            {tab === "issues" && (
+              <Surface>
+                <ReviewIssues invoice={inv} />
+              </Surface>
+            )}
+          </Tabs>
+        </div>
+      </div>
 
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={() => addItem(invIdx)}>
-                    <Plus className="h-3 w-3 mr-1" /> Позиция
-                  </Button>
-                  <Button size="sm" onClick={() => saveInvoice(invIdx)} disabled={saving === inv.id}>
-                    <Save className="h-3 w-3 mr-1" />
-                    {saving === inv.id ? "Сохранение..." : "Сохранить"}
-                  </Button>
-                  <Button size="sm" variant="destructive" onClick={() => deleteInvoice(inv.id)}>
-                    <Trash2 className="h-3 w-3 mr-1" /> Удалить СФ
-                  </Button>
-                </div>
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+      {/* Sticky-bar внизу */}
+      <div className="sticky bottom-0 -mx-6 mt-8 border-t border-border-subtle bg-surface/95 px-6 py-3 backdrop-blur">
+        <div className="container-page flex items-center justify-between">
+          <Button
+            variant="ghost"
+            leftIcon={<ArrowLeft size={14} />}
+            onClick={() => navigate(-1)}
+          >
+            Назад
+          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                if (window.confirm("Удалить документ?")) {
+                  remove.mutate(docId, {
+                    onSuccess: () => navigate("/"),
+                  });
+                }
+              }}
+            >
+              Удалить
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={!dirty || update.isPending}
+              loading={update.isPending}
+              onClick={() => update.mutate({ id: inv.id, input: inv })}
+            >
+              Сохранить
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
