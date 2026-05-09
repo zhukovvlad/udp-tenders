@@ -221,8 +221,8 @@ export default function Dashboard() {
           <h2 className="mb-3 font-serif text-xl font-medium text-fg">
             Отклонения от эталона
           </h2>
-          <Surface padding="none">
-            <Table>
+          <Surface padding="none" className="overflow-x-auto">
+            <Table className="min-w-[900px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Класс</TableHead>
