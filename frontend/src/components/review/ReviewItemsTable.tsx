@@ -145,7 +145,11 @@ export function ReviewItemsTable({ items, onChange }: ReviewItemsTableProps) {
               <div className="pt-0.5">
                 <Select
                   value={
-                    it.material_class_id ? String(it.material_class_id) : ""
+                    it.material_class_id
+                      ? String(it.material_class_id)
+                      : it.material_class
+                      ? String(it.material_class.id)
+                      : ""
                   }
                   onValueChange={(v: string | null) =>
                     update(i, { material_class_id: v ? Number(v) : null })
@@ -168,11 +172,6 @@ export function ReviewItemsTable({ items, onChange }: ReviewItemsTableProps) {
                     ))}
                   </SelectContent>
                 </Select>
-                {it.material_class && !it.material_class_id && (
-                  <div className="mt-1 truncate text-2xs text-fg-tertiary">
-                    ИИ: {it.material_class}
-                  </div>
-                )}
               </div>
 
               {/* Кол-во */}

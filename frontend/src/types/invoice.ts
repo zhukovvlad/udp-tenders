@@ -1,10 +1,18 @@
 import type { ID, ISODate, ISODateTime } from "./common";
 
+export interface MaterialClassRef {
+  id: ID;
+  name: string;
+}
+
 export interface InvoiceItem {
   id?: ID;
   raw_name: string;
   item_type: "material" | "delivery" | "other";
-  material_class: string | null;
+  /**
+   * Класс материала, привязанный к позиции. Бэкенд сериализует как {id, name} либо null.
+   */
+  material_class: MaterialClassRef | null;
   material_class_id?: ID | null;
   quantity: number;
   unit: string;

@@ -62,7 +62,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                 <div className="space-y-0.5">
                   {inv.items.slice(0, 3).map((it, i) => (
                     <div key={i} className="truncate text-xs text-fg-secondary">
-                      {it.material_class || it.item_type} ·{" "}
+                      {it.material_class?.name || it.item_type} ·{" "}
                       <span className="text-fg-tertiary">
                         {it.raw_name?.slice(0, 50)}
                         {(it.raw_name?.length ?? 0) > 50 ? "…" : ""}
