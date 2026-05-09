@@ -48,7 +48,9 @@ export default function Reports() {
       const a = document.createElement("a");
       a.href = url;
       a.download = `report-${projectId}-${Date.now()}.xlsx`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
       toast.success("Отчёт сформирован");
       setOpen(false);

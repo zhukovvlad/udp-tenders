@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Search, FolderOpen, Sigma } from "lucide-react";
 
 import {
@@ -314,9 +315,9 @@ export default function Dashboard() {
               }
               action={
                 !search ? (
-                  <a href="/upload">
+                  <Link to="/upload">
                     <Button>Загрузить документ</Button>
-                  </a>
+                  </Link>
                 ) : undefined
               }
             />
@@ -336,9 +337,9 @@ export default function Dashboard() {
             title="Выберите объект"
             description="Аналитика отображается по выбранному объекту. Выберите проект из списка выше или создайте новый."
             action={
-              <a href="/projects">
+              <Link to="/projects">
                 <Button variant="secondary">К списку объектов</Button>
-              </a>
+              </Link>
             }
           />
         </div>
@@ -355,9 +356,9 @@ export default function Dashboard() {
               title="Нет данных по этому объекту"
               description="Загрузите счета-фактуры, чтобы увидеть аналитику."
               action={
-                <a href="/upload">
+                <Link to="/upload">
                   <Button>Загрузить документ</Button>
-                </a>
+                </Link>
               }
             />
           </div>

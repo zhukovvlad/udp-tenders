@@ -192,7 +192,19 @@ export default function Review() {
               variant="secondary"
               disabled={!dirty || update.isPending}
               loading={update.isPending}
-              onClick={() => update.mutate({ id: inv.id, input: inv })}
+              onClick={() =>
+                update.mutate({
+                  id: inv.id,
+                  input: {
+                    number: inv.number,
+                    date: inv.date,
+                    supplier_name: inv.supplier_name,
+                    supplier_inn: inv.supplier_inn,
+                    vat_rate: inv.vat_rate,
+                    items: inv.items,
+                  },
+                })
+              }
             >
               Сохранить
             </Button>

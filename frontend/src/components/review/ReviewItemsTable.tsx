@@ -31,7 +31,7 @@ export function ReviewItemsTable({ items, onChange }: ReviewItemsTableProps) {
     <div className="space-y-2">
       {items.map((it, i) => (
         <div
-          key={i}
+          key={it.id ?? `new-${i}`}
           className="grid grid-cols-12 gap-2 rounded-md border border-border-subtle bg-surface p-2"
         >
           <div className="col-span-4">

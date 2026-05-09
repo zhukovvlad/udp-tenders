@@ -102,7 +102,7 @@ export function useCreateReferencePrice() {
     mutationFn: (input: ReferencePriceCreateInput) =>
       referencePricesApi.create(input),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["reference-prices"] });
+      qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
       toast.success("Эталон сохранён");
     },
   });
@@ -113,7 +113,7 @@ export function useDeleteReferencePrice() {
   return useMutation({
     mutationFn: (id: ID) => referencePricesApi.remove(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["reference-prices"] });
+      qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
       toast.success("Эталон удалён");
     },
   });

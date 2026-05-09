@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { CheckCircle2, AlertTriangle, Loader2, FileText } from "lucide-react";
+import { toast } from "sonner";
 
 import {
   Select,
@@ -67,6 +68,7 @@ export default function UploadPage() {
             j.id === job.id ? { ...j, status: "ready", result, progress: 100 } : j
           )
         );
+        toast.success(`«${job.file.name}» загружен`);
       } catch (err) {
         setJobs((prev) =>
           prev.map((j) =>
