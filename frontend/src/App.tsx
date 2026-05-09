@@ -1,75 +1,61 @@
-import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
-import {
-  LayoutDashboard,
-  Upload,
-  Building2,
-  Layers,
-  Target,
-  FileSpreadsheet,
-  Settings,
-} from "lucide-react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ThemeProvider } from "next-themes";
+import { Toaster, toast } from "sonner";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
-import Dashboard from "./pages/Dashboard";
-import UploadPage from "./pages/Upload";
-import Review from "./pages/Review";
-import Projects from "./pages/Projects";
-import MaterialClasses from "./pages/MaterialClasses";
-import ReferencePrices from "./pages/ReferencePrices";
-import Reports from "./pages/Reports";
-import SettingsPage from "./pages/Settings";
+import { AppShell } from "@/components/layout/AppShell";
+import Dashboard from "@/pages/Dashboard";
+import UploadPage from "@/pages/Upload";
+import Review from "@/pages/Review";
+import Projects from "@/pages/Projects";
+import MaterialClasses from "@/pages/MaterialClasses";
+import ReferencePrices from "@/pages/ReferencePrices";
+import Reports from "@/pages/Reports";
+import SettingsPage from "@/pages/Settings";
 
-const navItems = [
-  { to: "/", icon: LayoutDashboard, label: "Дашборд" },
-  { to: "/upload", icon: Upload, label: "Загрузка" },
-  { to: "/projects", icon: Building2, label: "Объекты" },
-  { to: "/material-classes", icon: Layers, label: "Классы материалов" },
-  { to: "/reference-prices", icon: Target, label: "Эталоны" },
-  { to: "/reports", icon: FileSpreadsheet, label: "Отчёты" },
-  { to: "/settings", icon: Settings, label: "Настройки" },
-];
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      staleTime: 60_000,
+      refetchOnWindowFocus: false,
+    },
+    mutations: {
+      onError: (error: unknown) => {
+        const message =
+          error instanceof Error ? error.message : "Произошла ошибка";
+        toast.error(message);
+      },
+    },
+  },
+});
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <div className="min-h-screen bg-background">
-        <header className="border-b bg-card">
-          <div className="container mx-auto flex h-14 items-center px-4">
-            <h1 className="text-lg font-bold mr-8">УПД Трекер</h1>
-            <nav className="flex gap-1 flex-wrap">
-              {navItems.map(({ to, icon: Icon, label }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  end={to === "/"}
-                  className={({ isActive }) =>
-                    `flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      isActive
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                    }`
-                  }
-                >
-                  <Icon className="h-4 w-4" />
-                  {label}
-                </NavLink>
-              ))}
-            </nav>
-          </div>
-        </header>
-
-        <main className="container mx-auto p-6">
+    <ThemeProvider
+      attribute="data-theme"
+      defaultTheme="light"
+      enableSystem={false}
+      disableTransitionOnChange
+    >
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/upload" element={<UploadPage />} />
-            <Route path="/projects" element={<Projects />} />
-            <Route path="/material-classes" element={<MaterialClasses />} />
-            <Route path="/reference-prices" element={<ReferencePrices />} />
-            <Route path="/reports" element={<Reports />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/documents/:id" element={<Review />} />
+            <Route element={<AppShell />}>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/upload" element={<UploadPage />} />
+              <Route path="/projects" element={<Projects />} />
+              <Route path="/material-classes" element={<MaterialClasses />} />
+              <Route path="/reference-prices" element={<ReferencePrices />} />
+              <Route path="/reports" element={<Reports />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/documents/:id" element={<Review />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
           </Routes>
-        </main>
-      </div>
-    </BrowserRouter>
+        </BrowserRouter>
+        <Toaster richColors position="top-right" />
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }
