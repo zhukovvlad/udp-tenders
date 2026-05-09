@@ -1,6 +1,14 @@
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { useState } from "react";
+import { FileSpreadsheet, Download } from "lucide-react";
+import { toast } from "sonner";
+
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -10,123 +18,134 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Download } from "lucide-react";
-import api from "@/lib/api";
 
-interface Project {
-  id: number;
-  name: string;
-}
+import { PageHeader } from "@/components/ui-domain/PageHeader";
+import { Surface } from "@/components/ui-domain/Surface";
+import { Button } from "@/components/ui-domain/Button";
 
-interface MaterialClass {
-  id: number;
-  name: string;
-}
+import { useProjects } from "@/services/queries";
+import { reportsApi } from "@/services/api/reports";
+import type { ID } from "@/types/common";
 
 export default function Reports() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [materialClasses, setMaterialClasses] = useState<MaterialClass[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string>("");
-  const [selectedClass, setSelectedClass] = useState<string>("");
-  const [periodStart, setPeriodStart] = useState<string>("");
-  const [periodEnd, setPeriodEnd] = useState<string>("");
+  const projectsQ = useProjects();
+  const [open, setOpen] = useState(false);
+  const [projectId, setProjectId] = useState<ID | null>(null);
+  const [periodStart, setPeriodStart] = useState("");
+  const [periodEnd, setPeriodEnd] = useState("");
   const [downloading, setDownloading] = useState(false);
 
-  useEffect(() => {
-    api.get("/projects").then((res) => setProjects(res.data));
-    api.get("/material-classes").then((res) => setMaterialClasses(res.data));
-  }, []);
-
-  const handleDownload = async () => {
-    if (!selectedProject) return;
+  const download = async () => {
+    if (!projectId) return;
     setDownloading(true);
     try {
-      const params: Record<string, string> = { project_id: selectedProject };
-      if (periodStart) params.period_start = periodStart;
-      if (periodEnd) params.period_end = periodEnd;
-      if (selectedClass) params.material_class_id = selectedClass;
-
-      const res = await api.get("/export/excel", { params, responseType: "blob" });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", "report.xlsx");
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-    } catch {
-      // handle error
+      const blob = await reportsApi.excelBlob({
+        project_id: projectId,
+        period_start: periodStart || undefined,
+        period_end: periodEnd || undefined,
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `report-${projectId}-${Date.now()}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Отчёт сформирован");
+      setOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось сформировать отчёт");
     } finally {
       setDownloading(false);
     }
   };
 
   return (
-    <Card>
-      <CardHeader><CardTitle>Выгрузка отчёта в Excel</CardTitle></CardHeader>
-      <CardContent>
-        <div className="flex gap-4 items-end flex-wrap">
-          <div className="space-y-2">
-            <Label>Объект *</Label>
-            <Select value={selectedProject} onValueChange={setSelectedProject}>
-              <SelectTrigger className="w-[280px]">
-                <SelectValue placeholder="Выберите объект" />
-              </SelectTrigger>
-              <SelectContent>
-                {projects.map((p) => (
-                  <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+    <div className="container-page py-8">
+      <PageHeader serif title="Отчёты" subtitle="Экспорт аналитики в Excel" />
 
-          <div className="space-y-2">
-            <Label htmlFor="rep-start">Период с</Label>
-            <Input
-              id="rep-start"
-              type="date"
-              value={periodStart}
-              onChange={(e) => setPeriodStart(e.target.value)}
-              className="w-[160px]"
-            />
+      <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <Surface>
+          <div className="flex items-start gap-4">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-accent-soft text-accent-text">
+              <FileSpreadsheet size={18} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-md font-medium text-fg">Сводный Excel</h3>
+              <p className="mt-1 text-sm text-fg-secondary">
+                Все счета-фактуры, позиции и расчёты отклонений по выбранному
+                объекту и периоду.
+              </p>
+              <Button
+                className="mt-4"
+                leftIcon={<Download size={14} />}
+                onClick={() => setOpen(true)}
+              >
+                Сформировать
+              </Button>
+            </div>
           </div>
+        </Surface>
+      </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="rep-end">Период по</Label>
-            <Input
-              id="rep-end"
-              type="date"
-              value={periodEnd}
-              onChange={(e) => setPeriodEnd(e.target.value)}
-              className="w-[160px]"
-            />
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Сформировать сводный Excel</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
+                Объект *
+              </Label>
+              <Select
+                value={projectId ? String(projectId) : ""}
+                onValueChange={(v: string | null) => setProjectId(v ? Number(v) : null)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Выберите объект" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(projectsQ.data ?? []).map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
+                  Период с
+                </Label>
+                <Input
+                  type="date"
+                  value={periodStart}
+                  onChange={(e) => setPeriodStart(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
+                  По
+                </Label>
+                <Input
+                  type="date"
+                  value={periodEnd}
+                  onChange={(e) => setPeriodEnd(e.target.value)}
+                />
+              </div>
+            </div>
           </div>
-
-          <div className="space-y-2">
-            <Label>Класс материала</Label>
-            <Select value={selectedClass} onValueChange={setSelectedClass}>
-              <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="Все классы" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">Все классы</SelectItem>
-                {materialClasses.map((mc) => (
-                  <SelectItem key={mc.id} value={String(mc.id)}>{mc.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <Button onClick={handleDownload} disabled={!selectedProject || downloading}>
-            <Download className="h-4 w-4 mr-2" />
-            {downloading ? "Генерация..." : "Скачать Excel"}
-          </Button>
-        </div>
-        <p className="text-sm text-muted-foreground mt-4">
-          Отчёт содержит сводную таблицу цен по объекту с разбивкой по классам материалов.
-        </p>
-      </CardContent>
-    </Card>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              Отмена
+            </Button>
+            <Button onClick={download} loading={downloading} disabled={!projectId}>
+              Скачать
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
