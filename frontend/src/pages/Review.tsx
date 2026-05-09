@@ -114,18 +114,38 @@ export default function Review() {
         }
       />
 
-      {/* Двухколоночный layout */}
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Левая колонка — превью документа */}
-        <div className="lg:sticky lg:top-20 lg:self-start">
-          <Surface padding="none" className="overflow-hidden">
-            <iframe
-              title="Документ"
-              src={invoicesApi.documentPdfUrl(docId)}
-              className="h-[80vh] w-full border-0 bg-surface-sunken"
+      {/* Сверху — редактирование на всю ширину */}
+      <div className="mt-6">
+        <Tabs<TabKey> value={tab} onValueChange={setTab} tabs={tabs}>
+          {tab === "header" && (
+            <Surface>
+              <ReviewHeader
+                invoice={inv}
+                onChange={(patch) => setDraft({ ...inv, ...patch })}
+              />
+            </Surface>
+          )}
+          {tab === "items" && (
+            <ReviewItemsTable
+              items={inv.items}
+              onChange={(items) => setDraft({ ...inv, items })}
             />
-          </Surface>
-          <div className="mt-2 flex items-center justify-between text-xs text-fg-tertiary">
+          )}
+          {tab === "issues" && (
+            <Surface>
+              <ReviewIssues invoice={inv} />
+            </Surface>
+          )}
+        </Tabs>
+      </div>
+
+      {/* Снизу — превью оригинала документа */}
+      <section className="mt-8">
+        <div className="mb-3 flex items-end justify-between gap-3">
+          <h2 className="font-serif text-xl font-medium text-fg">
+            Оригинал документа
+          </h2>
+          <div className="flex items-center gap-3 text-xs text-fg-tertiary">
             <span>{doc.filename}</span>
             <button
               type="button"
@@ -137,32 +157,14 @@ export default function Review() {
             </button>
           </div>
         </div>
-
-        {/* Правая колонка — редактирование */}
-        <div>
-          <Tabs<TabKey> value={tab} onValueChange={setTab} tabs={tabs}>
-            {tab === "header" && (
-              <Surface>
-                <ReviewHeader
-                  invoice={inv}
-                  onChange={(patch) => setDraft({ ...inv, ...patch })}
-                />
-              </Surface>
-            )}
-            {tab === "items" && (
-              <ReviewItemsTable
-                items={inv.items}
-                onChange={(items) => setDraft({ ...inv, items })}
-              />
-            )}
-            {tab === "issues" && (
-              <Surface>
-                <ReviewIssues invoice={inv} />
-              </Surface>
-            )}
-          </Tabs>
-        </div>
-      </div>
+        <Surface padding="none" className="overflow-hidden">
+          <iframe
+            title="Документ"
+            src={invoicesApi.documentPdfUrl(docId)}
+            className="h-[90vh] w-full border-0 bg-surface-sunken"
+          />
+        </Surface>
+      </section>
 
       {/* Sticky-bar внизу */}
       <div className="sticky bottom-0 -mx-6 mt-8 border-t border-border-subtle bg-surface/95 px-6 py-3 backdrop-blur">
