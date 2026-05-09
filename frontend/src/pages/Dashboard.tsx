@@ -2,13 +2,6 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Search, FolderOpen, Sigma } from "lucide-react";
 
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -28,6 +21,7 @@ import { EmptyState } from "@/components/ui-domain/EmptyState";
 import { Skeleton } from "@/components/ui-domain/Skeleton";
 import { MoneyCell } from "@/components/ui-domain/MoneyCell";
 import { DeviationCell } from "@/components/ui-domain/DeviationCell";
+import { EntitySelect } from "@/components/ui-domain/EntitySelect";
 import { InvoiceTable } from "@/components/invoices/InvoiceTable";
 
 import {
@@ -98,42 +92,28 @@ export default function Dashboard() {
             <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
               Объект *
             </Label>
-            <Select
-              value={projectId ? String(projectId) : ""}
-              onValueChange={handleProjectChange}
-            >
-              <SelectTrigger className="w-[280px]">
-                <SelectValue placeholder="Выберите объект" />
-              </SelectTrigger>
-              <SelectContent>
-                {(projectsQ.data ?? []).map((p) => (
-                  <SelectItem key={p.id} value={String(p.id)}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <EntitySelect
+              items={projectsQ.data}
+              value={projectId}
+              onChange={(v) => handleProjectChange(v ? String(v) : "")}
+              getLabel={(p) => p.name}
+              placeholder="Выберите объект"
+              className="w-[280px]"
+            />
           </div>
 
           <div className="space-y-1.5">
             <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
               Класс материала
             </Label>
-            <Select
-              value={classId ? String(classId) : ""}
-              onValueChange={(v) => setClassId(v ? Number(v) : null)}
-            >
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Все классы" />
-              </SelectTrigger>
-              <SelectContent>
-                {(classesQ.data ?? []).map((c) => (
-                  <SelectItem key={c.id} value={String(c.id)}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <EntitySelect
+              items={classesQ.data}
+              value={classId}
+              onChange={(v) => setClassId(v as number | null)}
+              getLabel={(c) => c.name}
+              placeholder="Все классы"
+              className="w-[200px]"
+            />
           </div>
 
           <div className="space-y-1.5">

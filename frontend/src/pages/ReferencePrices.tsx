@@ -12,13 +12,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Table,
   TableBody,
   TableCell,
@@ -33,6 +26,7 @@ import { Surface } from "@/components/ui-domain/Surface";
 import { EmptyState } from "@/components/ui-domain/EmptyState";
 import { Skeleton } from "@/components/ui-domain/Skeleton";
 import { MoneyCell } from "@/components/ui-domain/MoneyCell";
+import { EntitySelect } from "@/components/ui-domain/EntitySelect";
 
 import {
   useProjects,
@@ -124,43 +118,36 @@ export default function ReferencePrices() {
                   <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
                     Объект *
                   </Label>
-                  <Select
-                    value={form.project_id}
-                    onValueChange={(v: string | null) => setForm({ ...form, project_id: v ?? "" })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите объект" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(projectsQ.data ?? []).map((p) => (
-                        <SelectItem key={p.id} value={String(p.id)}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <EntitySelect
+                    items={projectsQ.data}
+                    value={form.project_id ? Number(form.project_id) : null}
+                    onChange={(v) =>
+                      setForm({ ...form, project_id: v ? String(v) : "" })
+                    }
+                    getLabel={(p) => p.name}
+                    placeholder="Выберите объект"
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
                     Класс материала *
                   </Label>
-                  <Select
-                    value={form.material_class_id}
-                    onValueChange={(v: string | null) =>
-                      setForm({ ...form, material_class_id: v ?? "" })
+                  <EntitySelect
+                    items={classesQ.data}
+                    value={
+                      form.material_class_id
+                        ? Number(form.material_class_id)
+                        : null
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите класс" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(classesQ.data ?? []).map((c) => (
-                        <SelectItem key={c.id} value={String(c.id)}>
-                          {c.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    onChange={(v) =>
+                      setForm({
+                        ...form,
+                        material_class_id: v ? String(v) : "",
+                      })
+                    }
+                    getLabel={(c) => c.name}
+                    placeholder="Выберите класс"
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
@@ -236,21 +223,14 @@ export default function ReferencePrices() {
       {/* Фильтр по объекту */}
       <div className="mt-6 flex items-center gap-3">
         <Label className="text-xs text-fg-tertiary">Объект</Label>
-        <Select
-          value={filterProject ? String(filterProject) : ""}
-          onValueChange={(v: string | null) => setFilterProject(v ? Number(v) : null)}
-        >
-          <SelectTrigger className="w-[280px]">
-            <SelectValue placeholder="Все объекты" />
-          </SelectTrigger>
-          <SelectContent>
-            {(projectsQ.data ?? []).map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <EntitySelect
+          items={projectsQ.data}
+          value={filterProject}
+          onChange={(v) => setFilterProject(v as ID | null)}
+          getLabel={(p) => p.name}
+          placeholder="Все объекты"
+          className="w-[280px]"
+        />
         {filterProject && (
           <Button variant="ghost" size="sm" onClick={() => setFilterProject(null)}>
             Сбросить

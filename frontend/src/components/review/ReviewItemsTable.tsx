@@ -162,7 +162,17 @@ export function ReviewItemsTable({ items, onChange }: ReviewItemsTableProps) {
                         "border-warning-border bg-warning-soft/40"
                     )}
                   >
-                    <SelectValue placeholder={requireClass ? "не задан" : "—"} />
+                    <SelectValue placeholder={requireClass ? "не задан" : "—"}>
+                      {(value) => {
+                        const id = value ? Number(value) : null;
+                        const found = (classes.data ?? []).find(
+                          (c) => c.id === id
+                        );
+                        if (found) return found.name;
+                        if (it.material_class) return it.material_class.name;
+                        return requireClass ? "не задан" : "—";
+                      }}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {(classes.data ?? []).map((c) => (

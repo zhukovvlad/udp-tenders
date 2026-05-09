@@ -3,13 +3,6 @@ import { Link } from "react-router-dom";
 import { CheckCircle2, AlertTriangle, Loader2, FileText } from "lucide-react";
 import { toast } from "sonner";
 
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 
 import { PageHeader } from "@/components/ui-domain/PageHeader";
@@ -19,6 +12,7 @@ import { StatusPill } from "@/components/ui-domain/StatusPill";
 import { ConfidenceBadge } from "@/components/ui-domain/ConfidenceBadge";
 import { Button } from "@/components/ui-domain/Button";
 import { EmptyState } from "@/components/ui-domain/EmptyState";
+import { EntitySelect } from "@/components/ui-domain/EntitySelect";
 
 import { useProjects, useUploadInvoice } from "@/services/queries";
 import type { ID } from "@/types/common";
@@ -100,21 +94,14 @@ export default function UploadPage() {
             <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
               Объект *
             </Label>
-            <Select
-              value={projectId ? String(projectId) : ""}
-              onValueChange={(v) => setProjectId(v ? Number(v) : null)}
-            >
-              <SelectTrigger className="w-[320px]">
-                <SelectValue placeholder="Выберите объект" />
-              </SelectTrigger>
-              <SelectContent>
-                {(projectsQ.data ?? []).map((p) => (
-                  <SelectItem key={p.id} value={String(p.id)}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <EntitySelect
+              items={projectsQ.data}
+              value={projectId}
+              onChange={(v) => setProjectId(v as number | null)}
+              getLabel={(p) => p.name}
+              placeholder="Выберите объект"
+              className="w-[320px]"
+            />
           </div>
         </div>
       </Surface>

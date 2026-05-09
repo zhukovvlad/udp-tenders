@@ -11,17 +11,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 import { PageHeader } from "@/components/ui-domain/PageHeader";
 import { Surface } from "@/components/ui-domain/Surface";
 import { Button } from "@/components/ui-domain/Button";
+import { EntitySelect } from "@/components/ui-domain/EntitySelect";
 
 import { useProjects } from "@/services/queries";
 import { reportsApi } from "@/services/api/reports";
@@ -99,21 +93,13 @@ export default function Reports() {
               <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
                 Объект *
               </Label>
-              <Select
-                value={projectId ? String(projectId) : ""}
-                onValueChange={(v: string | null) => setProjectId(v ? Number(v) : null)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Выберите объект" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(projectsQ.data ?? []).map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <EntitySelect
+                items={projectsQ.data}
+                value={projectId}
+                onChange={(v) => setProjectId(v as ID | null)}
+                getLabel={(p) => p.name}
+                placeholder="Выберите объект"
+              />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
