@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -58,6 +58,56 @@ def _avg_confidence(doc) -> float | None:
     return round(sum(confs) / len(confs), 2)
 
 
+def _serialize_document(doc) -> dict:
+    """Полная сериализация документа со счетами-фактурами и позициями.
+    Используется в GET /documents/{id}, POST /upload, POST /reparse —
+    клиент кеширует один и тот же shape независимо от точки входа."""
+    return {
+        "id": doc.id,
+        "project_id": doc.project_id,
+        "filename": doc.filename,
+        "doc_type": doc.doc_type,
+        "status": doc.status,
+        "uploaded_at": doc.uploaded_at.isoformat() if doc.uploaded_at else None,
+        "invoice_count": len(doc.invoices),
+        "has_issues": _doc_has_issues(doc) if doc.status == "parsed" else False,
+        "ai_confidence": _avg_confidence(doc),
+        "invoices": [
+            {
+                "id": inv.id,
+                "document_id": doc.id,
+                "number": inv.number,
+                "date": inv.date.isoformat(),
+                "supplier_name": inv.supplier_name,
+                "supplier_inn": inv.supplier_inn,
+                "vat_rate": inv.vat_rate,
+                "ai_confidence": inv.ai_confidence,
+                "has_issues": False,  # пер-СФ флаг можно вычислить позже, пока на уровне документа
+                "items": [
+                    {
+                        "id": item.id,
+                        "raw_name": item.raw_name,
+                        "item_type": item.item_type,
+                        "material_class": (
+                            {"id": item.material_class.id, "name": item.material_class.name}
+                            if item.material_class
+                            else None
+                        ),
+                        "material_class_id": item.material_class_id,
+                        "quantity": item.quantity,
+                        "unit": item.unit,
+                        "unit_price": item.unit_price,
+                        "amount": item.amount,
+                        "vat_amount": item.vat_amount,
+                    }
+                    for item in inv.items
+                ],
+            }
+            for inv in doc.invoices
+        ],
+    }
+
+
 @router.get("/documents")
 def list_documents(project_id: int | None = None, db: Session = Depends(get_db)):
     docs = crud.get_documents(db, project_id)
@@ -82,38 +132,7 @@ def get_document_detail(doc_id: int, db: Session = Depends(get_db)):
     doc = crud.get_document(db, doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
-    return {
-        "id": doc.id,
-        "filename": doc.filename,
-        "doc_type": doc.doc_type,
-        "status": doc.status,
-        "invoices": [
-            {
-                "id": inv.id,
-                "number": inv.number,
-                "date": inv.date.isoformat(),
-                "supplier_name": inv.supplier_name,
-                "supplier_inn": inv.supplier_inn,
-                "vat_rate": inv.vat_rate,
-                "ai_confidence": inv.ai_confidence,
-                "items": [
-                    {
-                        "id": item.id,
-                        "raw_name": item.raw_name,
-                        "item_type": item.item_type,
-                        "material_class": {"id": item.material_class.id, "name": item.material_class.name} if item.material_class else None,
-                        "quantity": item.quantity,
-                        "unit": item.unit,
-                        "unit_price": item.unit_price,
-                        "amount": item.amount,
-                        "vat_amount": item.vat_amount,
-                    }
-                    for item in inv.items
-                ],
-            }
-            for inv in doc.invoices
-        ],
-    }
+    return _serialize_document(doc)
 
 
 @router.get("/documents/{doc_id}/pdf")
@@ -162,23 +181,24 @@ async def reparse_document(doc_id: int, db: Session = Depends(get_db)):
         doc.doc_type = "unknown"
         db.commit()
         logger.warning(f"Reparse doc={doc_id} завершён с ошибкой: {result['error']}")
-        return {"status": "error", "document_id": doc.id, "error": result["error"]}
+        db.refresh(doc)
+        return _serialize_document(doc)
 
     doc.doc_type = result.get("doc_type", "invoice")
     doc.status = "parsed"
     db.commit()
+    db.refresh(doc)
     logger.info(f"Reparse doc={doc_id} успешно завершён, СФ: {len(result.get('invoices_created', []))}")
 
-    return {
-        "status": "parsed",
-        "document_id": doc.id,
-        "doc_type": doc.doc_type,
-        "invoice_count": len(result.get("invoices_created", [])),
-    }
+    return _serialize_document(doc)
 
 
 @router.post("/upload")
-async def upload_pdf(project_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_pdf(
+    project_id: int = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
     if not file.filename.lower().endswith(".pdf"):
         logger.warning(f"Upload: попытка загрузить не-PDF '{file.filename}' (project={project_id})")
         raise HTTPException(status_code=400, detail="Только PDF-файлы")
@@ -208,19 +228,16 @@ async def upload_pdf(project_id: int, file: UploadFile = File(...), db: Session 
         doc.doc_type = "unknown"
         db.commit()
         logger.warning(f"Upload doc={doc.id} завершён с ошибкой: {result['error']}")
-        return {"status": "error", "document_id": doc.id, "error": result["error"]}
+        db.refresh(doc)
+        return _serialize_document(doc)
 
     doc.doc_type = result.get("doc_type", "invoice")
     doc.status = "parsed"
     db.commit()
+    db.refresh(doc)
     logger.info(f"Upload doc={doc.id} успешно завершён, СФ: {len(result.get('invoices_created', []))}")
 
-    return {
-        "status": "parsed",
-        "document_id": doc.id,
-        "doc_type": doc.doc_type,
-        "invoice_count": len(result.get("invoices_created", [])),
-    }
+    return _serialize_document(doc)
 
 
 @router.put("/{invoice_id}")
