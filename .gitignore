@@ -16,6 +16,7 @@ minio-data/
 # IDE
 .vscode/
 .idea/
+.claude/
 
 # OS
 .DS_Store

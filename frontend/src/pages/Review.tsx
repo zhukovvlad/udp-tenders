@@ -129,6 +129,7 @@ export default function Review() {
             <ReviewItemsTable
               items={inv.items}
               onChange={(items) => setDraft({ ...inv, items })}
+              vatRate={inv.vat_rate}
             />
           )}
           {tab === "issues" && (

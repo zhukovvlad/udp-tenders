@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 interface ReviewItemsTableProps {
   items: InvoiceItem[];
   onChange: (items: InvoiceItem[]) => void;
+  vatRate?: number;
 }
 
 const TYPE_META: Record<
@@ -40,7 +41,7 @@ const TYPE_META: Record<
   },
 };
 
-export function ReviewItemsTable({ items, onChange }: ReviewItemsTableProps) {
+export function ReviewItemsTable({ items, onChange, vatRate }: ReviewItemsTableProps) {
   const classes = useMaterialClasses();
 
   const update = (idx: number, patch: Partial<InvoiceItem>) => {
@@ -51,11 +52,16 @@ export function ReviewItemsTable({ items, onChange }: ReviewItemsTableProps) {
         // Пересчёт суммы при изменении количества или цены
         if ("quantity" in patch || "unit_price" in patch) {
           next.amount = Math.round(next.quantity * next.unit_price * 100) / 100;
+          if (vatRate != null) {
+            next.vat_amount = Math.round(next.amount * (vatRate / 100) * 100) / 100;
+          }
         }
         return next;
       })
     );
   };
+
+  const withVat = (it: InvoiceItem) => it.amount + (it.vat_amount ?? 0);
   const remove = (idx: number) => {
     onChange(items.filter((_, i) => i !== idx));
   };
@@ -72,14 +78,30 @@ export function ReviewItemsTable({ items, onChange }: ReviewItemsTableProps) {
   return (
     <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
       {/* Header */}
-      <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_9rem_5rem_3.5rem_6rem_7rem_2.25rem] gap-2 border-b border-border-subtle bg-surface-sunken px-3 py-2 text-2xs uppercase tracking-wider text-fg-tertiary">
+      <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_9rem_5rem_3.5rem_6rem_7rem_7rem_2.25rem] gap-2 border-b border-border-subtle bg-surface-sunken px-3 py-2 text-2xs uppercase tracking-wider text-fg-tertiary">
         <div className="text-center">№</div>
         <div>Наименование</div>
         <div>Класс материала</div>
         <div className="text-right">Кол-во</div>
         <div>Ед.</div>
-        <div className="text-right">Цена / ед.</div>
-        <div className="text-right">Сумма</div>
+        <div className="text-right">
+          <div className="inline-block text-center">
+            <div>Цена / ед.</div>
+            <div className="text-[10px] normal-case tracking-normal text-fg-tertiary/70">без НДС</div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="inline-block text-center">
+            <div>Сумма</div>
+            <div className="text-[10px] normal-case tracking-normal text-fg-tertiary/70">без НДС</div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="inline-block text-center">
+            <div>Сумма</div>
+            <div className="text-[10px] normal-case tracking-normal text-fg-tertiary/70">с НДС</div>
+          </div>
+        </div>
         <div></div>
       </div>
 
@@ -95,7 +117,7 @@ export function ReviewItemsTable({ items, onChange }: ReviewItemsTableProps) {
           return (
             <div
               key={it.id ?? `new-${i}`}
-              className="grid grid-cols-[2.5rem_minmax(0,1fr)_9rem_5rem_3.5rem_6rem_7rem_2.25rem] items-start gap-2 px-3 py-2.5 hover:bg-surface-hover"
+              className="grid grid-cols-[2.5rem_minmax(0,1fr)_9rem_5rem_3.5rem_6rem_7rem_7rem_2.25rem] items-start gap-2 px-3 py-2.5 hover:bg-surface-hover"
             >
               {/* № */}
               <div className="flex items-center justify-center pt-2 text-xs text-fg-tertiary tabular-nums">
@@ -219,9 +241,14 @@ export function ReviewItemsTable({ items, onChange }: ReviewItemsTableProps) {
                 />
               </div>
 
-              {/* Сумма (readonly, авто) */}
+              {/* Сумма без НДС (readonly, авто) */}
               <div className="flex items-center justify-end whitespace-nowrap pt-2.5 text-sm font-medium">
                 <MoneyCell value={it.amount} />
+              </div>
+
+              {/* Сумма с НДС (readonly, авто) */}
+              <div className="flex items-center justify-end whitespace-nowrap pt-2.5 text-sm font-medium">
+                <MoneyCell value={withVat(it)} />
               </div>
 
               {/* Удалить */}
@@ -242,7 +269,7 @@ export function ReviewItemsTable({ items, onChange }: ReviewItemsTableProps) {
       </div>
 
       {/* Footer: итог */}
-      <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_9rem_5rem_3.5rem_6rem_7rem_2.25rem] gap-2 border-t border-border-default bg-surface-sunken px-3 py-2.5 text-sm">
+      <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_9rem_5rem_3.5rem_6rem_7rem_7rem_2.25rem] gap-2 border-t border-border-default bg-surface-sunken px-3 py-2.5 text-sm">
         <div></div>
         <div className="text-fg-secondary">Итого по {items.length} позициям</div>
         <div></div>
@@ -251,6 +278,9 @@ export function ReviewItemsTable({ items, onChange }: ReviewItemsTableProps) {
         <div></div>
         <div className="text-right font-medium">
           <MoneyCell value={items.reduce((s, it) => s + (it.amount || 0), 0)} />
+        </div>
+        <div className="text-right font-medium">
+          <MoneyCell value={items.reduce((s, it) => s + withVat(it), 0)} />
         </div>
         <div></div>
       </div>
