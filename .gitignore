@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 backend/.env
 backend/database.db
+backend/database.db.backup
 backend/logs/
 
 # Node

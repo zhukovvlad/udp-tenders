@@ -12,11 +12,10 @@ from logging_config import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-from database import engine, Base
+from database import engine
 from s3 import ensure_bucket
 from routers import invoices, dashboard, export, settings, projects, material_classes, reference_prices
 
-Base.metadata.create_all(bind=engine)
 try:
     ensure_bucket()
     logger.info("MinIO bucket готов")
