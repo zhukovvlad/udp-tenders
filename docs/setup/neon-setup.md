@@ -17,12 +17,12 @@
 
 Формат:
 ```
-postgresql://<owner>:<password>@ep-<adjective>-<noun>-<hash>.eu-central-1.aws.neon.tech/neondb?sslmode=require
+postgresql://<owner>:<password>@ep-<adjective>-<noun>-<hash>.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
 ```
 
 Преобразовать схему URL для psycopg 3 (добавить `+psycopg`):
 ```
-postgresql+psycopg://<owner>:<password>@ep-<adjective>-<noun>-<hash>.eu-central-1.aws.neon.tech/neondb?sslmode=require
+postgresql+psycopg://<owner>:<password>@ep-<adjective>-<noun>-<hash>.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
 ```
 
 ## 3. Сохранить в `backend/.env`
@@ -36,7 +36,7 @@ DATABASE_URL=sqlite:///./database.db
 на полученную выше:
 
 ```
-DATABASE_URL=postgresql+psycopg://<owner>:<password>@ep-<adjective>-<noun>-<hash>.eu-central-1.aws.neon.tech/neondb?sslmode=require
+DATABASE_URL=postgresql+psycopg://<owner>:<password>@ep-<adjective>-<noun>-<hash>.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
 ```
 
 ## 4. Включить pgvector
