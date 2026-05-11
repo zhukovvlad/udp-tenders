@@ -1,0 +1,50 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra --strict-markers --tb=short"
+markers = [
+    "integration: tests that hit a real Postgres (need TEST_DATABASE_URL)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:passlib.*",
+]
+env_files = [".env.test"]
+
+[tool.coverage.run]
+source = ["."]
+branch = true
+omit = [
+    "tests/*",
+    "alembic/*",
+    "scripts/*",
+    "logging_config.py",
+]
+
+[tool.coverage.report]
+fail_under = 60
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = [
+    "E501",   # длинные строки прощаем (длинные SQL и docstrings)
+    "B008",   # FastAPI Depends() в аргументах функций — стандартный идиом FastAPI
+    "I001",   # unsorted imports в существующем коде — не рефакторим в этой задаче
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]  # import-order в тестах не критичен
+"alembic/versions/*" = ["E402", "F401", "UP007", "UP035"]
+"scripts/*" = ["E402", "F401"]  # скрипты — не строгий production-код
+"main.py" = ["E402"]  # load_dotenv() должен запуститься до локальных импортов
