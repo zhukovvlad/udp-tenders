@@ -10,7 +10,18 @@
 
 **Spec:** `docs/superpowers/specs/2026-05-11-testing-infrastructure-design.md`
 
-**Branch:** `feat/testing-infrastructure`
+**Branch:** `feat/testing-infrastructure` (уже создана и запушена в origin)
+
+**PR:** https://github.com/zhukovvlad/udp-tenders/pulls — draft PR для ветки `feat/testing-infrastructure` создан вручную.
+
+## Push policy
+
+После каждой Task (не после каждого step) — `git push`. Это держит PR на GitHub в актуальном состоянии и исключает риск потери работы.
+
+**`gh` CLI и MCP-аутентификация в этом окружении недоступны** — поэтому:
+- PR создаётся вручную через GitHub UI один раз перед стартом Этапа 1.
+- Описание/чек-лист PR обновляется вручную через UI после завершения каждого этапа (или в конце работы целиком).
+- Нигде в плане не используются `gh pr ...` команды.
 
 ---
 
@@ -816,34 +827,15 @@ just test-backend-unit
 
 Expected: суммарно 19 PASSED, время < 2 сек.
 
-- [ ] **Step 1.10.2: Открыть merge-request (PR)**
+- [ ] **Step 1.10.2: Push конец Этапа 1**
 
-Этап 1 завершён. Push и создаём draft PR в `main` для дальнейшей работы.
+Этап 1 завершён. Push в remote — коммиты появятся в открытом draft PR.
 
 ```bash
-git push -u origin feat/testing-infrastructure
-gh pr create --draft --title "Testing infrastructure" --body "$(cat <<'EOF'
-## Summary
-Внедрение многослойной системы тестирования. План: docs/superpowers/plans/2026-05-11-testing-infrastructure.md
-
-## Прогресс
-- [x] Этап 1: фундамент (justfile, conftest, пилотные unit-тесты)
-- [ ] Этап 2: backend integration tests + factories + AI mocks
-- [ ] Этап 3: frontend Vitest + MSW
-- [ ] Этап 4: Playwright E2E
-- [ ] Этап 5: GitHub Actions CI + docs/testing.md
-
-## Test plan
-- [x] `just test-backend-unit` локально зелёный
-- [ ] `just test-backend` (с integration) зелёный
-- [ ] `just test-frontend` зелёный
-- [ ] `just test-e2e` зелёный
-- [ ] CI зелёный
-EOF
-)"
+git push
 ```
 
-Expected: возвращает URL PR.
+После этого вручную обновить чек-лист PR на GitHub (отметить «Этап 1: фундамент»).
 
 ---
 
@@ -1879,20 +1871,13 @@ Expected: HTML отчёт в `backend/htmlcov/index.html`. Total coverage >= 60%
 
 Если ниже — добавить тесты на непокрытые ветки. Если значительно ниже — это сигнал, что нужно ещё несколько итераций тестов перед переходом к Этапу 3.
 
-- [ ] **Step 2.10.2: Push и обновить PR**
+- [ ] **Step 2.10.2: Push конец Этапа 2**
 
 ```bash
 git push
-gh pr edit --body "$(cat <<'EOF'
-## Прогресс
-- [x] Этап 1: фундамент
-- [x] Этап 2: backend integration tests
-- [ ] Этап 3: frontend
-- [ ] Этап 4: E2E
-- [ ] Этап 5: CI
-EOF
-)"
 ```
+
+Чек-лист в PR на GitHub обновить вручную: отметить «Этап 2: backend integration tests».
 
 ---
 
@@ -2602,20 +2587,13 @@ just coverage-frontend
 
 Expected: HTML отчёт в `frontend/coverage/index.html`. Total >= 40%, на critical (`lib/`, `pages/Review`, `pages/Upload`) >= 70%.
 
-- [ ] **Step 3.11.2: Push и обновить PR**
+- [ ] **Step 3.11.2: Push конец Этапа 3**
 
 ```bash
 git push
-gh pr edit --body "$(cat <<'EOF'
-## Прогресс
-- [x] Этап 1
-- [x] Этап 2
-- [x] Этап 3: frontend Vitest + MSW
-- [ ] Этап 4: E2E
-- [ ] Этап 5: CI
-EOF
-)"
 ```
+
+Чек-лист в PR обновить вручную.
 
 ---
 
@@ -3227,13 +3205,9 @@ git commit -m "test(e2e): navigation smoke without JS errors"
 
 ```bash
 git push
-gh pr edit --body "$(cat <<'EOF'
-## Прогресс
-- [x] Этапы 1-4
-- [ ] Этап 5: CI + docs
-EOF
-)"
 ```
+
+Чек-лист в PR обновить вручную.
 
 ---
 
@@ -3337,7 +3311,10 @@ jobs:
 git add .github/workflows/tests.yml
 git commit -m "ci: lint and backend tests workflow"
 git push
-gh run watch
+```
+
+Проверить ход CI: https://github.com/zhukovvlad/udp-tenders/actions
+
 ```
 
 Expected: оба джоба зелёные. Если падает — открыть логи, чинить.
@@ -3381,7 +3358,10 @@ Expected: оба джоба зелёные. Если падает — откры
 git add .github/workflows/tests.yml
 git commit -m "ci: frontend tests workflow"
 git push
-gh run watch
+```
+
+Проверить ход CI: https://github.com/zhukovvlad/udp-tenders/actions
+
 ```
 
 ---
@@ -3465,7 +3445,10 @@ gh run watch
 git add .github/workflows/tests.yml
 git commit -m "ci: e2e workflow with Playwright and mock OpenRouter"
 git push
-gh run watch
+```
+
+Проверить ход CI: https://github.com/zhukovvlad/udp-tenders/actions
+
 ```
 
 Если e2e падает в CI — скачать `playwright-report` из artifacts и смотреть trace.
@@ -3578,15 +3561,13 @@ Expected: всё зелёное.
 
 - [ ] **Step 5.5.2: Дождаться зелёного CI на ветке**
 
-```bash
-gh run watch
-```
+Проверять во вкладке Actions на GitHub: https://github.com/zhukovvlad/udp-tenders/actions
 
 - [ ] **Step 5.5.3: Снять draft и попросить ревью**
 
-```bash
-gh pr ready
-gh pr edit --body "$(cat <<'EOF'
+Через GitHub UI: открыть PR → "Ready for review", обновить description с финальной сводкой:
+
+```
 ## Summary
 - pytest unit + integration с Neon test branch
 - Vitest + RTL + MSW для frontend
@@ -3600,8 +3581,6 @@ gh pr edit --body "$(cat <<'EOF'
 - [x] just test-frontend
 - [x] just test-e2e
 - [x] CI зелёный
-EOF
-)"
 ```
 
 - [ ] **Step 5.5.4: Branch protection (вручную через GitHub UI)**
