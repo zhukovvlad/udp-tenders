@@ -169,8 +169,9 @@ def db_session(db_engine) -> Iterator[Session]:
 def client(db_session, in_memory_s3) -> Iterator:
     """FastAPI TestClient с переопределённым get_db."""
     from fastapi.testclient import TestClient
-    from main import app
+
     from database import get_db
+    from main import app
 
     def override_get_db():
         try:

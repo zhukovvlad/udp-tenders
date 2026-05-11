@@ -9,7 +9,12 @@ import factory
 from factory.alchemy import SQLAlchemyModelFactory
 
 from models import (
-    Document, Invoice, InvoiceItem, MaterialClass, Project, ReferencePrice,
+    Document,
+    Invoice,
+    InvoiceItem,
+    MaterialClass,
+    Project,
+    ReferencePrice,
 )
 
 # Глобальный slot — устанавливается фикстурой db_session

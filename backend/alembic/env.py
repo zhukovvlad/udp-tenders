@@ -1,6 +1,6 @@
-from logging.config import fileConfig
 import os
 import sys
+from logging.config import fileConfig
 from pathlib import Path
 
 from sqlalchemy import engine_from_config, pool
@@ -12,10 +12,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv  # noqa: E402
+
 load_dotenv(ROOT / ".env")
 
-from database import Base  # noqa: E402
 import models  # noqa: F401,E402  -- регистрируем модели в Base.metadata
+from database import Base  # noqa: E402
 
 config = context.config
 _db_url = config.get_main_option("sqlalchemy.url") or os.environ.get("DATABASE_URL")

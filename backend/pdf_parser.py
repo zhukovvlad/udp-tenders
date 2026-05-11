@@ -3,8 +3,9 @@ import json
 import logging
 import os
 from datetime import date
-from sqlalchemy.orm import Session
+
 import httpx
+from sqlalchemy.orm import Session
 
 import crud
 

@@ -24,11 +24,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv
+
 load_dotenv(ROOT / ".env")
 
 from database import SessionLocal  # noqa: E402
 from models import Document, Invoice, InvoiceItem, PriceCalculation  # noqa: E402
-from s3 import get_s3_client, S3_BUCKET  # noqa: E402
+from s3 import S3_BUCKET, get_s3_client  # noqa: E402
 
 
 def reset_db() -> None:

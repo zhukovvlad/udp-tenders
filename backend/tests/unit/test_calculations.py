@@ -1,6 +1,7 @@
 """Unit-тесты для _doc_has_issues и _avg_confidence (routers/invoices.py)."""
 from dataclasses import dataclass, field
-from routers.invoices import _doc_has_issues, _avg_confidence
+
+from routers.invoices import _avg_confidence, _doc_has_issues
 
 
 @dataclass

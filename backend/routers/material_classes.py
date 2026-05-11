@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from database import get_db
+from sqlalchemy.orm import Session
+
 import crud
+from database import get_db
 
 router = APIRouter()
 
