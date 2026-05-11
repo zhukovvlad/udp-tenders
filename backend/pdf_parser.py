@@ -97,7 +97,8 @@ SYSTEM_PROMPT = """Ты — парсер счетов-фактур и УПД (у
 - confidence_reason — кратко и по делу укажи, что именно вызывает неуверенность, либо "все поля читаются чётко"
 """
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_URL = f"{OPENROUTER_BASE_URL.rstrip('/')}/chat/completions"
 
 
 async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> dict:
