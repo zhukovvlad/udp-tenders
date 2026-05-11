@@ -51,8 +51,12 @@ class MaterialClassFactory(_BaseFactory):
     class Meta:
         model = MaterialClass
 
-    name = factory.Iterator(["В15", "В25", "В40", "d12", "d16"])
-    material_type = factory.Iterator(["concrete", "concrete", "concrete", "rebar", "rebar"])
+    # name выводится из material_type, чтобы при override одного из полей
+    # не получить рассинхронизацию (например, name="В25", material_type="rebar").
+    material_type = factory.Iterator(["concrete", "rebar"])
+    name = factory.LazyAttribute(
+        lambda obj: {"concrete": "В25", "rebar": "d12"}.get(obj.material_type, "X")
+    )
 
 
 class ReferencePriceFactory(_BaseFactory):
@@ -101,5 +105,7 @@ class InvoiceItemFactory(_BaseFactory):
     quantity = 5.0
     unit = "м3"
     unit_price = 8000.0
-    amount = 40000.0
-    vat_amount = 6666.67
+    # amount и vat_amount выводятся из quantity * unit_price — это предотвращает
+    # рассинхронизацию при override quantity. Тесты могут передать amount явно.
+    amount = factory.LazyAttribute(lambda obj: obj.quantity * obj.unit_price)
+    vat_amount = factory.LazyAttribute(lambda obj: round(obj.amount / 1.20 * 0.20, 2))
