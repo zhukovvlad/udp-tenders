@@ -7,10 +7,14 @@
 """
 from __future__ import annotations
 
+import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 # Делаем импорты "from database import ..." и "import crud" работающими
 # из тестов, не привязываясь к sys.path в IDE
@@ -96,3 +100,64 @@ def sample_pdf_bytes() -> bytes:
         b"0000000009 00000 n\n0000000052 00000 n\n0000000092 00000 n\n"
         b"trailer<</Size 4/Root 1 0 R>>\nstartxref\n145\n%%EOF\n"
     )
+
+
+@pytest.fixture(scope="session")
+def db_engine() -> Iterator:
+    """Engine на TEST_DATABASE_URL. Накатывает Alembic один раз на сессию."""
+    test_url = os.getenv("TEST_DATABASE_URL")
+    if not test_url:
+        pytest.skip("TEST_DATABASE_URL не задан — integration tests пропущены")
+
+    engine = create_engine(test_url, pool_pre_ping=True)
+
+    # Накатываем миграции через Alembic
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", test_url)
+
+    # Сбрасываем схему перед накатом — гарантируем чистый старт
+    with engine.begin() as conn:
+        conn.exec_driver_sql("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+    command.upgrade(cfg, "head")
+
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def db_session(db_engine) -> Iterator[Session]:
+    """Транзакционная фикстура. Каждый тест в своей транзакции, rollback после."""
+    connection = db_engine.connect()
+    transaction = connection.begin()
+    SessionLocal = sessionmaker(bind=connection, autoflush=False, autocommit=False)
+    session = SessionLocal()
+
+    try:
+        yield session
+    finally:
+        session.close()
+        transaction.rollback()
+        connection.close()
+
+
+@pytest.fixture
+def client(db_session, in_memory_s3) -> Iterator:
+    """FastAPI TestClient с переопределённым get_db."""
+    from fastapi.testclient import TestClient
+    from main import app
+    from database import get_db
+
+    def override_get_db():
+        try:
+            yield db_session
+        finally:
+            pass  # cleanup в db_session фикстуре
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
