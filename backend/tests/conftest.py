@@ -211,6 +211,14 @@ def mock_openrouter(openrouter_fixtures_dir, monkeypatch):
     Восстанавливаем оригинальный AsyncClient.send (вместо delattr, который
     сносит атрибут с класса и ломает все httpx-вызовы). respx работает на
     transport-уровне, оригинальный send через него корректно проходит.
+
+    Использование:
+        def test_xxx(client, mock_openrouter):
+            mock_openrouter.use_scenario("unparseable")
+            client.post("/api/invoices/upload", ...)
+            assert len(mock_openrouter.calls) == 1
+            req_body = mock_openrouter.last_request_json()
+            assert "messages" in req_body
     """
     monkeypatch.setattr(_httpx_module.AsyncClient, "send", _REAL_ASYNC_CLIENT_SEND)
 
@@ -223,9 +231,20 @@ def mock_openrouter(openrouter_fixtures_dir, monkeypatch):
             self.scenario = name
 
         def _load(self) -> dict:
-            return json.loads(
-                (openrouter_fixtures_dir / f"{self.scenario}.json").read_text(encoding="utf-8")
-            )
+            path = openrouter_fixtures_dir / f"{self.scenario}.json"
+            if not path.exists():
+                available = sorted(p.stem for p in openrouter_fixtures_dir.glob("*.json"))
+                raise FileNotFoundError(
+                    f"mock_openrouter: нет фикстуры для сценария '{self.scenario}'. "
+                    f"Доступны: {available}"
+                )
+            return json.loads(path.read_text(encoding="utf-8"))
+
+        def last_request_json(self) -> dict | None:
+            """Возвращает JSON тела последнего перехваченного запроса или None."""
+            if not self.calls:
+                return None
+            return json.loads(self.calls[-1].content)
 
         def __enter__(self):
             self._respx = respx.mock(base_url="https://openrouter.ai", assert_all_called=False)
