@@ -173,3 +173,12 @@ def client(db_session, in_memory_s3) -> Iterator:
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def factories(db_session):
+    """Регистрирует db_session в фабриках. Возвращает модуль с фабриками."""
+    from tests import factories as f
+
+    f._register_session(db_session)
+    return f
