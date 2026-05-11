@@ -98,7 +98,10 @@ SYSTEM_PROMPT = """Ты — парсер счетов-фактур и УПД (у
 - confidence_reason — кратко и по делу укажи, что именно вызывает неуверенность, либо "все поля читаются чётко"
 """
 
-OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+# Если переменная окружения задана пустой строкой ("OPENROUTER_BASE_URL=" в .env),
+# os.getenv вернёт "" — это даст relative URL "/chat/completions" и тихо сломает
+# httpx-вызовы. Используем "or", чтобы пустая строка считалась отсутствием значения.
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
 OPENROUTER_URL = f"{OPENROUTER_BASE_URL.rstrip('/')}/chat/completions"
 
 
