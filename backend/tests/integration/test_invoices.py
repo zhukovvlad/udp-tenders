@@ -39,8 +39,10 @@ def test_upload_unparseable_marks_doc_type_unknown(
     )
     assert response.status_code == 200
     body = response.json()
-    # При doc_type=unknown бэкенд кладёт error и помечает status=error
-    assert body["doc_type"] == "unknown" or body["status"] == "error"
+    # При doc_type=unknown бэкенд проставляет ОБА поля: doc_type=unknown и status=error.
+    assert body["doc_type"] == "unknown"
+    assert body["status"] == "error"
+    assert body["invoice_count"] == 0
 
 
 def test_upload_invalid_json_marks_error(
@@ -54,7 +56,10 @@ def test_upload_invalid_json_marks_error(
         data={"project_id": project.id},
     )
     assert response.status_code == 200
-    assert response.json()["status"] == "error"
+    body = response.json()
+    assert body["status"] == "error"
+    # Невалидный JSON не должен оставлять полу-сохранённых СФ в БД.
+    assert body["invoice_count"] == 0
 
 
 def test_get_document_404(client):
@@ -76,6 +81,7 @@ def test_list_documents_filtered_by_project(client, factories):
 def test_update_invoice_replaces_items(client, factories):
     invoice = factories.InvoiceFactory.create()
     factories.InvoiceItemFactory.create(invoice=invoice, raw_name="Старая позиция")
+    document_id = invoice.document_id
 
     response = client.put(
         f"/api/invoices/{invoice.id}",
@@ -102,11 +108,32 @@ def test_update_invoice_replaces_items(client, factories):
     )
     assert response.status_code == 200
 
+    # Проверяем, что новый шейп действительно сохранился — старая позиция удалена,
+    # новая на месте, поля СФ обновлены.
+    doc_response = client.get(f"/api/invoices/documents/{document_id}")
+    assert doc_response.status_code == 200
+    doc = doc_response.json()
+    assert len(doc["invoices"]) == 1
+    inv = doc["invoices"][0]
+    assert inv["number"] == "СФ-NEW"
+    assert inv["supplier_name"] == "Новый"
+    assert len(inv["items"]) == 1
+    assert inv["items"][0]["raw_name"] == "Новая"
+    assert inv["items"][0]["quantity"] == 3.0
+
 
 def test_delete_invoice(client, factories):
     invoice = factories.InvoiceFactory.create()
+    document_id = invoice.document_id
+
     response = client.delete(f"/api/invoices/{invoice.id}")
     assert response.status_code == 200
+
+    # Проверяем, что СФ действительно убрана из документа.
+    doc_response = client.get(f"/api/invoices/documents/{document_id}")
+    assert doc_response.status_code == 200
+    assert doc_response.json()["invoice_count"] == 0
+    assert doc_response.json()["invoices"] == []
 
 
 def test_delete_document_removes_from_s3(
