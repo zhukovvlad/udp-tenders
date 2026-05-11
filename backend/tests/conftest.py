@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 # Делаем импорты "from database import ..." и "import crud" работающими
 # из тестов, не привязываясь к sys.path в IDE
@@ -111,6 +111,14 @@ def db_engine() -> Iterator:
 
     engine = create_engine(test_url, pool_pre_ping=True)
 
+    # Безопасность: отказываемся работать, если TEST_DATABASE_URL совпадает с прод DATABASE_URL.
+    # DROP SCHEMA — деструктивная операция; ошибка конфигурации = катастрофа.
+    prod_url = os.getenv("DATABASE_URL", "")
+    if prod_url and test_url == prod_url:
+        pytest.skip(
+            "TEST_DATABASE_URL совпадает с DATABASE_URL — отказ от DROP SCHEMA на проде"
+        )
+
     # Накатываем миграции через Alembic
     from alembic import command
     from alembic.config import Config
@@ -133,8 +141,12 @@ def db_session(db_engine) -> Iterator[Session]:
     """Транзакционная фикстура. Каждый тест в своей транзакции, rollback после."""
     connection = db_engine.connect()
     transaction = connection.begin()
-    SessionLocal = sessionmaker(bind=connection, autoflush=False, autocommit=False)
-    session = SessionLocal()
+    session = Session(
+        bind=connection,
+        autoflush=False,
+        autocommit=False,
+        join_transaction_mode="create_savepoint",
+    )
 
     try:
         yield session

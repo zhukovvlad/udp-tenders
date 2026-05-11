@@ -18,7 +18,7 @@ from database import Base  # noqa: E402
 import models  # noqa: F401,E402  -- регистрируем модели в Base.metadata
 
 config = context.config
-_db_url = os.environ.get("DATABASE_URL")
+_db_url = config.get_main_option("sqlalchemy.url") or os.environ.get("DATABASE_URL")
 if not _db_url:
     raise RuntimeError(
         "DATABASE_URL is not set. "
