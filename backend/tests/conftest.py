@@ -7,12 +7,15 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
 
+import httpx as _httpx_module
 import pytest
+import respx
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -187,3 +190,46 @@ def factories(db_session):
     f._register_session(db_session)
     yield f
     f._register_session(None)
+
+
+@pytest.fixture
+def openrouter_fixtures_dir() -> Path:
+    return BACKEND_ROOT / "tests" / "fixtures" / "openrouter"
+
+
+@pytest.fixture
+def mock_openrouter(openrouter_fixtures_dir, monkeypatch):
+    """Подменяет OpenRouter. По умолчанию — happy_path. Меняй сценарий через .use_scenario()."""
+    # Снимаем общий guard (block_real_openrouter autouse) на этот тест —
+    # respx сам перехватит реальный URL, guard ему мешает.
+    monkeypatch.delattr(_httpx_module.AsyncClient, "send", raising=False)
+
+    class _Mock:
+        def __init__(self):
+            self.scenario = "happy_path"
+            self.calls = []
+
+        def use_scenario(self, name: str) -> None:
+            self.scenario = name
+
+        def _load(self) -> dict:
+            return json.loads(
+                (openrouter_fixtures_dir / f"{self.scenario}.json").read_text(encoding="utf-8")
+            )
+
+        def __enter__(self):
+            self._respx = respx.mock(base_url="https://openrouter.ai", assert_all_called=False)
+            self._respx.start()
+
+            def handler(request):
+                self.calls.append(request)
+                return _httpx_module.Response(200, json=self._load())
+
+            self._respx.post("/api/v1/chat/completions").mock(side_effect=handler)
+            return self
+
+        def __exit__(self, *exc):
+            self._respx.stop()
+
+    with _Mock() as m:
+        yield m
