@@ -177,8 +177,13 @@ def client(db_session, in_memory_s3) -> Iterator:
 
 @pytest.fixture
 def factories(db_session):
-    """Регистрирует db_session в фабриках. Возвращает модуль с фабриками."""
+    """Регистрирует db_session в фабриках. Возвращает модуль с фабриками.
+
+    После теста сбрасываем session-holder, чтобы стейл-ссылка на закрытую
+    сессию не пережила тест и не дала путаницу при следующем создании фабрики.
+    """
     from tests import factories as f
 
     f._register_session(db_session)
-    return f
+    yield f
+    f._register_session(None)
