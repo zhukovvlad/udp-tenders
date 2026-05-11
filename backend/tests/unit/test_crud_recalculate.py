@@ -1,12 +1,13 @@
 """Тесты бизнес-логики crud.recalculate_prices."""
 from datetime import date
 
+import crud
+
 
 def test_recalculate_with_no_items_returns_none(client, factories, db_session):
     project = factories.ProjectFactory.create()
     mc = factories.MaterialClassFactory.create()
 
-    import crud
     result = crud.recalculate_prices(
         db_session, project.id, mc.id, date(2026, 1, 1), date(2026, 12, 31)
     )
@@ -22,7 +23,6 @@ def test_recalculate_simple_avg(factories, db_session):
         invoice=inv, material_class=mc, quantity=10.0, unit_price=8000.0, amount=80000.0,
     )
 
-    import crud
     result = crud.recalculate_prices(
         db_session, project.id, mc.id, date(2026, 1, 1), date(2026, 12, 31)
     )
@@ -45,7 +45,6 @@ def test_recalculate_with_reference_price_computes_deviation(factories, db_sessi
         invoice=inv, material_class=mc, quantity=10.0, unit_price=11000.0, amount=110000.0,
     )
 
-    import crud
     result = crud.recalculate_prices(
         db_session, project.id, mc.id, date(2026, 1, 1), date(2026, 12, 31)
     )
