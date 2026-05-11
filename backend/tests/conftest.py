@@ -24,6 +24,12 @@ from sqlalchemy.orm import Session
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_ROOT))
 
+# Сохраняем оригинальный httpx.AsyncClient.send в момент импорта conftest,
+# ДО того, как block_real_openrouter автоматически заменит его на guard.
+# Используется в mock_openrouter для восстановления рабочего send (вместо
+# delattr, который сносит атрибут целиком и оставляет AsyncClient без send).
+_REAL_ASYNC_CLIENT_SEND = _httpx_module.AsyncClient.send
+
 
 @pytest.fixture(autouse=True)
 def block_real_openrouter(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -199,10 +205,13 @@ def openrouter_fixtures_dir() -> Path:
 
 @pytest.fixture
 def mock_openrouter(openrouter_fixtures_dir, monkeypatch):
-    """Подменяет OpenRouter. По умолчанию — happy_path. Меняй сценарий через .use_scenario()."""
-    # Снимаем общий guard (block_real_openrouter autouse) на этот тест —
-    # respx сам перехватит реальный URL, guard ему мешает.
-    monkeypatch.delattr(_httpx_module.AsyncClient, "send", raising=False)
+    """Подменяет OpenRouter. По умолчанию — happy_path. Меняй сценарий через .use_scenario().
+
+    Восстанавливаем оригинальный AsyncClient.send (вместо delattr, который
+    сносит атрибут с класса и ломает все httpx-вызовы). respx работает на
+    transport-уровне, оригинальный send через него корректно проходит.
+    """
+    monkeypatch.setattr(_httpx_module.AsyncClient, "send", _REAL_ASYNC_CLIENT_SEND)
 
     class _Mock:
         def __init__(self):
