@@ -47,15 +47,44 @@ test-backend-integration:
 test-backend-watch:
     cd backend && ptw tests -- -v
 
+# Frontend
+test-frontend:
+    cd frontend && npm test
+
+test-frontend-watch:
+    cd frontend && npm run test:watch
+
+test-frontend-ui:
+    cd frontend && npm run test:ui
+
+# Combined: backend + frontend (без E2E — он отдельно)
+test:
+    just test-backend
+    just test-frontend
+
 # === Coverage ===
 
 coverage-backend:
     cd backend && pytest --cov=. --cov-report=html --cov-report=term
 
+coverage-frontend:
+    cd frontend && npm run test:coverage
+
 # === Lint ===
 
 lint-backend:
     cd backend && ruff check .
+
+lint-frontend:
+    cd frontend && npm run lint
+
+typecheck-frontend:
+    cd frontend && npx tsc -b --noEmit
+
+# Combined lint
+lint:
+    just lint-backend
+    just lint-frontend
 
 format-backend:
     cd backend && ruff format .
