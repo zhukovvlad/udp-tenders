@@ -17,6 +17,7 @@ export const qk = {
     invoices: (projectId: ID) => ["dashboard", "invoices", projectId] as const,
     calculations: (projectId: ID) =>
       ["dashboard", "calculations", projectId] as const,
+    calculationsAll: ["dashboard", "calculations", "all"] as const,
   },
   settings: { current: ["settings"] as const },
 };

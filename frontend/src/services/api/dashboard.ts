@@ -28,6 +28,10 @@ export const dashboardApi = {
     );
     return data;
   },
+  async calculationsAll(): Promise<DashboardCalculation[]> {
+    const { data } = await api.get<DashboardCalculation[]>("/dashboard/calculations");
+    return data;
+  },
   async autoCalculate(projectId: ID): Promise<AutoCalculateResponse> {
     const { data } = await api.post<AutoCalculateResponse>(
       "/dashboard/auto-calculate",
