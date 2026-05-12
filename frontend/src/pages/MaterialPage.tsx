@@ -70,7 +70,7 @@ export default function MaterialPage() {
                 <TableBody>
                   {materialPrices.map((rp) => (
                     <TableRow key={rp.id}>
-                      <TableCell className="font-medium">{rp.project_id}</TableCell>
+                      <TableCell className="font-medium">{rp.project_name ?? String(rp.project_id)}</TableCell>
                       <TableCell className="text-fg-secondary">{formatDate(rp.period_start)} — {formatDate(rp.period_end)}</TableCell>
                       <TableCell className="text-right"><MoneyCell value={rp.price} /></TableCell>
                       <TableCell className="text-fg-secondary">{rp.source ?? "—"}</TableCell>
