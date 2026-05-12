@@ -197,6 +197,7 @@ export function useAutoCalculate() {
     mutationFn: (projectId: ID) => dashboardApi.autoCalculate(projectId),
     onSuccess: (_data, projectId) => {
       qc.invalidateQueries({ queryKey: qk.dashboard.calculations(projectId) });
+      qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
     },
   });
 }
@@ -207,6 +208,7 @@ export function useCalculate() {
     mutationFn: (input: CalculateInput) => dashboardApi.calculate(input),
     onSuccess: (_d, input) => {
       qc.invalidateQueries({ queryKey: qk.dashboard.calculations(input.project_id) });
+      qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
       toast.success("Расчёт выполнен");
     },
   });

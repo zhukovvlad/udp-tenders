@@ -47,7 +47,7 @@ export function PriceChart({ calculations }: Props) {
             <Cell
               key={`${entry.name}-${i}`}
               fill={
-                !entry.refPrice
+                entry.refPrice == null
                   ? "#9CA39A"
                   : entry.deviation_pct > 0
                   ? "#D85A30"

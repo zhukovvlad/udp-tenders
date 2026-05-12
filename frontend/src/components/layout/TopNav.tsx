@@ -48,7 +48,11 @@ export function TopNav() {
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <DropdownMenu>
-            <DropdownMenuTrigger className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-hover text-sm font-medium text-fg hover:bg-surface-hover/80">
+            <DropdownMenuTrigger
+              type="button"
+              aria-label="Открыть меню пользователя"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-hover text-sm font-medium text-fg hover:bg-surface-hover/80"
+            >
               ЗВ
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">

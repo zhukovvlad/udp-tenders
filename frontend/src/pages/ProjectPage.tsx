@@ -109,12 +109,17 @@ export default function ProjectPage() {
   // Aggregate suppliers from invoices
   const supplierMap = new Map<string, { displayName: string; count: number }>();
   for (const inv of invoices) {
-    const key = `${inv.supplier_inn ?? inv.supplier_name ?? "unknown"}`;
+    const key = inv.supplier_inn
+      ? `inn:${inv.supplier_inn}`
+      : inv.supplier_name
+        ? `name:${inv.supplier_name}`
+        : "unknown";
     const displayName = inv.supplier_name ?? inv.supplier_inn ?? "(без названия)";
     const existing = supplierMap.get(key);
     supplierMap.set(key, { displayName, count: (existing?.count ?? 0) + 1 });
   }
-  const suppliers = Array.from(supplierMap.values()).map(({ displayName, count }) => ({
+  const suppliers = Array.from(supplierMap.entries()).map(([key, { displayName, count }]) => ({
+    key,
     name: displayName,
     count,
   }));
@@ -364,7 +369,9 @@ export default function ProjectPage() {
                         <td
                           className={
                             "px-4 py-2 text-right font-mono " +
-                            ((c.deviation_pct ?? 0) > 0
+                            (c.deviation_pct == null
+                              ? "text-fg-secondary"
+                              : c.deviation_pct > 0
                               ? "text-danger-text"
                               : "text-accent-text")
                           }
@@ -374,7 +381,9 @@ export default function ProjectPage() {
                         <td
                           className={
                             "px-4 py-2 text-right font-mono " +
-                            ((c.deviation_amount ?? 0) > 0
+                            (c.deviation_amount == null
+                              ? "text-fg-secondary"
+                              : c.deviation_amount > 0
                               ? "text-danger-text"
                               : "text-accent-text")
                           }
@@ -589,7 +598,7 @@ export default function ProjectPage() {
                   <tbody>
                     {suppliers.map((s) => (
                       <tr
-                        key={s.name}
+                        key={s.key}
                         className="border-b border-border-subtle last:border-0 hover:bg-surface-hover"
                       >
                         <td className="px-4 py-2 text-fg">{s.name}</td>
