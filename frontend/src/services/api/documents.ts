@@ -14,7 +14,7 @@ export interface DocumentSummary {
 
 export const documentsApi = {
   async list(projectId?: number): Promise<DocumentSummary[]> {
-    const { data } = await api.get<DocumentSummary[]>("/documents", {
+    const { data } = await api.get<DocumentSummary[]>("/invoices/documents", {
       params: projectId != null ? { project_id: projectId } : undefined,
     });
     return data;
