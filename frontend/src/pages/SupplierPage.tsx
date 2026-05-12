@@ -4,8 +4,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui-domain/EmptyState";
 
 export default function SupplierPage() {
-  const { slug } = useParams<{ slug: string }>();
-  const name = slug ? decodeURIComponent(slug) : "Поставщик";
+  const { id } = useParams<{ id: string }>();
+  let name = "Поставщик";
+  if (id) {
+    try {
+      name = decodeURIComponent(id);
+    } catch {
+      name = id;
+    }
+  }
 
   return (
     <div className="container-page py-8">

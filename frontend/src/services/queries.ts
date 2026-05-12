@@ -251,7 +251,7 @@ export function useUpdateSettings() {
 }
 
 // ========== Documents ==========
-export function useDocuments(projectId?: number): ReturnType<typeof useQuery<DocumentSummary[]>> {
+export function useDocuments(projectId?: number) {
   return useQuery({
     queryKey: qk.documents.list(projectId),
     queryFn: () => documentsApi.list(projectId),

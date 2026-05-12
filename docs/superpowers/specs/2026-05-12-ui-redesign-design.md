@@ -48,7 +48,7 @@
 - В правой части шапки: иконка поиска (stub), иконка уведомлений (stub), аватар-кнопка с `DropdownMenu` содержащим «Настройки» → `/settings` и «Выйти» (stub)
 
 Итоговый массив NAV (5 пунктов):
-```
+```text
 { to: "/dashboard", icon: LayoutDashboard, label: "Дашборд", end: true }
 { to: "/projects",  icon: Building2,       label: "Объекты" }
 { to: "/suppliers", icon: Users,           label: "Поставщики" }
@@ -58,7 +58,7 @@
 
 ### App.tsx — роуты
 
-```
+```text
 /                       → <Navigate to="/dashboard" replace />
 /dashboard              → <Dashboard />          (новая страница)
 /projects               → <Projects />           (без изменений)
@@ -237,7 +237,7 @@ BarChart с центральной осью (Recharts):
 
 ## Зависимости
 
-- `recharts` — уже установлен (v3.8.1)
+- `recharts` — уже установлен (v3.8.0)
 - `shadcn add chart` — нужно выполнить
 - `shadcn add sheet` — нужно выполнить
 - `shadcn add dropdown-menu` — проверить наличие (нужен для аватара)

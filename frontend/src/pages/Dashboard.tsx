@@ -25,11 +25,11 @@ export default function Dashboard() {
       <PageHeader serif title="Сводка по портфелю" subtitle="Аналитика закупок по всем объектам" />
 
       <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2">
-        {calcsQ.isLoading ? (
+        {calcsQ.isLoading || docsQ.isLoading ? (
           <><Skeleton className="h-[88px]" /><Skeleton className="h-[88px]" /></>
         ) : (
           <>
-            <KpiCard label="Переплата к плановым" value={totalOverpay ? formatMoney(totalOverpay) : "—"} />
+            <KpiCard label="Переплата к плановым" value={calcsQ.data?.length ? formatMoney(totalOverpay) : "—"} />
             <KpiCard label="Требуют внимания" value={String(issueCount)} />
           </>
         )}

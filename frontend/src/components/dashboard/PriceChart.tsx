@@ -10,20 +10,20 @@ interface Props {
 }
 
 export function PriceChart({ calculations }: Props) {
-  if (!calculations.length) return (
-    <div className="flex h-48 items-center justify-center text-sm text-fg-tertiary">
-      Рассчитайте отклонения по объектам, чтобы увидеть динамику
-    </div>
-  );
-
   const data = calculations
     .filter((c) => c.avg_price > 0)
     .map((c) => ({
       name: c.material_class_name ?? "?",
       avg: c.avg_price,
-      ref: c.reference_price ?? null,
+      refPrice: c.reference_price ?? null,
       deviation_pct: c.deviation_pct ?? 0,
     }));
+
+  if (!data.length) return (
+    <div className="flex h-48 items-center justify-center text-sm text-fg-tertiary">
+      Рассчитайте отклонения по объектам, чтобы увидеть динамику
+    </div>
+  );
 
   return (
     <ChartContainer config={{}} className="h-[220px] w-full">
@@ -43,11 +43,11 @@ export function PriceChart({ calculations }: Props) {
         />
         <Legend formatter={(v) => (v === "avg" ? "Средняя цена" : "Эталон")} />
         <Bar dataKey="avg" name="avg" radius={[3, 3, 0, 0]}>
-          {data.map((entry) => (
+          {data.map((entry, i) => (
             <Cell
-              key={entry.name}
+              key={`${entry.name}-${i}`}
               fill={
-                !entry.ref
+                !entry.refPrice
                   ? "#9CA39A"
                   : entry.deviation_pct > 0
                   ? "#D85A30"
@@ -56,7 +56,7 @@ export function PriceChart({ calculations }: Props) {
             />
           ))}
         </Bar>
-        <Bar dataKey="ref" name="ref" radius={[3, 3, 0, 0]} fill="rgba(255,255,255,0.15)" />
+        <Bar dataKey="refPrice" name="refPrice" radius={[3, 3, 0, 0]} fill="rgba(255,255,255,0.15)" />
       </BarChart>
     </ChartContainer>
   );

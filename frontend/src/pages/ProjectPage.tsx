@@ -64,7 +64,8 @@ function totalDeviationAmount(
 // ─────────────────────────────────────────────
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
-  const projectId: ID | null = id ? Number(id) : null;
+  const parsed = id ? Number(id) : NaN;
+  const projectId: ID | null = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 
   // ── upload sheet ──
   const [uploadOpen, setUploadOpen] = useState(false);
