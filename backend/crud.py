@@ -1,11 +1,17 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 from datetime import date, datetime
-from models import (
-    Project, MaterialClass, ReferencePrice,
-    Document, Invoice, InvoiceItem, PriceCalculation,
-)
 
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from models import (
+    Document,
+    Invoice,
+    InvoiceItem,
+    MaterialClass,
+    PriceCalculation,
+    Project,
+    ReferencePrice,
+)
 
 # --- Projects ---
 

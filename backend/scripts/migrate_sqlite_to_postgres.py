@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv
+
 load_dotenv(ROOT / ".env")
 
 from sqlalchemy import create_engine, text  # noqa: E402
@@ -26,8 +27,13 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from database import SessionLocal as PgSession  # noqa: E402
 from models import (  # noqa: E402
-    Project, MaterialClass, ReferencePrice,
-    Document, Invoice, InvoiceItem, PriceCalculation,
+    Document,
+    Invoice,
+    InvoiceItem,
+    MaterialClass,
+    PriceCalculation,
+    Project,
+    ReferencePrice,
 )
 
 # Порядок важен: parent → child (FK constraints)

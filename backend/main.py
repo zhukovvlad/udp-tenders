@@ -1,20 +1,22 @@
+import logging
+import os
+import time
+from pathlib import Path
+
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
-from pathlib import Path
-import logging
-import time
-import os
 
 load_dotenv(Path(__file__).parent / ".env")
 
 from logging_config import setup_logging
+
 setup_logging()
 logger = logging.getLogger(__name__)
 
 from database import engine
+from routers import dashboard, export, invoices, material_classes, projects, reference_prices, settings
 from s3 import ensure_bucket
-from routers import invoices, dashboard, export, settings, projects, material_classes, reference_prices
 
 try:
     ensure_bucket()

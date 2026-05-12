@@ -1,7 +1,8 @@
+import os
+
+from dotenv import load_dotenv, set_key
 from fastapi import APIRouter
 from pydantic import BaseModel
-from dotenv import load_dotenv, set_key
-import os
 
 router = APIRouter()
 

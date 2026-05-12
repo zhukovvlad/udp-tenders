@@ -3,8 +3,9 @@ import json
 import logging
 import os
 from datetime import date
-from sqlalchemy.orm import Session
+
 import httpx
+from sqlalchemy.orm import Session
 
 import crud
 
@@ -97,7 +98,11 @@ SYSTEM_PROMPT = """Ты — парсер счетов-фактур и УПД (у
 - confidence_reason — кратко и по делу укажи, что именно вызывает неуверенность, либо "все поля читаются чётко"
 """
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+# Если переменная окружения задана пустой строкой ("OPENROUTER_BASE_URL=" в .env),
+# os.getenv вернёт "" — это даст relative URL "/chat/completions" и тихо сломает
+# httpx-вызовы. Используем "or", чтобы пустая строка считалась отсутствием значения.
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
+OPENROUTER_URL = f"{OPENROUTER_BASE_URL.rstrip('/')}/chat/completions"
 
 
 async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> dict:

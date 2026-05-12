@@ -22,3 +22,23 @@ minio-data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Тесты — реальные PDF и тестовые env-файлы
+backend/tests/fixtures/pdf/real/
+.env.test
+.env.test.local
+
+# Тестовые артефакты
+backend/htmlcov/
+backend/coverage.xml
+backend/.coverage
+backend/.pytest_cache/
+.ruff_cache/
+frontend/coverage/
+playwright-report/
+test-results/
+e2e/test-results/
+e2e/playwright-report/
+
+# Сохраняем .gitkeep в real/, но не сами PDF
+!backend/tests/fixtures/pdf/real/.gitkeep
