@@ -1,4 +1,6 @@
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell, ResponsiveContainer,
+} from "recharts";
 import { ChartContainer } from "@/components/ui/chart";
 import type { DashboardCalculation } from "@/types/dashboard";
 import { formatMoney } from "@/lib/format";
@@ -14,38 +16,52 @@ export function PriceChart({ calculations }: Props) {
     </div>
   );
 
-  const classNames = [...new Set(calculations.map((c) => c.material_class_name))];
-  const byPeriod = new Map<string, Record<string, number>>();
-  calculations.forEach((c) => {
-    if (!c.period_start || !c.material_class_name) return;
-    if (!byPeriod.has(c.period_start)) byPeriod.set(c.period_start, {});
-    byPeriod.get(c.period_start)![c.material_class_name] = c.avg_price;
-  });
-  const data = [...byPeriod.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([period, values]) => ({ period, ...values }));
-
-  const COLORS = ["#9CC79A", "#EFB75C", "#F0B0A0", "#7DA876", "#C8E0C2"];
+  const data = calculations
+    .filter((c) => c.avg_price > 0)
+    .map((c) => ({
+      name: c.material_class_name ?? "?",
+      avg: c.avg_price,
+      ref: c.reference_price ?? null,
+      deviation_pct: c.deviation_pct ?? 0,
+    }));
 
   return (
     <ChartContainer config={{}}>
-      <LineChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-        <XAxis dataKey="period" tick={{ fontSize: 11 }} />
-        <YAxis tickFormatter={(v) => (typeof v === "number" ? formatMoney(v) : String(v))} tick={{ fontSize: 11 }} width={80} />
-        <Tooltip formatter={(v) => (typeof v === "number" ? formatMoney(v) : String(v ?? "—"))} />
-        <Legend />
-        {classNames.map((name, i) => (
-          <Line
-            key={name}
-            type="monotone"
-            dataKey={name}
-            stroke={COLORS[i % COLORS.length]}
-            dot={false}
-            strokeWidth={1.5}
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+          <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+          <YAxis
+            tickFormatter={(v: number) => formatMoney(v)}
+            tick={{ fontSize: 11 }}
+            width={90}
           />
-        ))}
-      </LineChart>
+          <Tooltip
+            formatter={(v, name) => [
+              typeof v === "number" ? formatMoney(v) : "—",
+              name === "avg" ? "Средняя цена" : "Эталон",
+            ]}
+          />
+          <Legend
+            formatter={(v) => v === "avg" ? "Средняя цена" : "Эталон"}
+          />
+          <Bar dataKey="avg" name="avg" radius={[3, 3, 0, 0]}>
+            {data.map((entry) => (
+              <Cell
+                key={entry.name}
+                fill={
+                  !entry.ref
+                    ? "#9CA39A"
+                    : entry.deviation_pct > 0
+                    ? "#D85A30"
+                    : "#9CC79A"
+                }
+              />
+            ))}
+          </Bar>
+          <Bar dataKey="ref" name="ref" radius={[3, 3, 0, 0]} fill="rgba(255,255,255,0.15)" />
+        </BarChart>
+      </ResponsiveContainer>
     </ChartContainer>
   );
 }
