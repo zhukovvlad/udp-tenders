@@ -48,12 +48,13 @@ import {
 
 import { formatDate, formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import type { ID } from "@/types/common";
+import type { DashboardCalculation } from "@/types/dashboard";
 
 // ─────────────────────────────────────────────
 // Helper: total deviation across all calculations
 // ─────────────────────────────────────────────
 function totalDeviationAmount(
-  calculations: import("@/types/dashboard").DashboardCalculation[]
+  calculations: DashboardCalculation[]
 ): number {
   return calculations.reduce((sum, c) => sum + (c.deviation_amount ?? 0), 0);
 }
@@ -105,13 +106,15 @@ export default function ProjectPage() {
   const totalDev = totalDeviationAmount(calculations);
 
   // Aggregate suppliers from invoices
-  const supplierMap = new Map<string, number>();
+  const supplierMap = new Map<string, { displayName: string; count: number }>();
   for (const inv of invoices) {
-    const name = inv.supplier_name ?? "(без названия)";
-    supplierMap.set(name, (supplierMap.get(name) ?? 0) + 1);
+    const key = `${inv.supplier_inn ?? inv.supplier_name ?? "unknown"}`;
+    const displayName = inv.supplier_name ?? inv.supplier_inn ?? "(без названия)";
+    const existing = supplierMap.get(key);
+    supplierMap.set(key, { displayName, count: (existing?.count ?? 0) + 1 });
   }
-  const suppliers = Array.from(supplierMap.entries()).map(([name, count]) => ({
-    name,
+  const suppliers = Array.from(supplierMap.values()).map(({ displayName, count }) => ({
+    name: displayName,
     count,
   }));
 
@@ -338,9 +341,9 @@ export default function ProjectPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {calculations.map((c, idx) => (
+                    {calculations.map((c) => (
                       <tr
-                        key={idx}
+                        key={`${c.material_class_name ?? ""}-${c.period_start}-${c.period_end}`}
                         className="border-b border-border-subtle last:border-0 hover:bg-surface-hover"
                       >
                         <td className="px-4 py-2 text-fg">

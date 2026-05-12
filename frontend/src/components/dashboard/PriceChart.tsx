@@ -14,7 +14,7 @@ export function PriceChart({ calculations }: Props) {
     </div>
   );
 
-  const classNames = [...new Set(calculations.map((c) => c.material_class_name).filter(Boolean))] as string[];
+  const classNames = [...new Set(calculations.map((c) => c.material_class_name))];
   const byPeriod = new Map<string, Record<string, number>>();
   calculations.forEach((c) => {
     if (!c.period_start || !c.material_class_name) return;

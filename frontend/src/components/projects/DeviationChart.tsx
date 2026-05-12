@@ -24,9 +24,9 @@ export function DeviationChart({ calculations }: Props) {
         <ReferenceLine y={0} stroke="rgba(255,255,255,0.2)" />
         <Tooltip formatter={(v) => (typeof v === "number" ? `${v.toFixed(2)}%` : String(v))} />
         <Bar dataKey="value" radius={[3, 3, 0, 0]}>
-          {data.map((entry, i) => (
+          {data.map((entry) => (
             <Cell
-              key={i}
+              key={entry.name}
               fill={entry.value > 0 ? "#D85A30" : "#9CC79A"}
             />
           ))}
