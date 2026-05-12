@@ -8,8 +8,6 @@ import { invoicesApi } from "./api/invoices";
 import { dashboardApi } from "./api/dashboard";
 import { uploadApi } from "./api/upload";
 import { settingsApi } from "./api/settings";
-import { documentsApi } from "./api/documents";
-import type { DocumentSummary } from "./api/documents";
 import { qk } from "./queryKeys";
 
 import type { ID } from "@/types/common";
@@ -254,7 +252,7 @@ export function useUpdateSettings() {
 export function useDocuments(projectId?: number) {
   return useQuery({
     queryKey: qk.documents.list(projectId),
-    queryFn: () => documentsApi.list(projectId),
+    queryFn: () => invoicesApi.listDocuments(projectId),
   });
 }
 
