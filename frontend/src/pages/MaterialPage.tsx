@@ -16,7 +16,8 @@ const TYPE_LABELS: Record<string, string> = { concrete: "Бетон", rebar: "А
 
 export default function MaterialPage() {
   const { id } = useParams<{ id: string }>();
-  const materialId = id ? Number(id) : null;
+  const parsed = id ? Number(id) : NaN;
+  const materialId = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 
   const classesQ = useMaterialClasses();
   const material = classesQ.data?.find((c) => c.id === materialId) ?? null;
