@@ -1,7 +1,7 @@
 from datetime import UTC, date, datetime
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from models import (
     Document,
@@ -90,7 +90,10 @@ def delete_material_class(db: Session, class_id: int):
 # --- Reference Prices ---
 
 def get_reference_prices(db: Session, project_id: int = None, material_class_id: int = None):
-    q = db.query(ReferencePrice)
+    q = db.query(ReferencePrice).options(
+        joinedload(ReferencePrice.project),
+        joinedload(ReferencePrice.material_class),
+    )
     if project_id:
         q = q.filter(ReferencePrice.project_id == project_id)
     if material_class_id:

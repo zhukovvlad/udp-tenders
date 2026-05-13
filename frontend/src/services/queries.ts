@@ -106,9 +106,8 @@ export function useCreateReferencePrice() {
   return useMutation({
     mutationFn: (input: ReferencePriceCreateInput) =>
       referencePricesApi.create(input),
-    onSuccess: (_data, input) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
-      qc.invalidateQueries({ queryKey: qk.referencePrices.all(input.project_id) });
       toast.success("Плановая цена сохранена");
     },
   });
