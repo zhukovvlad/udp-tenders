@@ -45,7 +45,11 @@ export default function Review() {
   const serverInv = docQ.data?.invoices[0] ?? null;
   const draft = serverInv && overrides?.invId === serverInv.id ? overrides.data : serverInv;
 
-  const dirty = overrides !== null && overrides.invId === serverInv?.id;
+  const dirty =
+    serverInv !== null &&
+    overrides !== null &&
+    overrides.invId === serverInv.id &&
+    JSON.stringify(overrides.data) !== JSON.stringify(serverInv);
 
   if (docId === null) {
     return (

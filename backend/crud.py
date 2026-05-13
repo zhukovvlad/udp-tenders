@@ -290,6 +290,4 @@ def recalculate_prices(db: Session, project_id: int, material_class_id: int,
     if commit:
         db.commit()
         db.refresh(calc)
-    else:
-        db.flush()
     return calc

@@ -17,8 +17,6 @@ export const handlers = [
   http.get("/api/material-classes", () => HttpResponse.json([sampleMaterialClass])),
   http.post("/api/material-classes", () => HttpResponse.json(sampleMaterialClass)),
 
-  http.get("/api/documents", () => HttpResponse.json([])),
-
   http.get("/api/reference-prices", () => HttpResponse.json([])),
   http.post("/api/reference-prices", () => HttpResponse.json({ id: 1 })),
   http.delete("/api/reference-prices/:id", () => HttpResponse.json({ message: "Удалено" })),
