@@ -6,6 +6,9 @@ export interface DashboardSummary {
   invoice_count: number;
   total_amount: number;
   total_qty: number;
+  first_invoice_date: ISODate | null;
+  last_invoice_date: ISODate | null;
+  full_deviation_amount: number | null;
 }
 
 export interface DashboardCalculation {

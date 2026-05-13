@@ -164,6 +164,7 @@ export function DeviationChart({ calculations, onConfigurePrice }: Props) {
           <div className="h-2 flex-1 rounded-full bg-surface-hover" />
           {typeof onConfigurePrice === "function" ? (
             <button
+              type="button"
               onClick={onConfigurePrice}
               className="shrink-0 text-right text-xs italic text-accent-text hover:underline"
             >

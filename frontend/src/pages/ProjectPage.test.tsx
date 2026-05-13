@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
 import { Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "@/test/utils";
+import { server } from "@/test/server";
 import ProjectPage from "./ProjectPage";
 
 // MSW handlers provide:
@@ -62,6 +64,38 @@ describe("ProjectPage", () => {
     renderProject("abc");
     await waitFor(() => {
       expect(screen.getByText("Объект не найден")).toBeInTheDocument();
+    });
+  });
+
+  it("clicking configure price button switches to prices tab", async () => {
+    server.use(
+      http.get("/api/dashboard/calculations", () =>
+        HttpResponse.json([
+          {
+            id: 1,
+            project_id: 1,
+            material_class_id: 1,
+            material_class_name: "В25",
+            period_start: "2026-04-01",
+            period_end: "2026-04-30",
+            total_qty: 10,
+            total_amount: 80000,
+            avg_unit_price: 8000,
+            reference_price: null,
+            deviation_pct: null,
+          },
+        ])
+      )
+    );
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const configureBtn = await screen.findByRole("button", { name: /настроить/i });
+    await user.click(configureBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Нет плановых цен")).toBeInTheDocument();
     });
   });
 });

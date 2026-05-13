@@ -14,7 +14,7 @@ router = APIRouter()
 
 @router.get("/summary")
 def get_project_summary(project_id: int, db: Session = Depends(get_db)):
-    """Сводка по проекту: кол-во документов, СФ, позиций, общие суммы."""
+    """Сводка по проекту: кол-во документов, СФ, позиций, общие суммы + отклонение за весь период."""
     doc_count = db.query(func.count(Document.id)).filter(Document.project_id == project_id).scalar()
     invoice_count = (
         db.query(func.count(Invoice.id))
@@ -32,11 +32,30 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db)):
         .filter(Document.project_id == project_id, InvoiceItem.item_type == "material")
         .first()
     )
+
+    # Full invoice date range for this project
+    date_bounds = (
+        db.query(func.min(Invoice.date), func.max(Invoice.date))
+        .join(Document, Invoice.document_id == Document.id)
+        .filter(Document.project_id == project_id)
+        .first()
+    )
+    first_invoice_date, last_invoice_date = date_bounds if date_bounds else (None, None)
+
+    full_deviation = None
+    if first_invoice_date and last_invoice_date:
+        full_deviation = crud.compute_full_deviation(
+            db, project_id, first_invoice_date, last_invoice_date
+        )
+
     return {
         "doc_count": doc_count or 0,
         "invoice_count": invoice_count or 0,
         "total_amount": round(totals.total_amount or 0, 2),
         "total_qty": round(totals.total_qty or 0, 2),
+        "first_invoice_date": first_invoice_date.isoformat() if first_invoice_date else None,
+        "last_invoice_date": last_invoice_date.isoformat() if last_invoice_date else None,
+        "full_deviation_amount": full_deviation,
     }
 
 
