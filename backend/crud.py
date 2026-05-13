@@ -282,7 +282,7 @@ def recalculate_prices(db: Session, project_id: int, material_class_id: int,
         reference_price=reference_price,
         deviation_pct=deviation_pct,
         deviation_amount=deviation_amount,
-        calculated_at=datetime.now(UTC),
+        calculated_at=datetime.now(UTC).replace(tzinfo=None),
     )
     db.add(calc)
     if commit:

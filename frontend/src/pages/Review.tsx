@@ -48,6 +48,9 @@ export default function Review() {
     if (inv && initializedInvId.current !== inv.id) {
       initializedInvId.current = inv.id;
       setDraft(inv);
+    } else if (docQ.data && !inv) {
+      initializedInvId.current = null;
+      setDraft(null);
     }
   }, [docQ.data]);
 

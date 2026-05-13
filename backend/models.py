@@ -12,7 +12,7 @@ class Project(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     contract_number = Column(String)
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
 
     documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
     reference_prices = relationship("ReferencePrice", back_populates="project", cascade="all, delete-orphan")
@@ -25,7 +25,7 @@ class MaterialClass(Base):
     id = Column(Integer, primary_key=True, index=True)
     material_type = Column(String, nullable=False)  # concrete / rebar / other
     name = Column(String, nullable=False)  # В15, В40
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
 
     reference_prices = relationship("ReferencePrice", back_populates="material_class")
     invoice_items = relationship("InvoiceItem", back_populates="material_class")
@@ -56,7 +56,7 @@ class Document(Base):
     s3_key = Column(String)
     doc_type = Column(String, default="unknown")
     status = Column(String, default="parsed")
-    uploaded_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    uploaded_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
 
     project = relationship("Project", back_populates="documents")
     invoices = relationship("Invoice", back_populates="document", cascade="all, delete-orphan")
@@ -73,7 +73,7 @@ class Invoice(Base):
     supplier_inn = Column(String)
     vat_rate = Column(Float, default=20.0)
     ai_confidence = Column(Float)
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
 
     document = relationship("Document", back_populates="invoices")
     items = relationship("InvoiceItem", back_populates="invoice", cascade="all, delete-orphan")
@@ -115,7 +115,7 @@ class PriceCalculation(Base):
     reference_price = Column(Float)
     deviation_pct = Column(Float)
     deviation_amount = Column(Float)
-    calculated_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    calculated_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
 
     project = relationship("Project", back_populates="price_calculations")
     material_class = relationship("MaterialClass", back_populates="price_calculations")
