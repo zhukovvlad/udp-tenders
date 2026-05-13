@@ -258,9 +258,14 @@ export default function ProjectPage() {
           <TabsContent value="overview" className="mt-6 space-y-6">
             {/* Verdict banner */}
             {hasCalculations && (() => {
-              const calcPeriod = calculations[0]
-                ? `${formatDate(calculations[0].period_start)} — ${formatDate(calculations[0].period_end)}`
-                : null;
+              // Show the full covered range (min start → max end) since totalDev spans all periods
+              const rangeStart = calculations.reduce((min, c) =>
+                c.period_start < min ? c.period_start : min, calculations[0].period_start
+              );
+              const rangeEnd = calculations.reduce((max, c) =>
+                c.period_end > max ? c.period_end : max, calculations[0].period_end
+              );
+              const calcPeriod = `${formatDate(rangeStart)} — ${formatDate(rangeEnd)}`;
               return (
                 <div
                   className={
@@ -305,11 +310,16 @@ export default function ProjectPage() {
 
             {/* Calculation controls */}
             <div className="rounded-lg border border-border-subtle bg-surface p-4 space-y-3">
-              {hasCalculations && calculations[0] && (
-                <div className="text-xs text-fg-tertiary">
-                  Последний расчёт: {formatDate(calculations[0].period_start)} — {formatDate(calculations[0].period_end)}
-                </div>
-              )}
+              {hasCalculations && (() => {
+                const latestCalc = calculations.reduce((a, b) =>
+                  new Date(a.period_end) >= new Date(b.period_end) ? a : b
+                );
+                return (
+                  <div className="text-xs text-fg-tertiary">
+                    Последний расчёт: {formatDate(latestCalc.period_start)} — {formatDate(latestCalc.period_end)}
+                  </div>
+                );
+              })()}
               <div className="flex flex-wrap items-end gap-3">
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-fg-secondary">

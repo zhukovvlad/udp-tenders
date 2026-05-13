@@ -58,16 +58,22 @@ function PctLabel(props: Record<string, unknown>) {
 export function DeviationChart({ calculations, onConfigurePrice }: Props) {
   if (!calculations.length) return null;
 
-  const withPrice = calculations.filter(
-    (c) => c.reference_price !== null && c.deviation_pct !== null,
+  // When auto-calculate runs it creates monthly rows; show only the latest period.
+  const latestPeriodEnd = calculations.reduce(
+    (max, c) => (c.period_end > max ? c.period_end : max),
+    calculations[0].period_end,
   );
-  const withoutPrice = calculations.filter((c) => c.reference_price === null);
+  const latestPeriodCalcs = calculations.filter(
+    (c) => c.period_end === latestPeriodEnd,
+  );
 
-  // Period — all calculations in one run share the same period, take from first
-  const first = calculations[0];
+  // deviation_pct is null when reference_price is null or <= 0 (see crud.recalculate_prices)
+  const withPrice = latestPeriodCalcs.filter((c) => c.deviation_pct !== null);
+  const withoutPrice = latestPeriodCalcs.filter((c) => c.deviation_pct === null);
+
   const periodLabel =
-    first.period_start && first.period_end
-      ? `${formatDate(first.period_start)} — ${formatDate(first.period_end)}`
+    latestPeriodCalcs[0]?.period_start && latestPeriodCalcs[0]?.period_end
+      ? `${formatDate(latestPeriodCalcs[0].period_start)} — ${formatDate(latestPeriodCalcs[0].period_end)}`
       : null;
 
   const maxAbsPct = withPrice.length
@@ -141,8 +147,8 @@ export function DeviationChart({ calculations, onConfigurePrice }: Props) {
               }
             />
             <Bar dataKey="value" radius={4}>
-              {data.map((entry, i) => (
-                <Cell key={i} fill={entry.fill} />
+              {data.map((entry) => (
+                <Cell key={entry.name} fill={entry.fill} />
               ))}
               <LabelList dataKey="value" content={PctLabel} />
             </Bar>
@@ -156,12 +162,18 @@ export function DeviationChart({ calculations, onConfigurePrice }: Props) {
             {c.material_class_name}
           </div>
           <div className="h-2 flex-1 rounded-full bg-surface-hover" />
-          <button
-            onClick={onConfigurePrice}
-            className="shrink-0 text-right text-xs italic text-accent-text hover:underline"
-          >
-            Нет плановой цены · настроить →
-          </button>
+          {typeof onConfigurePrice === "function" ? (
+            <button
+              onClick={onConfigurePrice}
+              className="shrink-0 text-right text-xs italic text-accent-text hover:underline"
+            >
+              Нет плановой цены · настроить →
+            </button>
+          ) : (
+            <span className="shrink-0 text-right text-xs italic text-fg-tertiary">
+              Нет плановой цены
+            </span>
+          )}
         </div>
       ))}
     </div>
