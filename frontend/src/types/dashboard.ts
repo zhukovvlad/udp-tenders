@@ -16,6 +16,8 @@ export interface DashboardCalculation {
   reference_price: number | null;
   deviation_pct: number | null;
   deviation_amount: number | null;
+  material_total: number | null;
+  delivery_total: number | null;
   total_qty: number;
   invoice_count: number;
 }

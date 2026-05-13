@@ -1,36 +1,26 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard,
-  Upload,
-  Building2,
-  Layers,
-  Target,
-  FileSpreadsheet,
-  Settings,
-  type LucideIcon,
+  LayoutDashboard, Building2, Users, Layers, FileSpreadsheet,
+  Settings, LogOut, Search, Bell, type LucideIcon,
 } from "lucide-react";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
-interface NavItem {
-  to: string;
-  icon: LucideIcon;
-  label: string;
-  end?: boolean;
-}
-
-const NAV: NavItem[] = [
-  { to: "/", icon: LayoutDashboard, label: "Дашборд", end: true },
-  { to: "/upload", icon: Upload, label: "Загрузка" },
-  { to: "/projects", icon: Building2, label: "Объекты" },
-  { to: "/material-classes", icon: Layers, label: "Классы материалов" },
-  { to: "/reference-prices", icon: Target, label: "Эталоны" },
-  { to: "/reports", icon: FileSpreadsheet, label: "Отчёты" },
-  { to: "/settings", icon: Settings, label: "Настройки" },
+const NAV: { to: string; icon: LucideIcon; label: string; end?: boolean }[] = [
+  { to: "/dashboard", icon: LayoutDashboard, label: "Дашборд", end: true },
+  { to: "/projects",  icon: Building2,       label: "Объекты" },
+  { to: "/suppliers", icon: Users,           label: "Поставщики" },
+  { to: "/materials", icon: Layers,          label: "Номенклатура" },
+  { to: "/reports",   icon: FileSpreadsheet, label: "Отчёты" },
 ];
 
 export function TopNav() {
+  const navigate = useNavigate();
   return (
     <header className="sticky top-0 z-40 h-14 border-b border-border-subtle bg-surface/95 backdrop-blur">
       <div className="container-page flex h-full items-center gap-6">
@@ -55,7 +45,35 @@ export function TopNav() {
             </NavLink>
           ))}
         </nav>
-        <ThemeToggle />
+        <div className="flex items-center gap-2">
+          <button type="button" aria-label="Поиск" disabled className="flex h-8 w-8 items-center justify-center rounded-md text-fg-tertiary opacity-40">
+            <Search size={16} />
+          </button>
+          <button type="button" aria-label="Уведомления" disabled className="flex h-8 w-8 items-center justify-center rounded-md text-fg-tertiary opacity-40">
+            <Bell size={16} />
+          </button>
+          <ThemeToggle />
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              type="button"
+              aria-label="Открыть меню пользователя"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-hover text-sm font-medium text-fg hover:bg-surface-hover/80"
+            >
+              ЗВ
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                className="flex items-center gap-2"
+                onClick={() => navigate("/settings")}
+              >
+                <Settings size={14} /> Настройки
+              </DropdownMenuItem>
+              <DropdownMenuItem className="flex items-center gap-2 text-fg-secondary">
+                <LogOut size={14} /> Выйти
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
     </header>
   );

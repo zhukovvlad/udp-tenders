@@ -89,10 +89,15 @@ export function useDeleteMaterialClass() {
 }
 
 // ========== Reference prices ==========
-export function useReferencePrices(projectId?: ID) {
+export function useReferencePrices(
+  projectId?: ID,
+  options?: { enabled?: boolean; materialClassId?: ID },
+) {
+  const { enabled, materialClassId } = options ?? {};
   return useQuery({
-    queryKey: qk.referencePrices.all(projectId),
-    queryFn: () => referencePricesApi.list(projectId),
+    queryKey: qk.referencePrices.all(projectId, materialClassId),
+    queryFn: () => referencePricesApi.list(projectId, materialClassId),
+    enabled,
   });
 }
 
@@ -103,7 +108,7 @@ export function useCreateReferencePrice() {
       referencePricesApi.create(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
-      toast.success("Эталон сохранён");
+      toast.success("Плановая цена сохранена");
     },
   });
 }
@@ -114,7 +119,7 @@ export function useDeleteReferencePrice() {
     mutationFn: (id: ID) => referencePricesApi.remove(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
-      toast.success("Эталон удалён");
+      toast.success("Плановая цена удалена");
     },
   });
 }
@@ -197,6 +202,7 @@ export function useAutoCalculate() {
     mutationFn: (projectId: ID) => dashboardApi.autoCalculate(projectId),
     onSuccess: (_data, projectId) => {
       qc.invalidateQueries({ queryKey: qk.dashboard.calculations(projectId) });
+      qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
     },
   });
 }
@@ -207,6 +213,7 @@ export function useCalculate() {
     mutationFn: (input: CalculateInput) => dashboardApi.calculate(input),
     onSuccess: (_d, input) => {
       qc.invalidateQueries({ queryKey: qk.dashboard.calculations(input.project_id) });
+      qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
       toast.success("Расчёт выполнен");
     },
   });
@@ -245,5 +252,22 @@ export function useUpdateSettings() {
       qc.invalidateQueries({ queryKey: qk.settings.current });
       toast.success("Настройки сохранены");
     },
+  });
+}
+
+// ========== Documents ==========
+export function useDocuments(projectId?: number) {
+  return useQuery({
+    queryKey: qk.documents.list(projectId),
+    queryFn: () => invoicesApi.listDocuments(projectId),
+  });
+}
+
+// ========== Dashboard (all projects) ==========
+export function useAllCalculations() {
+  return useQuery({
+    queryKey: qk.dashboard.calculationsAll,
+    queryFn: () => dashboardApi.calculationsAll(),
+    staleTime: 0,
   });
 }

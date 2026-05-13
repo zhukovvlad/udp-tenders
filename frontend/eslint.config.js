@@ -19,4 +19,12 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  // shadcn-generated UI components export both components and helpers (e.g. buttonVariants)
+  // test utilities export both components and functions — both are intentional non-HMR files
+  {
+    files: ['src/components/ui/**/*.{ts,tsx}', 'src/test/**/*.{ts,tsx}'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 ])

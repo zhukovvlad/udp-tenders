@@ -18,8 +18,8 @@ class ReferencePriceCreate(BaseModel):
     source: str | None = None
 
 @router.get("")
-def list_reference_prices(project_id: int | None = None, db: Session = Depends(get_db)):
-    prices = crud.get_reference_prices(db, project_id)
+def list_reference_prices(project_id: int | None = None, material_class_id: int | None = None, db: Session = Depends(get_db)):
+    prices = crud.get_reference_prices(db, project_id, material_class_id)
     return [
         {
             "id": rp.id,

@@ -3,6 +3,7 @@ import type { ID, ISODate } from "./common";
 export interface ReferencePrice {
   id: ID;
   project_id: ID;
+  project_name?: string;
   material_class_id: ID;
   material_class_name?: string;
   price: number;

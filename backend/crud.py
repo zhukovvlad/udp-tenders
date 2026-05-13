@@ -1,7 +1,7 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from models import (
     Document,
@@ -89,10 +89,15 @@ def delete_material_class(db: Session, class_id: int):
 
 # --- Reference Prices ---
 
-def get_reference_prices(db: Session, project_id: int = None):
-    q = db.query(ReferencePrice)
+def get_reference_prices(db: Session, project_id: int = None, material_class_id: int = None):
+    q = db.query(ReferencePrice).options(
+        joinedload(ReferencePrice.project),
+        joinedload(ReferencePrice.material_class),
+    )
     if project_id:
         q = q.filter(ReferencePrice.project_id == project_id)
+    if material_class_id:
+        q = q.filter(ReferencePrice.material_class_id == material_class_id)
     return q.order_by(ReferencePrice.period_start.desc()).all()
 
 
@@ -187,14 +192,16 @@ def create_invoice(db: Session, document_id: int, number: str, invoice_date: dat
 # --- Price Calculations ---
 
 def recalculate_prices(db: Session, project_id: int, material_class_id: int,
-                       period_start: date, period_end: date):
+                       period_start: date, period_end: date, commit: bool = True,
+                       skip_delete: bool = False):
     """Recalculate average price for a project + material class + period."""
-    db.query(PriceCalculation).filter(
-        PriceCalculation.project_id == project_id,
-        PriceCalculation.material_class_id == material_class_id,
-        PriceCalculation.period_start == period_start,
-        PriceCalculation.period_end == period_end,
-    ).delete()
+    if not skip_delete:
+        db.query(PriceCalculation).filter(
+            PriceCalculation.project_id == project_id,
+            PriceCalculation.material_class_id == material_class_id,
+            PriceCalculation.period_start == period_start,
+            PriceCalculation.period_end == period_end,
+        ).delete()
 
     items_query = (
         db.query(InvoiceItem)
@@ -282,9 +289,10 @@ def recalculate_prices(db: Session, project_id: int, material_class_id: int,
         reference_price=reference_price,
         deviation_pct=deviation_pct,
         deviation_amount=deviation_amount,
-        calculated_at=datetime.utcnow(),
+        calculated_at=datetime.now(UTC).replace(tzinfo=None),
     )
     db.add(calc)
-    db.commit()
-    db.refresh(calc)
+    if commit:
+        db.commit()
+        db.refresh(calc)
     return calc

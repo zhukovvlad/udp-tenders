@@ -5,27 +5,22 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import { AppShell } from "@/components/layout/AppShell";
 import Dashboard from "@/pages/Dashboard";
-import UploadPage from "@/pages/Upload";
-import Review from "@/pages/Review";
 import Projects from "@/pages/Projects";
 import ProjectPage from "@/pages/ProjectPage";
-import MaterialClasses from "@/pages/MaterialClasses";
-import ReferencePrices from "@/pages/ReferencePrices";
+import Suppliers from "@/pages/Suppliers";
+import SupplierPage from "@/pages/SupplierPage";
+import Materials from "@/pages/Materials";
+import MaterialPage from "@/pages/MaterialPage";
 import Reports from "@/pages/Reports";
 import SettingsPage from "@/pages/Settings";
+import Review from "@/pages/Review";
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: {
-      retry: 1,
-      staleTime: 60_000,
-      refetchOnWindowFocus: false,
-    },
+    queries: { retry: 1, staleTime: 60_000, refetchOnWindowFocus: false },
     mutations: {
       onError: (error: unknown) => {
-        const message =
-          error instanceof Error ? error.message : "Произошла ошибка";
-        toast.error(message);
+        toast.error(error instanceof Error ? error.message : "Произошла ошибка");
       },
     },
   },
@@ -33,26 +28,26 @@ const queryClient = new QueryClient({
 
 export default function App() {
   return (
-    <ThemeProvider
-      attribute="data-theme"
-      defaultTheme="light"
-      enableSystem={false}
-      disableTransitionOnChange
-    >
+    <ThemeProvider attribute="data-theme" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <Routes>
             <Route element={<AppShell />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/upload" element={<UploadPage />} />
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/projects" element={<Projects />} />
               <Route path="/projects/:id" element={<ProjectPage />} />
-              <Route path="/material-classes" element={<MaterialClasses />} />
-              <Route path="/reference-prices" element={<ReferencePrices />} />
+              <Route path="/suppliers" element={<Suppliers />} />
+              <Route path="/suppliers/:id" element={<SupplierPage />} />
+              <Route path="/materials" element={<Materials />} />
+              <Route path="/materials/:id" element={<MaterialPage />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/documents/:id" element={<Review />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="/upload" element={<Navigate to="/projects" replace />} />
+              <Route path="/material-classes" element={<Navigate to="/materials" replace />} />
+              <Route path="/reference-prices" element={<Navigate to="/projects" replace />} />
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>
           </Routes>
         </BrowserRouter>

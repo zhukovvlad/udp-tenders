@@ -42,6 +42,8 @@ export interface DocumentSummary {
   status: string;
   uploaded_at: ISODateTime;
   invoice_count: number;
+  has_issues: boolean;
+  ai_confidence: number | null;
 }
 
 export interface DocumentDetail extends DocumentSummary {

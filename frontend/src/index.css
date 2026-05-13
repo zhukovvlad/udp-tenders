@@ -237,6 +237,17 @@
   --shadow-focus:   var(--shadow-focus);
 }
 
+@keyframes indeterminate {
+  0%   { transform: translateX(-100%) scaleX(1); }
+  40%  { transform: translateX(0%)    scaleX(1.5); }
+  100% { transform: translateX(200%) scaleX(1); }
+}
+
+@utility animate-indeterminate {
+  animation: indeterminate 1.4s ease-in-out infinite;
+  transform-origin: left center;
+}
+
 @layer base {
   *, ::before, ::after {
     border-color: var(--color-border-subtle);

@@ -1,3 +1,4 @@
+from calendar import monthrange
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
@@ -118,8 +119,7 @@ def list_calculations(project_id: int | None = None, material_class_id: int | No
 
 @router.post("/auto-calculate")
 def auto_calculate(project_id: int, db: Session = Depends(get_db)):
-    """Автоматический пересчёт по всем классам за весь диапазон дат СФ проекта.
-    Удаляет старые расчёты и создаёт свежие. Возвращает использованный период."""
+    """Автоматический пересчёт по всем классам помесячно за весь диапазон СФ проекта."""
     bounds = (
         db.query(func.min(Invoice.date), func.max(Invoice.date))
         .join(Document, Invoice.document_id == Document.id)
@@ -134,6 +134,18 @@ def auto_calculate(project_id: int, db: Session = Depends(get_db)):
 
     if not period_start or not period_end:
         return {"message": "Нет СФ в проекте", "period_start": None, "period_end": None, "results": []}
+
+    # Build list of (month_start, month_end) for each calendar month in range
+    def months_in_range(start: date, end: date):
+        months = []
+        cur = date(start.year, start.month, 1)
+        while cur <= end:
+            last = monthrange(cur.year, cur.month)[1]
+            month_end = min(date(cur.year, cur.month, last), end)
+            months.append((cur, month_end))
+            # Advance to first day of next month
+            cur = date(cur.year + (cur.month // 12), (cur.month % 12) + 1, 1)
+        return months
 
     class_ids = [
         row[0] for row in (
@@ -151,13 +163,19 @@ def auto_calculate(project_id: int, db: Session = Depends(get_db)):
     ]
 
     results = []
-    for cid in class_ids:
-        res = crud.recalculate_prices(db, project_id, cid, period_start, period_end)
-        if res:
-            results.append({"material_class_id": cid, "avg_price": res.avg_price})
+    for month_start, month_end in months_in_range(period_start, period_end):
+        for cid in class_ids:
+            res = crud.recalculate_prices(db, project_id, cid, month_start, month_end, commit=False, skip_delete=True)
+            if res and res.invoice_count > 0:
+                results.append({
+                    "material_class_id": cid,
+                    "period_start": month_start.isoformat(),
+                    "avg_price": res.avg_price,
+                })
+    db.commit()
 
     return {
-        "message": f"Рассчитано классов: {len(results)}",
+        "message": f"Рассчитано: {len(results)} записей",
         "period_start": period_start.isoformat(),
         "period_end": period_end.isoformat(),
         "results": results,

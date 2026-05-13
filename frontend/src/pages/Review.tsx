@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 
@@ -39,21 +39,17 @@ export default function Review() {
   const remove = useDeleteDocument();
 
   const [tab, setTab] = useState<TabKey>("items");
-  const [draft, setDraft] = useState<InvoiceRow | null>(null);
+  // Local edits keyed by invoice id — auto-discarded when invoice changes
+  const [overrides, setOverrides] = useState<{ invId: number; data: InvoiceRow } | null>(null);
 
-  // Загрузить первый СФ документа в draft при первом получении
-  useEffect(() => {
-    const inv = docQ.data?.invoices[0];
-    if (inv && (!draft || draft.id !== inv.id)) {
-      setDraft(inv);
-    }
-  }, [docQ.data, draft]);
+  const serverInv = docQ.data?.invoices[0] ?? null;
+  const draft = serverInv && overrides?.invId === serverInv.id ? overrides.data : serverInv;
 
-  const dirty = useMemo(() => {
-    const inv = docQ.data?.invoices[0];
-    if (!draft || !inv) return false;
-    return JSON.stringify(draft) !== JSON.stringify(inv);
-  }, [draft, docQ.data]);
+  const dirty =
+    serverInv !== null &&
+    overrides !== null &&
+    overrides.invId === serverInv.id &&
+    JSON.stringify(overrides.data) !== JSON.stringify(serverInv);
 
   if (docId === null) {
     return (
@@ -121,14 +117,14 @@ export default function Review() {
             <Surface>
               <ReviewHeader
                 invoice={inv}
-                onChange={(patch) => setDraft({ ...inv, ...patch })}
+                onChange={(patch) => setOverrides({ invId: inv.id, data: { ...inv, ...patch } })}
               />
             </Surface>
           )}
           {tab === "items" && (
             <ReviewItemsTable
               items={inv.items}
-              onChange={(items) => setDraft({ ...inv, items })}
+              onChange={(items) => setOverrides({ invId: inv.id, data: { ...inv, items } })}
               vatRate={inv.vat_rate}
             />
           )}
@@ -196,17 +192,20 @@ export default function Review() {
               disabled={!dirty || update.isPending}
               loading={update.isPending}
               onClick={() =>
-                update.mutate({
-                  id: inv.id,
-                  input: {
-                    number: inv.number,
-                    date: inv.date,
-                    supplier_name: inv.supplier_name,
-                    supplier_inn: inv.supplier_inn,
-                    vat_rate: inv.vat_rate,
-                    items: inv.items,
+                update.mutate(
+                  {
+                    id: inv.id,
+                    input: {
+                      number: inv.number,
+                      date: inv.date,
+                      supplier_name: inv.supplier_name,
+                      supplier_inn: inv.supplier_inn,
+                      vat_rate: inv.vat_rate,
+                      items: inv.items,
+                    },
                   },
-                })
+                  { onSuccess: () => setOverrides(null) },
+                )
               }
             >
               Сохранить
