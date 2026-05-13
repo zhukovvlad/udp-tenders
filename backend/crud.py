@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -187,7 +187,7 @@ def create_invoice(db: Session, document_id: int, number: str, invoice_date: dat
 # --- Price Calculations ---
 
 def recalculate_prices(db: Session, project_id: int, material_class_id: int,
-                       period_start: date, period_end: date):
+                       period_start: date, period_end: date, commit: bool = True):
     """Recalculate average price for a project + material class + period."""
     db.query(PriceCalculation).filter(
         PriceCalculation.project_id == project_id,
@@ -282,9 +282,12 @@ def recalculate_prices(db: Session, project_id: int, material_class_id: int,
         reference_price=reference_price,
         deviation_pct=deviation_pct,
         deviation_amount=deviation_amount,
-        calculated_at=datetime.utcnow(),
+        calculated_at=datetime.now(UTC),
     )
     db.add(calc)
-    db.commit()
-    db.refresh(calc)
+    if commit:
+        db.commit()
+        db.refresh(calc)
+    else:
+        db.flush()
     return calc

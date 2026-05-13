@@ -91,7 +91,7 @@
 **KPI-строка (3 карточки):**
 - «Переплата к плановым» — сумма `deviation_amount` из `GET /dashboard/calculations` (без project_id фильтра). Если нет данных — «—».
 - «Оборот» — сумма `material_total + delivery_total` из тех же расчётов.
-- «Требуют внимания» — счётчик документов с `has_issues: true` из `GET /documents` (без фильтра). Клик → `/reports`.
+- «Требуют внимания» — счётчик документов с `has_issues: true` из `GET /api/invoices/documents` (без фильтра). Клик → `/reports`.
 
 **Динамика цен (LineChart через shadcn chart):**  
 Данные: агрегация `avg_price` по `period_start` из `GET /dashboard/calculations` без фильтра, группировка по `material_class_name`. Линия на каждый класс материала. Если расчётов нет — empty state «Рассчитайте отклонения по объектам, чтобы увидеть динамику».
@@ -100,11 +100,11 @@
 Заглушка — empty state с текстом «Аналитика по поставщикам появится здесь». Готовая структура компонента для будущего backend.
 
 **Лента «Требуют внимания»:**  
-Список документов с `has_issues: true` из `GET /documents`. Каждая строка: иконка предупреждения, имя файла, дата, ссылка на `/documents/:id`.
+Список документов с `has_issues: true` из `GET /api/invoices/documents`. Каждая строка: иконка предупреждения, имя файла, дата, ссылка на `/documents/:id`.
 
 ### API-запросы
 - `GET /dashboard/calculations` (без query-параметров) — все расчёты
-- `GET /documents` (без query-параметров) — все документы для подсчёта проблемных
+- `GET /api/invoices/documents` (без query-параметров) — все документы для подсчёта проблемных
 
 ---
 
@@ -164,7 +164,7 @@ BarChart с центральной осью (Recharts):
 
 **Файл:** `frontend/src/pages/Suppliers.tsx` (новый)
 
-Данные: `GET /documents` (без фильтра) → агрегация на фронтенде по `invoices[].supplier_name` / `invoices[].supplier_inn`.
+Данные: `GET /api/invoices/documents` (без фильтра) → агрегация на фронтенде по `invoices[].supplier_name` / `invoices[].supplier_inn`.
 
 Таблица: Поставщик, ИНН, Документов, Оборот*. Сортировка по умолчанию — по кол-ву документов.
 

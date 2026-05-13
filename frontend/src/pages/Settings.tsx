@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 
 import { Input } from "@/components/ui/input";
@@ -32,16 +32,14 @@ export default function SettingsPage() {
   const update = useUpdateSettings();
 
   const [active, setActive] = useState<SectionKey>("general");
-  const [draft, setDraft] = useState<AppSettings | null>(null);
-
-  useEffect(() => {
-    if (settingsQ.data && !draft) setDraft(settingsQ.data);
-  }, [settingsQ.data, draft]);
+  // Local edits — null means "no overrides yet, show server data"
+  const [overrides, setOverrides] = useState<AppSettings | null>(null);
+  const draft = overrides ?? settingsQ.data ?? null;
 
   const dirty = useMemo(() => {
-    if (!draft || !settingsQ.data) return false;
-    return JSON.stringify(draft) !== JSON.stringify(settingsQ.data);
-  }, [draft, settingsQ.data]);
+    if (!overrides || !settingsQ.data) return false;
+    return JSON.stringify(overrides) !== JSON.stringify(settingsQ.data);
+  }, [overrides, settingsQ.data]);
 
   if (settingsQ.isLoading || !draft) {
     return (
@@ -104,7 +102,7 @@ export default function SettingsPage() {
                   <Select
                     value={String(draft.ai_provider ?? "off")}
                     onValueChange={(v: string | null) =>
-                      setDraft({ ...draft, ai_provider: (v ?? "off") as AppSettings["ai_provider"] })
+                      setOverrides({ ...draft, ai_provider: (v ?? "off") as AppSettings["ai_provider"] })
                     }
                   >
                     <SelectTrigger className="w-[280px]">
@@ -127,7 +125,7 @@ export default function SettingsPage() {
                   </Label>
                   <Input
                     value={String(draft.ai_model ?? "")}
-                    onChange={(e) => setDraft({ ...draft, ai_model: e.target.value })}
+                    onChange={(e) => setOverrides({ ...draft, ai_model: e.target.value })}
                     placeholder="например, anthropic/claude-haiku-4-5"
                     className="max-w-md"
                   />
@@ -144,7 +142,7 @@ export default function SettingsPage() {
                     max="1"
                     value={String(draft.parse_threshold ?? 0.7)}
                     onChange={(e) =>
-                      setDraft({
+                      setOverrides({
                         ...draft,
                         parse_threshold: Number(e.target.value) || 0,
                       })
@@ -176,7 +174,7 @@ export default function SettingsPage() {
       {dirty && (
         <div className="sticky bottom-0 mt-8 -mx-6 border-t border-border-subtle bg-surface/95 px-6 py-3 backdrop-blur">
           <div className="container-page flex items-center justify-end gap-2">
-            <Button variant="ghost" onClick={() => setDraft(settingsQ.data ?? null)}>
+            <Button variant="ghost" onClick={() => setOverrides(null)}>
               Отменить изменения
             </Button>
             <Button

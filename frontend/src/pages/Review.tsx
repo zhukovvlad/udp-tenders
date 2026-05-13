@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 
@@ -40,14 +40,16 @@ export default function Review() {
 
   const [tab, setTab] = useState<TabKey>("items");
   const [draft, setDraft] = useState<InvoiceRow | null>(null);
+  const initializedInvId = useRef<number | null>(null);
 
-  // Загрузить первый СФ документа в draft при первом получении
+  // Загрузить первый СФ документа в draft при первом получении или смене документа
   useEffect(() => {
     const inv = docQ.data?.invoices[0];
-    if (inv && (!draft || draft.id !== inv.id)) {
+    if (inv && initializedInvId.current !== inv.id) {
+      initializedInvId.current = inv.id;
       setDraft(inv);
     }
-  }, [docQ.data, draft]);
+  }, [docQ.data]);
 
   const dirty = useMemo(() => {
     const inv = docQ.data?.invoices[0];

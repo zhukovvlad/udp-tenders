@@ -54,7 +54,7 @@ export function UploadSheet({ projectId, open, onOpenChange }: Props) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[480px]">
+      <SheetContent side="right" className="w-full max-w-[480px]">
         <SheetHeader>
           <SheetTitle>Добавить счёт</SheetTitle>
         </SheetHeader>
@@ -81,18 +81,31 @@ function UploadProgress({ status }: { status: UploadStatus }) {
       </div>
 
       {/* Progress bar */}
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
+      <div
+        className="h-1.5 w-full overflow-hidden rounded-full bg-surface-hover"
+        aria-busy={isAnalyzing}
+      >
         {isAnalyzing ? (
-          <div className="h-full w-2/5 animate-indeterminate rounded-full bg-accent" />
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuetext="Анализируем документ с помощью ИИ…"
+            className="h-full w-2/5 animate-indeterminate rounded-full bg-accent"
+          />
         ) : (
           <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={uploadPct ?? 0}
             className="h-full rounded-full bg-accent transition-all duration-200"
             style={{ width: `${uploadPct}%` }}
           />
         )}
       </div>
 
-      <p className="text-xs text-fg-secondary">
+      <p aria-live="polite" className="text-xs text-fg-secondary">
         {isAnalyzing
           ? "Анализируем документ с помощью ИИ…"
           : `Отправка файла… ${uploadPct}%`}

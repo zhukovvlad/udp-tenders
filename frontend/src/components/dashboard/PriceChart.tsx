@@ -42,9 +42,10 @@ export function PriceChart({ calculations }: Props) {
       0
     );
     if (!maxTs) return [];
-    const cutoff = new Date(maxTs - rangeMonths * 30.5 * 24 * 60 * 60 * 1000);
+    const cutoffDate = new Date(maxTs);
+    cutoffDate.setMonth(cutoffDate.getMonth() - rangeMonths);
     return calculations.filter(
-      (c) => c.avg_price > 0 && new Date(c.period_start) >= cutoff
+      (c) => c.avg_price > 0 && new Date(c.period_start) >= cutoffDate
     );
   }, [calculations, rangeMonths]);
 

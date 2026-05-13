@@ -125,7 +125,19 @@ export default function Materials() {
               </TableHeader>
               <TableBody>
                 {(list.data ?? []).map((c) => (
-                  <TableRow key={c.id} className="cursor-pointer" onClick={() => navigate(`/materials/${c.id}`)}>
+                  <TableRow
+                    key={c.id}
+                    className="cursor-pointer"
+                    role="link"
+                    tabIndex={0}
+                    onClick={() => navigate(`/materials/${c.id}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        navigate(`/materials/${c.id}`);
+                      }
+                    }}
+                  >
                     <TableCell className="font-medium">{c.name}</TableCell>
                     <TableCell>
                       <StatusPill tone="neutral" label={TYPE_LABELS[c.material_type] ?? c.material_type} />

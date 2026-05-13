@@ -1,7 +1,15 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 addopts = "-ra --strict-markers --tb=short"
+# Targeted suppression for third-party code not yet ported to Python 3.14:
+# fastapi 0.115.x uses asyncio.iscoroutinefunction (fixed in 0.116+, skip major bump for now)
+# pytest-asyncio 0.26.0 uses asyncio.get_event_loop_policy internally
+filterwarnings = [
+    "ignore:.*asyncio\\.iscoroutinefunction.*:DeprecationWarning:fastapi",
+    "ignore:.*asyncio\\.get_event_loop_policy.*:DeprecationWarning:pytest_asyncio",
+]
 markers = [
     "integration: tests that hit a real Postgres (need TEST_DATABASE_URL)",
 ]

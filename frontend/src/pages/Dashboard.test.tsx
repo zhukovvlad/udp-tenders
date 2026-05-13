@@ -22,7 +22,7 @@ describe("Dashboard", () => {
   it("renders price dynamics section", async () => {
     renderWithProviders(<Dashboard />);
     await waitFor(() => {
-      expect(screen.getByText(/Динамика цен на ключевые материалы/)).toBeInTheDocument();
+      expect(screen.getByText(/Динамика средних цен по материалам/)).toBeInTheDocument();
     });
   });
 
