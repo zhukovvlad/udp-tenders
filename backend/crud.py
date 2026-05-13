@@ -222,7 +222,20 @@ def compute_full_deviation(
 
     class_ids = [r.material_class_id for r in class_rows]
 
-    all_material_qty: float = sum(r.qty for r in class_rows) or 0.0
+    # Use ALL material qty (including unclassified) as denominator for delivery allocation,
+    # matching the logic in recalculate_prices.
+    all_material_qty: float = (
+        db.query(func.sum(InvoiceItem.quantity))
+        .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+        .join(Document, Invoice.document_id == Document.id)
+        .filter(
+            Document.project_id == project_id,
+            Invoice.date >= period_start,
+            Invoice.date <= period_end,
+            InvoiceItem.item_type == "material",
+        )
+        .scalar() or 0.0
+    )
     delivery_total_period: float = (
         db.query(func.sum(InvoiceItem.amount))
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
@@ -334,12 +347,21 @@ def recalculate_prices(db: Session, project_id: int, material_class_id: int,
 
     avg_price = (material_total + delivery_total) / total_qty
 
-    ref = db.query(ReferencePrice).filter(
-        ReferencePrice.project_id == project_id,
-        ReferencePrice.material_class_id == material_class_id,
-        ReferencePrice.period_start <= period_end,
-        ReferencePrice.period_end >= period_start,
-    ).first()
+    ref = (
+        db.query(ReferencePrice)
+        .filter(
+            ReferencePrice.project_id == project_id,
+            ReferencePrice.material_class_id == material_class_id,
+            ReferencePrice.period_start <= period_end,
+            ReferencePrice.period_end >= period_start,
+        )
+        .order_by(
+            ReferencePrice.period_start.desc(),
+            ReferencePrice.period_end.desc(),
+            ReferencePrice.id.desc(),
+        )
+        .first()
+    )
 
     reference_price = ref.price if ref else None
     deviation_pct = None
