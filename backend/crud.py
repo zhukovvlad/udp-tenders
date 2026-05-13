@@ -197,31 +197,14 @@ def compute_full_deviation(
     """Compute total deviation_amount for a project over [period_start, period_end]
     without writing anything to the database.
     Returns None if no reference prices are available for any class."""
-    class_ids = [
-        row[0] for row in (
-            db.query(InvoiceItem.material_class_id)
-            .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
-            .join(Document, Invoice.document_id == Document.id)
-            .filter(
-                Document.project_id == project_id,
-                Invoice.date >= period_start,
-                Invoice.date <= period_end,
-                InvoiceItem.item_type == "material",
-                InvoiceItem.material_class_id.isnot(None),
-            )
-            .distinct()
-            .all()
+
+    # Single grouped query: mat_total + qty per class
+    class_rows = (
+        db.query(
+            InvoiceItem.material_class_id,
+            func.sum(InvoiceItem.amount).label("mat_total"),
+            func.sum(InvoiceItem.quantity).label("qty"),
         )
-    ]
-    if not class_ids:
-        return None
-
-    total_deviation: float = 0.0
-    any_ref = False
-
-    # precompute all-materials qty for delivery allocation
-    all_material_qty: float = (
-        db.query(func.sum(InvoiceItem.quantity))
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .join(Document, Invoice.document_id == Document.id)
         .filter(
@@ -229,9 +212,17 @@ def compute_full_deviation(
             Invoice.date >= period_start,
             Invoice.date <= period_end,
             InvoiceItem.item_type == "material",
+            InvoiceItem.material_class_id.isnot(None),
         )
-        .scalar() or 0.0
+        .group_by(InvoiceItem.material_class_id)
+        .all()
     )
+    if not class_rows:
+        return None
+
+    class_ids = [r.material_class_id for r in class_rows]
+
+    all_material_qty: float = sum(r.qty for r in class_rows) or 0.0
     delivery_total_period: float = (
         db.query(func.sum(InvoiceItem.amount))
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
@@ -245,39 +236,43 @@ def compute_full_deviation(
         .scalar() or 0.0
     )
 
-    for cid in class_ids:
-        row = (
-            db.query(
-                func.sum(InvoiceItem.amount).label("mat_total"),
-                func.sum(InvoiceItem.quantity).label("qty"),
-            )
-            .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
-            .join(Document, Invoice.document_id == Document.id)
-            .filter(
-                Document.project_id == project_id,
-                Invoice.date >= period_start,
-                Invoice.date <= period_end,
-                InvoiceItem.item_type == "material",
-                InvoiceItem.material_class_id == cid,
-            )
-            .first()
-        )
-        if not row or not row.qty:
-            continue
-        share = row.qty / all_material_qty if all_material_qty > 0 else 0
-        delivery_for_class = delivery_total_period * share
-        avg_price = (row.mat_total + delivery_for_class) / row.qty
-
-        ref = db.query(ReferencePrice).filter(
+    # Fetch all relevant reference prices in one query, keep latest by period_start/period_end/id
+    ref_rows = (
+        db.query(ReferencePrice)
+        .filter(
             ReferencePrice.project_id == project_id,
-            ReferencePrice.material_class_id == cid,
+            ReferencePrice.material_class_id.in_(class_ids),
             ReferencePrice.period_start <= period_end,
             ReferencePrice.period_end >= period_start,
-        ).first()
+        )
+        .order_by(
+            ReferencePrice.material_class_id,
+            ReferencePrice.period_start.desc(),
+            ReferencePrice.period_end.desc(),
+            ReferencePrice.id.desc(),
+        )
+        .all()
+    )
+    # Keep only the first (most recent) ref price per class
+    ref_by_class: dict[int, ReferencePrice] = {}
+    for ref in ref_rows:
+        if ref.material_class_id not in ref_by_class:
+            ref_by_class[ref.material_class_id] = ref
 
+    total_deviation: float = 0.0
+    any_ref = False
+
+    for r in class_rows:
+        if not r.qty:
+            continue
+        share = r.qty / all_material_qty if all_material_qty > 0 else 0.0
+        delivery_for_class = delivery_total_period * share
+        avg_price = (r.mat_total + delivery_for_class) / r.qty
+
+        ref = ref_by_class.get(r.material_class_id)
         if ref and ref.price and ref.price > 0:
             any_ref = True
-            total_deviation += round((avg_price - ref.price) * row.qty, 2)
+            total_deviation += (avg_price - ref.price) * r.qty  # accumulate unrounded
 
     return round(total_deviation, 2) if any_ref else None
 

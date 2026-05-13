@@ -71,9 +71,17 @@ export function DeviationChart({ calculations, onConfigurePrice }: Props) {
   const withPrice = latestPeriodCalcs.filter((c) => c.deviation_pct !== null);
   const withoutPrice = latestPeriodCalcs.filter((c) => c.deviation_pct === null);
 
+  const latestPeriodStart = latestPeriodCalcs.reduce(
+    (min, c) => (c.period_start < min ? c.period_start : min),
+    latestPeriodCalcs[0].period_start,
+  );
+  const latestPeriodLabelEnd = latestPeriodCalcs.reduce(
+    (max, c) => (c.period_end > max ? c.period_end : max),
+    latestPeriodCalcs[0].period_end,
+  );
   const periodLabel =
-    latestPeriodCalcs[0]?.period_start && latestPeriodCalcs[0]?.period_end
-      ? `${formatDate(latestPeriodCalcs[0].period_start)} — ${formatDate(latestPeriodCalcs[0].period_end)}`
+    latestPeriodStart && latestPeriodLabelEnd
+      ? `${formatDate(latestPeriodStart)} — ${formatDate(latestPeriodLabelEnd)}`
       : null;
 
   const maxAbsPct = withPrice.length
@@ -147,8 +155,8 @@ export function DeviationChart({ calculations, onConfigurePrice }: Props) {
               }
             />
             <Bar dataKey="value" radius={4}>
-              {data.map((entry) => (
-                <Cell key={entry.name} fill={entry.fill} />
+              {data.map((entry, idx) => (
+                <Cell key={`${entry.name}-${idx}`} fill={entry.fill} />
               ))}
               <LabelList dataKey="value" content={PctLabel} />
             </Bar>
@@ -156,8 +164,8 @@ export function DeviationChart({ calculations, onConfigurePrice }: Props) {
         </ChartContainer>
       )}
 
-      {withoutPrice.map((c) => (
-        <div key={c.material_class_name} className="flex items-center gap-3.5">
+      {withoutPrice.map((c, idx) => (
+        <div key={`${c.material_class_name}-${idx}`} className="flex items-center gap-3.5">
           <div className="w-12 shrink-0 text-sm font-medium text-fg-tertiary">
             {c.material_class_name}
           </div>

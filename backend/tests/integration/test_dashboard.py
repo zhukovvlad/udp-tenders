@@ -5,7 +5,14 @@ def test_summary_empty(client, factories):
     project = factories.ProjectFactory.create()
     response = client.get(f"/api/dashboard/summary?project_id={project.id}")
     assert response.status_code == 200
-    assert response.json() == {"doc_count": 0, "invoice_count": 0, "total_amount": 0, "total_qty": 0}
+    body = response.json()
+    assert body["doc_count"] == 0
+    assert body["invoice_count"] == 0
+    assert body["total_amount"] == 0
+    assert body["total_qty"] == 0
+    assert body["first_invoice_date"] is None
+    assert body["last_invoice_date"] is None
+    assert body["full_deviation_amount"] is None
 
 
 def test_summary_aggregates_materials(client, factories):

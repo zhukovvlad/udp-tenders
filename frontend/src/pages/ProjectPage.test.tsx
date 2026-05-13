@@ -79,10 +79,13 @@ describe("ProjectPage", () => {
             period_start: "2026-04-01",
             period_end: "2026-04-30",
             total_qty: 10,
-            total_amount: 80000,
-            avg_unit_price: 8000,
+            material_total: 80000,
+            delivery_total: 0,
+            avg_price: 8000,
+            invoice_count: 1,
             reference_price: null,
             deviation_pct: null,
+            deviation_amount: null,
           },
         ])
       )
