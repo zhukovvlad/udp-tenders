@@ -17,6 +17,7 @@ export default function Dashboard() {
   const calcsQ = useAllCalculations();
 
   const totalOverpay = (calcsQ.data ?? []).reduce((s, c) => s + (c.deviation_amount ?? 0), 0);
+  const totalTurnover = (calcsQ.data ?? []).reduce((s, c) => s + (c.material_total ?? 0) + (c.delivery_total ?? 0), 0);
   const issueCount = (docsQ.data ?? []).filter((d) => d.has_issues).length;
   const issueDocs = (docsQ.data ?? []).filter((d) => d.has_issues).slice(0, 5);
 
@@ -24,11 +25,12 @@ export default function Dashboard() {
     <div className="container-page py-8">
       <PageHeader serif title="Сводка по портфелю" subtitle="Аналитика закупок по всем объектам" />
 
-      <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2">
+      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         {calcsQ.isLoading || docsQ.isLoading ? (
-          <><Skeleton className="h-[88px]" /><Skeleton className="h-[88px]" /></>
+          <><Skeleton className="h-[88px]" /><Skeleton className="h-[88px]" /><Skeleton className="h-[88px]" /></>
         ) : (
           <>
+            <KpiCard label="Оборот" value={calcsQ.data?.length ? formatMoney(totalTurnover) : "—"} />
             <KpiCard label="Переплата к плановым" value={calcsQ.data?.length ? formatMoney(totalOverpay) : "—"} />
             <KpiCard label="Требуют внимания" value={String(issueCount)} />
           </>

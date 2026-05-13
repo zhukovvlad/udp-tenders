@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Building2, Users, Layers, FileSpreadsheet,
-  Settings, LogOut, type LucideIcon,
+  Settings, LogOut, Search, Bell, type LucideIcon,
 } from "lucide-react";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
@@ -46,6 +46,12 @@ export function TopNav() {
           ))}
         </nav>
         <div className="flex items-center gap-2">
+          <button type="button" aria-label="Поиск" disabled className="flex h-8 w-8 items-center justify-center rounded-md text-fg-tertiary opacity-40">
+            <Search size={16} />
+          </button>
+          <button type="button" aria-label="Уведомления" disabled className="flex h-8 w-8 items-center justify-center rounded-md text-fg-tertiary opacity-40">
+            <Bell size={16} />
+          </button>
           <ThemeToggle />
           <DropdownMenu>
             <DropdownMenuTrigger

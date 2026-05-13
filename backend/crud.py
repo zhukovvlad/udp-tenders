@@ -187,14 +187,16 @@ def create_invoice(db: Session, document_id: int, number: str, invoice_date: dat
 # --- Price Calculations ---
 
 def recalculate_prices(db: Session, project_id: int, material_class_id: int,
-                       period_start: date, period_end: date, commit: bool = True):
+                       period_start: date, period_end: date, commit: bool = True,
+                       skip_delete: bool = False):
     """Recalculate average price for a project + material class + period."""
-    db.query(PriceCalculation).filter(
-        PriceCalculation.project_id == project_id,
-        PriceCalculation.material_class_id == material_class_id,
-        PriceCalculation.period_start == period_start,
-        PriceCalculation.period_end == period_end,
-    ).delete()
+    if not skip_delete:
+        db.query(PriceCalculation).filter(
+            PriceCalculation.project_id == project_id,
+            PriceCalculation.material_class_id == material_class_id,
+            PriceCalculation.period_start == period_start,
+            PriceCalculation.period_end == period_end,
+        ).delete()
 
     items_query = (
         db.query(InvoiceItem)

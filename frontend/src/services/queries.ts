@@ -104,7 +104,7 @@ export function useCreateReferencePrice() {
     onSuccess: (_data, input) => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
       qc.invalidateQueries({ queryKey: qk.referencePrices.all(input.project_id) });
-      toast.success("Эталон сохранён");
+      toast.success("Плановая цена сохранена");
     },
   });
 }
@@ -115,7 +115,7 @@ export function useDeleteReferencePrice() {
     mutationFn: (id: ID) => referencePricesApi.remove(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
-      toast.success("Эталон удалён");
+      toast.success("Плановая цена удалена");
     },
   });
 }

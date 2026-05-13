@@ -14,6 +14,7 @@ describe("Dashboard", () => {
   it("renders KPI cards", async () => {
     renderWithProviders(<Dashboard />);
     await waitFor(() => {
+      expect(screen.getByText(/Оборот/)).toBeInTheDocument();
       expect(screen.getByText(/Переплата к плановым/)).toBeInTheDocument();
       expect(screen.getByText(/Требуют внимания/)).toBeInTheDocument();
     });

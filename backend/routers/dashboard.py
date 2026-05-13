@@ -1,5 +1,5 @@
 from calendar import monthrange
-from datetime import date, timedelta
+from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
@@ -165,7 +165,7 @@ def auto_calculate(project_id: int, db: Session = Depends(get_db)):
     results = []
     for month_start, month_end in months_in_range(period_start, period_end):
         for cid in class_ids:
-            res = crud.recalculate_prices(db, project_id, cid, month_start, month_end, commit=False)
+            res = crud.recalculate_prices(db, project_id, cid, month_start, month_end, commit=False, skip_delete=True)
             if res and res.invoice_count > 0:
                 results.append({
                     "material_class_id": cid,
