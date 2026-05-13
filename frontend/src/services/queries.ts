@@ -101,8 +101,9 @@ export function useCreateReferencePrice() {
   return useMutation({
     mutationFn: (input: ReferencePriceCreateInput) =>
       referencePricesApi.create(input),
-    onSuccess: () => {
+    onSuccess: (_data, input) => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
+      qc.invalidateQueries({ queryKey: qk.referencePrices.all(input.project_id) });
       toast.success("Эталон сохранён");
     },
   });
@@ -263,5 +264,6 @@ export function useAllCalculations() {
   return useQuery({
     queryKey: qk.dashboard.calculationsAll,
     queryFn: () => dashboardApi.calculationsAll(),
+    staleTime: 0,
   });
 }

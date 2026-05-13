@@ -36,8 +36,7 @@ export default function Dashboard() {
       </div>
 
       <Surface className="mt-6">
-        <h2 className="mb-4 font-serif text-base font-medium text-fg">Динамика цен на ключевые материалы</h2>
-        {calcsQ.isLoading ? <Skeleton className="h-48" /> : <PriceChart calculations={calcsQ.data ?? []} />}
+        {calcsQ.isLoading || calcsQ.isFetching ? <Skeleton className="h-48" /> : <PriceChart calculations={calcsQ.data ?? []} />}
       </Surface>
 
       <Surface className="mt-6">
