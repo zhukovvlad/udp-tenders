@@ -89,10 +89,11 @@ export function useDeleteMaterialClass() {
 }
 
 // ========== Reference prices ==========
-export function useReferencePrices(projectId?: ID) {
+export function useReferencePrices(projectId?: ID, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: qk.referencePrices.all(projectId),
     queryFn: () => referencePricesApi.list(projectId),
+    ...options,
   });
 }
 

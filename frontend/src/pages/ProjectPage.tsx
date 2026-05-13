@@ -89,7 +89,11 @@ export default function ProjectPage() {
   const summaryQ = useDashboardSummary(projectId);
   const invoicesQ = useDashboardInvoices(projectId);
   const calculationsQ = useDashboardCalculations(projectId);
-  const referencePricesQ = useReferencePrices(projectId ?? undefined);
+  const hasValidProjectId = projectId !== null;
+  const referencePricesQ = useReferencePrices(
+    hasValidProjectId ? projectId : undefined,
+    { enabled: hasValidProjectId },
+  );
   const materialClassesQ = useMaterialClasses();
 
   // ── mutations ──

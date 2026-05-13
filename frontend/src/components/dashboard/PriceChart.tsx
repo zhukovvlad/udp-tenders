@@ -111,12 +111,13 @@ export function PriceChart({ calculations }: Props) {
   // ── LINE CHART (more than one period) ─────────────────────────────────────
   if (periods.length > 1) {
     // Aggregate: average avg_price by (month, material_class)
+    const classKeyByName = new Map(classKeys.map(({ name, key }) => [name, key]));
     const sums = new Map<string, { sum: number; cnt: number }>();
     for (const c of valid) {
       const name = c.material_class_name ?? "?";
-      const entry = classKeys.find((e) => e.name === name);
-      if (!entry) continue;
-      const key = `${c.period_start.slice(0, 7)}__${entry.key}`;
+      const classKey = classKeyByName.get(name);
+      if (!classKey) continue;
+      const key = `${c.period_start.slice(0, 7)}__${classKey}`;
       const prev = sums.get(key) ?? { sum: 0, cnt: 0 };
       sums.set(key, { sum: prev.sum + c.avg_price, cnt: prev.cnt + 1 });
     }
