@@ -5,7 +5,14 @@ def test_summary_empty(client, factories):
     project = factories.ProjectFactory.create()
     response = client.get(f"/api/dashboard/summary?project_id={project.id}")
     assert response.status_code == 200
-    assert response.json() == {"doc_count": 0, "invoice_count": 0, "total_amount": 0, "total_qty": 0}
+    body = response.json()
+    assert body["doc_count"] == 0
+    assert body["invoice_count"] == 0
+    assert body["total_amount"] == 0
+    assert body["total_qty"] == 0
+    assert body["first_invoice_date"] is None
+    assert body["last_invoice_date"] is None
+    assert body["full_deviation_amount"] is None
 
 
 def test_summary_aggregates_materials(client, factories):
@@ -21,6 +28,29 @@ def test_summary_aggregates_materials(client, factories):
     assert body["total_amount"] == 40000.0
     assert body["total_qty"] == 5.0
     assert body["invoice_count"] == 1
+
+
+def test_summary_with_reference_price_computes_deviation(client, factories):
+    project = factories.ProjectFactory.create()
+    mc = factories.MaterialClassFactory.create()
+    doc = factories.DocumentFactory.create(project=project)
+    inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 15))
+    factories.InvoiceItemFactory.create(
+        invoice=inv, material_class=mc, item_type="material",
+        quantity=10, unit_price=9000, amount=90000,
+    )
+    # Reference price: 8000 → avg_price 9000 → deviation = (9000-8000)*10 = 10000
+    factories.ReferencePriceFactory.create(
+        project=project, material_class=mc,
+        price=8000.0,
+        period_start=date(2026, 1, 1), period_end=date(2026, 12, 31),
+    )
+
+    response = client.get(f"/api/dashboard/summary?project_id={project.id}")
+    body = response.json()
+    assert body["first_invoice_date"] == "2026-03-15"
+    assert body["last_invoice_date"] == "2026-03-15"
+    assert body["full_deviation_amount"] == 10000.0
 
 
 def test_calculate_endpoint_creates_calculation(client, factories):

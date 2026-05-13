@@ -40,7 +40,6 @@ import {
   useDashboardInvoices,
   useDashboardCalculations,
   useCalculate,
-  useAutoCalculate,
   useReferencePrices,
   useCreateReferencePrice,
   useMaterialClasses,
@@ -74,6 +73,9 @@ export default function ProjectPage() {
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
 
+  // ── active tab ──
+  const [activeTab, setActiveTab] = useState("overview");
+
   // ── reference price dialog ──
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   const [rpClassId, setRpClassId] = useState<string>("");
@@ -98,7 +100,6 @@ export default function ProjectPage() {
 
   // ── mutations ──
   const calculateMut = useCalculate();
-  const autoCalculateMut = useAutoCalculate();
   const createRefPrice = useCreateReferencePrice();
 
   // ── derived ──
@@ -108,7 +109,6 @@ export default function ProjectPage() {
   const materialClasses = materialClassesQ.data ?? [];
 
   const hasCalculations = calculations.length > 0;
-  const totalDev = totalDeviationAmount(calculations);
 
   // Aggregate suppliers from invoices
   const supplierMap = new Map<string, { displayName: string; count: number }>();
@@ -163,11 +163,6 @@ export default function ProjectPage() {
       period_start: periodStart,
       period_end: periodEnd,
     });
-  }
-
-  function handleAutoCalculate() {
-    if (!projectId) return;
-    autoCalculateMut.mutate(projectId);
   }
 
   function handleAddReferencePrice() {
@@ -239,7 +234,7 @@ export default function ProjectPage() {
 
       {/* Tabs */}
       <div className="mt-6">
-        <Tabs defaultValue="overview" data-testid="project-page-tabs">
+        <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="project-page-tabs">
           <TabsList variant="line" data-testid="project-page-tabs-list">
             <TabsTrigger value="overview" data-testid="project-tab-overview">Обзор</TabsTrigger>
             <TabsTrigger value="invoices" data-testid="project-tab-invoices">
@@ -253,45 +248,96 @@ export default function ProjectPage() {
 
           {/* ────────── TAB: Обзор ────────── */}
           <TabsContent value="overview" className="mt-6 space-y-6">
-            {/* Verdict banner */}
-            {hasCalculations && (
-              <div
-                className={
-                  totalDev > 0
-                    ? "rounded-lg bg-danger-soft border border-danger-border px-4 py-3 text-sm font-medium text-danger-text"
-                    : "rounded-lg bg-accent-soft border border-accent-border px-4 py-3 text-sm font-medium text-accent-text"
-                }
-              >
-                {totalDev > 0
-                  ? `Переплата: +${formatMoney(totalDev)}`
-                  : `Экономия: ${formatMoney(Math.abs(totalDev))}`}
-              </div>
-            )}
+            {/* Latest period verdict banner */}
+            {hasCalculations && (() => {
+              const latestPeriodEnd = calculations.reduce((max, c) =>
+                c.period_end > max ? c.period_end : max, calculations[0].period_end
+              );
+              const latestCalcs = calculations.filter(c => c.period_end === latestPeriodEnd);
+              const latestStart = latestCalcs.reduce((min, c) =>
+                c.period_start < min ? c.period_start : min, latestCalcs[0].period_start
+              );
+              const latestDev = totalDeviationAmount(latestCalcs);
+              return (
+                <div className={latestDev > 0
+                  ? "rounded-lg bg-danger-soft border border-danger-border px-4 py-3 text-sm font-medium text-danger-text flex items-center justify-between gap-4"
+                  : "rounded-lg bg-accent-soft border border-accent-border px-4 py-3 text-sm font-medium text-accent-text flex items-center justify-between gap-4"
+                }>
+                  <span>
+                    {latestDev > 0
+                      ? `За последний расчёт — Переплата: +${formatMoney(latestDev)}`
+                      : `За последний расчёт — Экономия: ${formatMoney(Math.abs(latestDev))}`}
+                  </span>
+                  <span className="text-xs font-normal opacity-60">
+                    {formatDate(latestStart)} — {formatDate(latestPeriodEnd)}
+                  </span>
+                </div>
+              );
+            })()}
 
             {/* KPI row */}
-            {summaryQ.data && (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <KpiCard
-                  label="Оборот"
-                  value={formatMoney(summaryQ.data.total_amount)}
-                />
-                <KpiCard
-                  label="Объём м³"
-                  value={formatNumber(summaryQ.data.total_qty)}
-                />
-                <KpiCard
-                  label="Счетов"
-                  value={formatNumber(summaryQ.data.invoice_count)}
-                />
-                <KpiCard
-                  label="Документов"
-                  value={formatNumber(summaryQ.data.doc_count)}
-                />
-              </div>
-            )}
+            {summaryQ.data && (() => {
+              const { first_invoice_date, last_invoice_date, full_deviation_amount } = summaryQ.data;
+
+              const devLabel = full_deviation_amount !== null && full_deviation_amount !== undefined
+                ? full_deviation_amount > 0
+                  ? `Переплата: +${formatMoney(full_deviation_amount)}`
+                  : `Экономия: ${formatMoney(Math.abs(full_deviation_amount))}`
+                : "—";
+              const devClass = full_deviation_amount !== null && full_deviation_amount !== undefined
+                ? full_deviation_amount > 0
+                  ? "bg-danger-soft border-danger-border"
+                  : "bg-accent-soft border-accent-border"
+                : "";
+
+              return (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <KpiCard
+                    label="Оборот"
+                    value={formatMoney(summaryQ.data.total_amount)}
+                  />
+                  <KpiCard
+                    label="Объём м³"
+                    value={formatNumber(summaryQ.data.total_qty)}
+                  />
+                  <KpiCard
+                    label="Счетов"
+                    value={formatNumber(summaryQ.data.invoice_count)}
+                  />
+                  <KpiCard
+                    label="Документов"
+                    value={formatNumber(summaryQ.data.doc_count)}
+                  />
+                  <KpiCard
+                    label="Первый счёт"
+                    value={first_invoice_date ? formatDate(first_invoice_date) : "—"}
+                  />
+                  <KpiCard
+                    label="Последний счёт"
+                    value={last_invoice_date ? formatDate(last_invoice_date) : "—"}
+                  />
+                  <KpiCard
+                    label="Отклонение (весь период)"
+                    value={devLabel}
+                    className={devClass}
+                  />
+                </div>
+              );
+            })()}
 
             {/* Calculation controls */}
-            <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border-subtle bg-surface p-4">
+            <div className="rounded-lg border border-border-subtle bg-surface p-4 space-y-3">
+              {hasCalculations && (() => {
+                const latestCalc = calculations.reduce((a, b) =>
+                  a.period_end >= b.period_end ? a : b
+                );
+                return (
+                  <div className="text-xs text-fg-tertiary">
+                    Последний расчёт: {formatDate(latestCalc.period_start)} — {formatDate(latestCalc.period_end)}
+                  </div>
+                );
+              })()}
+              <div className="flex flex-wrap items-end gap-3">
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-fg-secondary">
                   Период с
@@ -321,18 +367,15 @@ export default function ProjectPage() {
               >
                 Рассчитать
               </Button>
-              <Button
-                variant="secondary"
-                onClick={handleAutoCalculate}
-                loading={autoCalculateMut.isPending}
-              >
-                Авто
-              </Button>
+              </div>
             </div>
 
             {/* Deviation chart */}
             {hasCalculations && (
-              <DeviationChart calculations={calculations} />
+              <DeviationChart
+                calculations={calculations}
+                onConfigurePrice={() => setActiveTab("prices")}
+              />
             )}
 
             {/* Calculations table */}

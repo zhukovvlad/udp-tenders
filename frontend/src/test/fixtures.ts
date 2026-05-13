@@ -55,4 +55,7 @@ export const sampleDashboardSummary = {
   invoice_count: 5,
   total_amount: 250000,
   total_qty: 31.5,
+  first_invoice_date: "2026-01-01",
+  last_invoice_date: "2026-04-15",
+  full_deviation_amount: null,
 };
