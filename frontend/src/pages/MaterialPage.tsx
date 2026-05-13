@@ -20,9 +20,12 @@ export default function MaterialPage() {
 
   const classesQ = useMaterialClasses();
   const material = classesQ.data?.find((c) => c.id === materialId) ?? null;
-  const rpQ = useReferencePrices();
+  const rpQ = useReferencePrices(undefined, {
+    materialClassId: materialId ?? undefined,
+    enabled: materialId !== null,
+  });
 
-  const materialPrices = (rpQ.data ?? []).filter((rp) => rp.material_class_id === materialId);
+  const materialPrices = rpQ.data ?? [];
 
   if (classesQ.isLoading) return <div className="container-page py-8"><Skeleton className="h-8 w-1/3" /></div>;
   if (!material) return <div className="container-page py-8"><EmptyState title="Материал не найден" /></div>;

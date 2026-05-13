@@ -6,9 +6,12 @@ import type {
 import type { ID } from "@/types/common";
 
 export const referencePricesApi = {
-  async list(projectId?: ID): Promise<ReferencePrice[]> {
+  async list(projectId?: ID, materialClassId?: ID): Promise<ReferencePrice[]> {
+    const params: Record<string, unknown> = {};
+    if (projectId) params.project_id = projectId;
+    if (materialClassId) params.material_class_id = materialClassId;
     const { data } = await api.get<ReferencePrice[]>("/reference-prices", {
-      params: projectId ? { project_id: projectId } : undefined,
+      params: Object.keys(params).length ? params : undefined,
     });
     return data;
   },

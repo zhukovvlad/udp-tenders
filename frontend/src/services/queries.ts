@@ -89,11 +89,15 @@ export function useDeleteMaterialClass() {
 }
 
 // ========== Reference prices ==========
-export function useReferencePrices(projectId?: ID, options?: { enabled?: boolean }) {
+export function useReferencePrices(
+  projectId?: ID,
+  options?: { enabled?: boolean; materialClassId?: ID },
+) {
+  const { enabled, materialClassId } = options ?? {};
   return useQuery({
-    queryKey: qk.referencePrices.all(projectId),
-    queryFn: () => referencePricesApi.list(projectId),
-    ...options,
+    queryKey: qk.referencePrices.all(projectId, materialClassId),
+    queryFn: () => referencePricesApi.list(projectId, materialClassId),
+    enabled,
   });
 }
 

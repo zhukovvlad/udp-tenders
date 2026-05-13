@@ -89,10 +89,12 @@ def delete_material_class(db: Session, class_id: int):
 
 # --- Reference Prices ---
 
-def get_reference_prices(db: Session, project_id: int = None):
+def get_reference_prices(db: Session, project_id: int = None, material_class_id: int = None):
     q = db.query(ReferencePrice)
     if project_id:
         q = q.filter(ReferencePrice.project_id == project_id)
+    if material_class_id:
+        q = q.filter(ReferencePrice.material_class_id == material_class_id)
     return q.order_by(ReferencePrice.period_start.desc()).all()
 
 
