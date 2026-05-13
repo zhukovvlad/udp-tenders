@@ -74,6 +74,9 @@ export default function ProjectPage() {
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
 
+  // ── active tab ──
+  const [activeTab, setActiveTab] = useState("overview");
+
   // ── reference price dialog ──
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   const [rpClassId, setRpClassId] = useState<string>("");
@@ -239,7 +242,7 @@ export default function ProjectPage() {
 
       {/* Tabs */}
       <div className="mt-6">
-        <Tabs defaultValue="overview" data-testid="project-page-tabs">
+        <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="project-page-tabs">
           <TabsList variant="line" data-testid="project-page-tabs-list">
             <TabsTrigger value="overview" data-testid="project-tab-overview">Обзор</TabsTrigger>
             <TabsTrigger value="invoices" data-testid="project-tab-invoices">
@@ -254,19 +257,29 @@ export default function ProjectPage() {
           {/* ────────── TAB: Обзор ────────── */}
           <TabsContent value="overview" className="mt-6 space-y-6">
             {/* Verdict banner */}
-            {hasCalculations && (
-              <div
-                className={
-                  totalDev > 0
-                    ? "rounded-lg bg-danger-soft border border-danger-border px-4 py-3 text-sm font-medium text-danger-text"
-                    : "rounded-lg bg-accent-soft border border-accent-border px-4 py-3 text-sm font-medium text-accent-text"
-                }
-              >
-                {totalDev > 0
-                  ? `Переплата: +${formatMoney(totalDev)}`
-                  : `Экономия: ${formatMoney(Math.abs(totalDev))}`}
-              </div>
-            )}
+            {hasCalculations && (() => {
+              const calcPeriod = calculations[0]
+                ? `${formatDate(calculations[0].period_start)} — ${formatDate(calculations[0].period_end)}`
+                : null;
+              return (
+                <div
+                  className={
+                    totalDev > 0
+                      ? "rounded-lg bg-danger-soft border border-danger-border px-4 py-3 text-sm font-medium text-danger-text flex items-center justify-between gap-4"
+                      : "rounded-lg bg-accent-soft border border-accent-border px-4 py-3 text-sm font-medium text-accent-text flex items-center justify-between gap-4"
+                  }
+                >
+                  <span>
+                    {totalDev > 0
+                      ? `Переплата: +${formatMoney(totalDev)}`
+                      : `Экономия: ${formatMoney(Math.abs(totalDev))}`}
+                  </span>
+                  {calcPeriod && (
+                    <span className="text-xs font-normal opacity-60">{calcPeriod}</span>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* KPI row */}
             {summaryQ.data && (
@@ -291,7 +304,13 @@ export default function ProjectPage() {
             )}
 
             {/* Calculation controls */}
-            <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border-subtle bg-surface p-4">
+            <div className="rounded-lg border border-border-subtle bg-surface p-4 space-y-3">
+              {hasCalculations && calculations[0] && (
+                <div className="text-xs text-fg-tertiary">
+                  Последний расчёт: {formatDate(calculations[0].period_start)} — {formatDate(calculations[0].period_end)}
+                </div>
+              )}
+              <div className="flex flex-wrap items-end gap-3">
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-fg-secondary">
                   Период с
@@ -328,11 +347,15 @@ export default function ProjectPage() {
               >
                 Авто
               </Button>
+              </div>
             </div>
 
             {/* Deviation chart */}
             {hasCalculations && (
-              <DeviationChart calculations={calculations} />
+              <DeviationChart
+                calculations={calculations}
+                onConfigurePrice={() => setActiveTab("prices")}
+              />
             )}
 
             {/* Calculations table */}
