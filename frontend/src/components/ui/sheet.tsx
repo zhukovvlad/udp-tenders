@@ -64,7 +64,7 @@ function SheetContent({
             className="absolute top-3 right-3 rounded-md p-1.5 text-fg-secondary hover:bg-surface-hover hover:text-fg transition-colors"
           >
             <XIcon size={16} />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">Закрыть</span>
           </SheetPrimitive.Close>
         )}
       </SheetPrimitive.Popup>

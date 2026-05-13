@@ -239,14 +239,14 @@ export default function ProjectPage() {
 
       {/* Tabs */}
       <div className="mt-6">
-        <Tabs defaultValue="overview">
-          <TabsList variant="line">
-            <TabsTrigger value="overview">Обзор</TabsTrigger>
-            <TabsTrigger value="invoices">
+        <Tabs defaultValue="overview" data-testid="project-page-tabs">
+          <TabsList variant="line" data-testid="project-page-tabs-list">
+            <TabsTrigger value="overview" data-testid="project-tab-overview">Обзор</TabsTrigger>
+            <TabsTrigger value="invoices" data-testid="project-tab-invoices">
               Счета{invoices.length > 0 ? ` · ${invoices.length}` : ""}
             </TabsTrigger>
-            <TabsTrigger value="prices">Плановые цены</TabsTrigger>
-            <TabsTrigger value="suppliers">
+            <TabsTrigger value="prices" data-testid="project-tab-prices">Плановые цены</TabsTrigger>
+            <TabsTrigger value="suppliers" data-testid="project-tab-suppliers">
               Поставщики{suppliers.length > 0 ? ` · ${suppliers.length}` : ""}
             </TabsTrigger>
           </TabsList>
@@ -344,7 +344,7 @@ export default function ProjectPage() {
                       <th className="px-4 py-2 font-medium">Класс</th>
                       <th className="px-4 py-2 font-medium">Период</th>
                       <th className="px-4 py-2 font-medium text-right">Ср.цена</th>
-                      <th className="px-4 py-2 font-medium text-right">Эталон</th>
+                      <th className="px-4 py-2 font-medium text-right">Плановая цена</th>
                       <th className="px-4 py-2 font-medium text-right">Откл.%</th>
                       <th className="px-4 py-2 font-medium text-right">Откл.₽</th>
                       <th className="px-4 py-2 font-medium text-right">Объём</th>
@@ -446,7 +446,7 @@ export default function ProjectPage() {
             ) : referencePrices.length === 0 ? (
               <EmptyState
                 title="Нет плановых цен"
-                description="Добавьте эталонные цены для расчёта отклонений."
+                description="Добавьте плановые цены для расчёта отклонений."
               />
             ) : (
               <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface">

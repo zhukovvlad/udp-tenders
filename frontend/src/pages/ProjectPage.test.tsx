@@ -1,0 +1,67 @@
+import { describe, it, expect } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { Routes, Route } from "react-router-dom";
+import { renderWithProviders } from "@/test/utils";
+import ProjectPage from "./ProjectPage";
+
+// MSW handlers provide:
+//   GET /api/projects        → [sampleProject]  (id=1, name="ЖК Радуга")
+//   GET /api/dashboard/*     → sampleDashboardSummary / []
+//   GET /api/reference-prices → []
+//   GET /api/material-classes → [sampleMaterialClass]
+
+/** Render ProjectPage inside a proper Route so useParams() extracts the id. */
+function renderProject(id: string = "1") {
+  return renderWithProviders(
+    <Routes>
+      <Route path="/projects/:id" element={<ProjectPage />} />
+    </Routes>,
+    { initialRoute: `/projects/${id}` },
+  );
+}
+
+describe("ProjectPage", () => {
+  it("renders project name in header", async () => {
+    renderProject();
+    await waitFor(() => {
+      // Name appears in both breadcrumb and page heading
+      expect(screen.getAllByText("ЖК Радуга").length).toBeGreaterThan(0);
+    });
+  });
+
+  it("renders all four tabs", async () => {
+    renderProject();
+    await waitFor(() => {
+      expect(screen.getByTestId("project-tab-overview")).toBeInTheDocument();
+      expect(screen.getByTestId("project-tab-invoices")).toBeInTheDocument();
+      expect(screen.getByTestId("project-tab-prices")).toBeInTheDocument();
+      expect(screen.getByTestId("project-tab-suppliers")).toBeInTheDocument();
+    });
+  });
+
+  it("shows KPI cards after summary loads", async () => {
+    renderProject();
+    await waitFor(() => {
+      expect(screen.getByText("Оборот")).toBeInTheDocument();
+      expect(screen.getByText("Счетов")).toBeInTheDocument();
+    });
+  });
+
+  it("switches to Плановые цены tab", async () => {
+    const user = userEvent.setup();
+    renderProject();
+    const tab = await screen.findByTestId("project-tab-prices");
+    await user.click(tab);
+    await waitFor(() => {
+      expect(screen.getByText(/Плановые цены/)).toBeInTheDocument();
+    });
+  });
+
+  it("shows empty state for invalid project id", async () => {
+    renderProject("abc");
+    await waitFor(() => {
+      expect(screen.getByText("Объект не найден")).toBeInTheDocument();
+    });
+  });
+});
