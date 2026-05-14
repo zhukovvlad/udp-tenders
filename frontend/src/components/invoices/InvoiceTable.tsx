@@ -12,10 +12,10 @@ import { Button } from "@/components/ui-domain/Button";
 import { StatusPill } from "@/components/ui-domain/StatusPill";
 import { MoneyCell } from "@/components/ui-domain/MoneyCell";
 import { formatDate } from "@/lib/format";
-import type { InvoiceRow } from "@/types/invoice";
+import type { DashboardInvoiceRow } from "@/types/invoice";
 
 interface InvoiceTableProps {
-  invoices: InvoiceRow[];
+  invoices: DashboardInvoiceRow[];
   confidenceThreshold?: number;
 }
 
@@ -25,7 +25,7 @@ type Stage = "confirmed" | "review" | "pending";
 // Совпадает с порогом в ConfidenceBadge / ReviewIssues.
 const REVIEW_CONFIDENCE_THRESHOLD = 0.70;
 
-function getStage(inv: InvoiceRow, threshold: number): Stage {
+function getStage(inv: DashboardInvoiceRow, threshold: number): Stage {
   if (inv.verified) return "confirmed";
   if (
     inv.has_issues ||
@@ -97,7 +97,7 @@ export function InvoiceTable({ invoices, confidenceThreshold = REVIEW_CONFIDENCE
                         title={it.raw_name ?? ""}
                       >
                         <span className="text-fg-tertiary">
-                          {(typeof it.material_class === "string" ? it.material_class : it.material_class?.name) || it.item_type}
+                          {it.material_class || it.item_type}
                         </span>
                         {" · "}
                         {it.raw_name}

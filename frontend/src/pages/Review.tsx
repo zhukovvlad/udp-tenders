@@ -105,7 +105,7 @@ export default function Review() {
         actions={
           <>
             <ConfidenceBadge value={inv.ai_confidence} />
-            {inv.verified && (
+            {serverInv?.verified && (
               <StatusPill tone="success" label="Проверено" dot />
             )}
             <StatusPill
@@ -195,14 +195,14 @@ export default function Review() {
               Удалить
             </Button>
             {serverInv && (
-              inv.verified ? (
+              serverInv.verified ? (
                 <Button
                   variant="ghost"
                   size="sm"
                   leftIcon={<XCircle size={14} />}
                   disabled={unverify.isPending || dirty}
                   loading={unverify.isPending}
-                  onClick={() => unverify.mutate(serverInv.id)}
+                  onClick={() => unverify.mutate(serverInv.id, { onSuccess: () => setOverrides(null) })}
                   title={dirty ? "Сначала сохраните изменения" : undefined}
                 >
                   Снять подтверждение
@@ -214,7 +214,7 @@ export default function Review() {
                   leftIcon={<CheckCircle2 size={14} />}
                   disabled={verify.isPending || dirty}
                   loading={verify.isPending}
-                  onClick={() => verify.mutate(serverInv.id)}
+                  onClick={() => verify.mutate(serverInv.id, { onSuccess: () => setOverrides(null) })}
                   title={dirty ? "Сначала сохраните изменения" : undefined}
                 >
                   Подтвердить

@@ -3,7 +3,6 @@ import api from "@/lib/api";
 export interface AppSettings {
   ai_provider: "openrouter" | "anthropic" | "off";
   ai_model: string;
-  parse_threshold: number;
   confidence_threshold: number;
   // расширяется по мере добавления полей в backend
   [key: string]: unknown;

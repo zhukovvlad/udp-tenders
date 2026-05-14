@@ -140,11 +140,11 @@ export default function SettingsPage() {
                     step="0.05"
                     min="0"
                     max="1"
-                    value={String(draft.parse_threshold ?? 0.7)}
+                    value={String(draft.confidence_threshold ?? 0.7)}
                     onChange={(e) =>
                       setOverrides({
                         ...draft,
-                        parse_threshold: Number(e.target.value) || 0,
+                        confidence_threshold: Number(e.target.value) || 0,
                       })
                     }
                     className="w-[160px]"

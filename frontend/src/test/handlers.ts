@@ -8,6 +8,13 @@ import {
   sampleReferencePrice,
 } from "./fixtures";
 
+// Mutable state so that verify/unverify mutations are reflected in subsequent GETs.
+let _invoiceVerified = false;
+
+export function resetHandlerState() {
+  _invoiceVerified = false;
+}
+
 export const handlers = [
   http.get("/api/health", () => HttpResponse.json({ status: "ok" })),
 
@@ -25,7 +32,16 @@ export const handlers = [
   http.delete("/api/reference-prices/:id", () => HttpResponse.json({ message: "Удалено" })),
 
   http.get("/api/invoices/documents", () => HttpResponse.json([sampleDocument])),
-  http.get("/api/invoices/documents/:id", () => HttpResponse.json(sampleDocument)),
+  http.get("/api/invoices/documents/:id", () =>
+    HttpResponse.json({
+      ...sampleDocument,
+      invoices: [{
+        ...sampleDocument.invoices[0],
+        verified: _invoiceVerified,
+        verified_at: _invoiceVerified ? "2026-05-14T12:00:00" : null,
+      }],
+    })
+  ),
   http.post("/api/invoices/upload", () => HttpResponse.json(sampleDocument)),
   http.post("/api/invoices/documents/:id/reparse", () => HttpResponse.json(sampleDocument)),
   http.put("/api/invoices/:id", () =>
@@ -35,12 +51,14 @@ export const handlers = [
   http.delete("/api/invoices/documents/:id", () =>
     HttpResponse.json({ message: "Удалено" })
   ),
-  http.post("/api/invoices/:id/verify", () =>
-    HttpResponse.json({ message: "Проверено", invoice_id: 100, verified_at: "2026-05-14T12:00:00" })
-  ),
-  http.post("/api/invoices/:id/unverify", () =>
-    HttpResponse.json({ message: "Отметка снята", invoice_id: 100 })
-  ),
+  http.post("/api/invoices/:id/verify", () => {
+    _invoiceVerified = true;
+    return HttpResponse.json({ message: "Проверено", invoice_id: 100, verified_at: "2026-05-14T12:00:00" });
+  }),
+  http.post("/api/invoices/:id/unverify", () => {
+    _invoiceVerified = false;
+    return HttpResponse.json({ message: "Отметка снята", invoice_id: 100 });
+  }),
 
   http.get("/api/dashboard/summary", () => HttpResponse.json(sampleDashboardSummary)),
   http.get("/api/dashboard/invoices", () => HttpResponse.json(sampleDashboardInvoices)),
