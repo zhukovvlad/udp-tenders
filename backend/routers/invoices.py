@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
@@ -83,6 +83,8 @@ def _serialize_document(doc) -> dict:
                 "supplier_inn": inv.supplier_inn,
                 "vat_rate": inv.vat_rate,
                 "ai_confidence": inv.ai_confidence,
+                "verified": inv.verified,
+                "verified_at": inv.verified_at.isoformat() if inv.verified_at else None,
                 "has_issues": False,  # пер-СФ флаг можно вычислить позже, пока на уровне документа
                 "items": [
                     {
@@ -291,6 +293,32 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     db.commit()
     db.refresh(invoice)
     return {"message": "Сохранено", "invoice_id": invoice.id}
+
+
+@router.post("/{invoice_id}/verify")
+def verify_invoice(invoice_id: int, db: Session = Depends(get_db)):
+    """Отметить СФ как проверенную человеком."""
+    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="СФ не найдена")
+    invoice.verified = True
+    invoice.verified_at = datetime.now(UTC).replace(tzinfo=None)
+    db.commit()
+    logger.info(f"Invoice id={invoice_id} помечена как проверенная")
+    return {"message": "Проверено", "invoice_id": invoice.id, "verified_at": invoice.verified_at.isoformat()}
+
+
+@router.post("/{invoice_id}/unverify")
+def unverify_invoice(invoice_id: int, db: Session = Depends(get_db)):
+    """Снять отметку о проверке с СФ."""
+    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="СФ не найдена")
+    invoice.verified = False
+    invoice.verified_at = None
+    db.commit()
+    logger.info(f"Invoice id={invoice_id}: отметка о проверке снята")
+    return {"message": "Отметка снята", "invoice_id": invoice.id}
 
 
 @router.delete("/{invoice_id}")

@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -73,6 +73,8 @@ class Invoice(Base):
     supplier_inn = Column(String)
     vat_rate = Column(Float, default=20.0)
     ai_confidence = Column(Float)
+    verified = Column(Boolean, default=False, nullable=False)
+    verified_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
 
     document = relationship("Document", back_populates="invoices")
