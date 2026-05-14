@@ -47,21 +47,20 @@ class ReferencePriceUpdate(BaseModel):
     period_end: date | None = None
     source: str | None = None
 
-@router.put("/{rp_id}")
+@router.patch("/{rp_id}")
 def update_reference_price(rp_id: int, data: ReferencePriceUpdate, db: Session = Depends(get_db)):
-    rp = crud.update_reference_price(
-        db, rp_id,
-        price=data.price,
-        period_start=data.period_start,
-        period_end=data.period_end,
-        source=data.source,
-    )
+    fields = data.model_fields_set
+    kwargs = {k: getattr(data, k) for k in ("price", "period_start", "period_end", "source") if k in fields}
+    rp = crud.update_reference_price(db, rp_id, **kwargs)
     if not rp:
         raise HTTPException(status_code=404, detail="Эталон не найден")
     return {
         "id": rp.id,
         "project_id": rp.project_id,
+        "project_name": rp.project.name,
         "material_class_id": rp.material_class_id,
+        "material_class_name": rp.material_class.name,
+        "material_type": rp.material_class.material_type,
         "price": rp.price,
         "period_start": rp.period_start.isoformat(),
         "period_end": rp.period_end.isoformat(),

@@ -21,7 +21,7 @@ export const referencePricesApi = {
     return data;
   },
   async update(id: ID, input: ReferencePriceUpdateInput): Promise<ReferencePrice> {
-    const { data } = await api.put<ReferencePrice>(`/reference-prices/${id}`, input);
+    const { data } = await api.patch<ReferencePrice>(`/reference-prices/${id}`, input);
     return data;
   },
   async remove(id: ID): Promise<void> {

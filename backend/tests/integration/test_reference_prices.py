@@ -47,7 +47,7 @@ def test_delete_reference_price(client, factories):
 def test_update_reference_price(client, factories):
     rp = factories.ReferencePriceFactory.create(price=8000.0, source="старый")
 
-    response = client.put(
+    response = client.patch(
         f"/api/reference-prices/{rp.id}",
         json={
             "price": 9500.0,
@@ -71,7 +71,7 @@ def test_update_reference_price_partial(client, factories):
         period_end="2026-12-31",
     )
 
-    response = client.put(
+    response = client.patch(
         f"/api/reference-prices/{rp.id}",
         json={"price": 7000.0},
     )
@@ -83,9 +83,34 @@ def test_update_reference_price_partial(client, factories):
 
 
 def test_update_reference_price_not_found(client):
-    response = client.put(
+    response = client.patch(
         "/api/reference-prices/99999",
         json={"price": 1000.0},
     )
     assert response.status_code == 404
+
+
+def test_update_reference_price_clears_source(client, factories):
+    rp = factories.ReferencePriceFactory.create(source="договор")
+
+    response = client.patch(
+        f"/api/reference-prices/{rp.id}",
+        json={"source": None},
+    )
+    assert response.status_code == 200
+    assert response.json()["source"] is None
+
+
+def test_update_reference_price_response_includes_relations(client, factories):
+    rp = factories.ReferencePriceFactory.create(price=5000.0)
+
+    response = client.patch(
+        f"/api/reference-prices/{rp.id}",
+        json={"price": 5500.0},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert "project_name" in body
+    assert "material_class_name" in body
+    assert "material_type" in body
 

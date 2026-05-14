@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
@@ -143,7 +143,7 @@ describe("ProjectPage", () => {
     });
   });
 
-  it("calls delete API when delete confirmed", async () => {
+  it("calls delete API when delete confirmed via dialog", async () => {
     let deleteCalled = false;
     server.use(
       http.get("/api/reference-prices", () =>
@@ -154,7 +154,6 @@ describe("ProjectPage", () => {
         return HttpResponse.json({ message: "Удалено" });
       })
     );
-    vi.spyOn(window, "confirm").mockReturnValue(true);
 
     const user = userEvent.setup();
     renderProject();
@@ -165,8 +164,10 @@ describe("ProjectPage", () => {
     const deleteBtn = await screen.findByLabelText("Удалить");
     await user.click(deleteBtn);
 
-    await waitFor(() => expect(deleteCalled).toBe(true));
+    // Confirmation dialog appears
+    const confirmBtn = await screen.findByTestId("rp-delete-confirm");
+    await user.click(confirmBtn);
 
-    vi.restoreAllMocks();
+    await waitFor(() => expect(deleteCalled).toBe(true));
   });
 });

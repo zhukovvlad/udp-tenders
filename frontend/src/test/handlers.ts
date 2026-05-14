@@ -20,7 +20,7 @@ export const handlers = [
 
   http.get("/api/reference-prices", () => HttpResponse.json([])),
   http.post("/api/reference-prices", () => HttpResponse.json({ id: 1 })),
-  http.put("/api/reference-prices/:id", () => HttpResponse.json(sampleReferencePrice)),
+  http.patch("/api/reference-prices/:id", () => HttpResponse.json(sampleReferencePrice)),
   http.delete("/api/reference-prices/:id", () => HttpResponse.json({ message: "Удалено" })),
 
   http.get("/api/invoices/documents", () => HttpResponse.json([sampleDocument])),

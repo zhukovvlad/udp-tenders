@@ -49,6 +49,7 @@ import {
 
 import { formatDate, formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import type { ID } from "@/types/common";
+import type { ReferencePrice } from "@/types/referencePrice";
 import type { DashboardCalculation } from "@/types/dashboard";
 
 // ─────────────────────────────────────────────
@@ -93,6 +94,10 @@ export default function ProjectPage() {
   const [editStart, setEditStart] = useState("");
   const [editEnd, setEditEnd] = useState("");
   const [editSource, setEditSource] = useState("");
+
+  // ── delete reference price dialog ──
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteRpId, setDeleteRpId] = useState<number | null>(null);
 
   // ── queries ──
   const projectsQ = useProjects();
@@ -201,7 +206,7 @@ export default function ProjectPage() {
     );
   }
 
-  function openEditDialog(rp: { id: number; price: number; period_start: string; period_end: string; source: string | null }) {
+  function openEditDialog(rp: ReferencePrice) {
     setEditRpId(rp.id);
     setEditPrice(String(rp.price));
     setEditStart(rp.period_start);
@@ -211,12 +216,13 @@ export default function ProjectPage() {
   }
 
   function handleEditReferencePrice() {
-    if (!editRpId || !editPrice || !editStart || !editEnd) return;
+    const parsedPrice = parseFloat(editPrice);
+    if (!editRpId || !Number.isFinite(parsedPrice) || parsedPrice < 0 || !editStart || !editEnd) return;
     updateRefPrice.mutate(
       {
         id: editRpId,
         input: {
-          price: Number(editPrice),
+          price: parsedPrice,
           period_start: editStart,
           period_end: editEnd,
           source: editSource || null,
@@ -229,6 +235,21 @@ export default function ProjectPage() {
         },
       }
     );
+  }
+
+  function openDeleteDialog(id: number) {
+    setDeleteRpId(id);
+    setDeleteDialogOpen(true);
+  }
+
+  function handleDeleteReferencePrice() {
+    if (!deleteRpId) return;
+    deleteRefPrice.mutate(deleteRpId, {
+      onSuccess: () => {
+        setDeleteDialogOpen(false);
+        setDeleteRpId(null);
+      },
+    });
   }
 
   return (
@@ -576,11 +597,7 @@ export default function ProjectPage() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => {
-                                if (window.confirm("Удалить плановую цену?")) {
-                                  deleteRefPrice.mutate(rp.id);
-                                }
-                              }}
+                              onClick={() => openDeleteDialog(rp.id)}
                               aria-label="Удалить"
                             >
                               <Trash2 size={14} />
@@ -736,16 +753,37 @@ export default function ProjectPage() {
                   <Button
                     onClick={handleEditReferencePrice}
                     loading={updateRefPrice.isPending}
-                    disabled={!editPrice || !editStart || !editEnd}
+                    disabled={!Number.isFinite(parseFloat(editPrice)) || parseFloat(editPrice) < 0 || !editStart || !editEnd}
                   >
                     Сохранить
                   </Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+            {/* Delete confirmation dialog */}
+            <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Удалить плановую цену?</DialogTitle>
+                </DialogHeader>
+                <p className="text-sm text-fg-secondary py-2">
+                  Это действие нельзя отменить.
+                </p>
+                <DialogFooter>
+                  <Button variant="ghost" onClick={() => setDeleteDialogOpen(false)}>
+                    Отмена
+                  </Button>
+                  <Button
+                    data-testid="rp-delete-confirm"
+                    onClick={handleDeleteReferencePrice}
+                    loading={deleteRefPrice.isPending}
+                  >
+                    Удалить
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </TabsContent>
-
-          {/* ────────── TAB: Поставщики ────────── */}
           <TabsContent value="suppliers" className="mt-6">
             {invoicesQ.isLoading ? (
               <Skeleton className="h-32" />

@@ -13,6 +13,9 @@ from models import (
     ReferencePrice,
 )
 
+# Sentinel: field was not provided in the update payload (differs from explicit None)
+_UNSET = object()
+
 # --- Projects ---
 
 def get_projects(db: Session):
@@ -114,20 +117,20 @@ def create_reference_price(db: Session, project_id: int, material_class_id: int,
     return rp
 
 
-def update_reference_price(db: Session, rp_id: int, price: float = None,
-                           period_start: date = None, period_end: date = None,
-                           source: str = None) -> ReferencePrice | None:
+def update_reference_price(db: Session, rp_id: int, price=_UNSET,
+                           period_start=_UNSET, period_end=_UNSET,
+                           source=_UNSET) -> ReferencePrice | None:
     rp = db.query(ReferencePrice).filter(ReferencePrice.id == rp_id).first()
     if not rp:
         return None
-    if price is not None:
+    if price is not _UNSET:
         rp.price = price
-    if period_start is not None:
+    if period_start is not _UNSET:
         rp.period_start = period_start
-    if period_end is not None:
+    if period_end is not _UNSET:
         rp.period_end = period_end
-    if source is not None:
-        rp.source = source if source.strip() else None
+    if source is not _UNSET:
+        rp.source = source if (isinstance(source, str) and source.strip()) else None
     db.commit()
     db.refresh(rp)
     return rp
