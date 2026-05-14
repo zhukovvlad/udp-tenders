@@ -23,6 +23,7 @@ import {
   useDeleteDocument,
   useVerifyInvoice,
   useUnverifyInvoice,
+  useSettings,
 } from "@/services/queries";
 import { invoicesApi } from "@/services/api/invoices";
 import { formatDate } from "@/lib/format";
@@ -41,6 +42,7 @@ export default function Review() {
   const remove = useDeleteDocument();
   const verify = useVerifyInvoice();
   const unverify = useUnverifyInvoice();
+  const settingsQ = useSettings();
 
   const [tab, setTab] = useState<TabKey>("items");
   // Local edits keyed by invoice id — auto-discarded when invoice changes
@@ -82,6 +84,8 @@ export default function Review() {
 
   const doc = docQ.data;
   const inv = draft;
+  const threshold = settingsQ.data?.confidence_threshold ?? 0.7;
+  const hasProblems = inv.has_issues || (inv.ai_confidence ?? 0) < threshold;
 
   const tabs: Array<{ value: TabKey; label: string }> = [
     { value: "header", label: "Шапка" },
@@ -109,8 +113,8 @@ export default function Review() {
               <StatusPill tone="success" label="Проверено" dot />
             )}
             <StatusPill
-              tone={inv.has_issues ? "warning" : "success"}
-              label={inv.has_issues ? "требует проверки" : "готово"}
+              tone={hasProblems ? "warning" : "success"}
+              label={hasProblems ? "требует проверки" : "готово"}
               dot
             />
           </>

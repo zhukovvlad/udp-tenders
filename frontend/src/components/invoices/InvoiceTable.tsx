@@ -30,7 +30,6 @@ function getStage(inv: DashboardInvoiceRow, threshold: number): Stage {
     inv.has_issues ||
     !inv.supplier_name ||
     !inv.number ||
-    inv.items.some((it) => it.item_type === "material" && !it.material_class) ||
     (inv.ai_confidence ?? 0) < threshold
   )
     return "review";
