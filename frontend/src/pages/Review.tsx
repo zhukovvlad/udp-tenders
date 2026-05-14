@@ -93,7 +93,7 @@ export default function Review() {
       !inv.supplier_name ||
       !inv.number ||
       inv.items.length === 0 ||
-      inv.items.some((it) => !it.raw_name || (it.item_type === "material" && !it.material_class)));
+      inv.items.some((it) => !it.raw_name?.trim() || it.quantity <= 0));
   const locked = serverInv?.verified ?? false;
 
   const tabs: Array<{ value: TabKey; label: string }> = [

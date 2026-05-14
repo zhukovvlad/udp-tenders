@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
+import { DEFAULT_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -112,8 +113,14 @@ export default function SettingsPage() {
                     step="0.05"
                     min="0"
                     max="1"
-                    value={String(draft.confidence_threshold ?? 0.7)}
+                    value={String(draft.confidence_threshold ?? DEFAULT_CONFIDENCE_THRESHOLD)}
                     onChange={(e) =>
+                      setOverrides({
+                        ...draft,
+                        confidence_threshold: Number(e.target.value) || 0,
+                      })
+                    }
+                    onBlur={(e) =>
                       setOverrides({
                         ...draft,
                         confidence_threshold: Math.min(1, Math.max(0, Number(e.target.value) || 0)),
