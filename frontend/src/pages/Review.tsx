@@ -27,6 +27,7 @@ import {
 } from "@/services/queries";
 import { invoicesApi } from "@/services/api/invoices";
 import { formatDate } from "@/lib/format";
+import { DEFAULT_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import type { InvoiceRow } from "@/types/invoice";
 
 type TabKey = "header" | "items" | "issues";
@@ -84,8 +85,15 @@ export default function Review() {
 
   const doc = docQ.data;
   const inv = draft;
-  const threshold = settingsQ.data?.confidence_threshold ?? 0.7;
-  const hasProblems = !inv.verified && (inv.has_issues || (inv.ai_confidence ?? 0) < threshold);
+  const threshold = settingsQ.data?.confidence_threshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
+  const hasProblems =
+    !inv.verified &&
+    (inv.has_issues ||
+      (inv.ai_confidence ?? 0) < threshold ||
+      !inv.supplier_name ||
+      !inv.number ||
+      inv.items.length === 0 ||
+      inv.items.some((it) => !it.raw_name || (it.item_type === "material" && !it.material_class)));
   const locked = serverInv?.verified ?? false;
 
   const tabs: Array<{ value: TabKey; label: string }> = [
@@ -159,7 +167,8 @@ export default function Review() {
             <button
               type="button"
               onClick={() => reparse.mutate(docId)}
-              disabled={reparse.isPending}
+              disabled={reparse.isPending || locked}
+              title={locked ? "Сначала снимите подтверждение" : undefined}
               className="text-fg-secondary underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
             >
               Переразобрать

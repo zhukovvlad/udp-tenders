@@ -13,6 +13,7 @@ import { StatusPill } from "@/components/ui-domain/StatusPill";
 import { MoneyCell } from "@/components/ui-domain/MoneyCell";
 import { formatDate } from "@/lib/format";
 import { useSettings } from "@/services/queries";
+import { DEFAULT_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import type { DashboardInvoiceRow } from "@/types/invoice";
 
 interface InvoiceTableProps {
@@ -22,7 +23,7 @@ interface InvoiceTableProps {
 type Stage = "confirmed" | "review" | "pending";
 
 // Фоллбэк-порог, если настройка ещё не загрузилась.
-const REVIEW_CONFIDENCE_THRESHOLD = 0.70;
+const REVIEW_CONFIDENCE_THRESHOLD = DEFAULT_CONFIDENCE_THRESHOLD;
 
 function getStage(inv: DashboardInvoiceRow, threshold: number): Stage {
   if (inv.verified) return "confirmed";
