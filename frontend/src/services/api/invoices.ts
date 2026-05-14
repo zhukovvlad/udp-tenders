@@ -37,4 +37,10 @@ export const invoicesApi = {
   async removeDocument(docId: ID): Promise<void> {
     await api.delete(`/invoices/documents/${docId}`);
   },
+  async verifyInvoice(invoiceId: ID): Promise<void> {
+    await api.post(`/invoices/${invoiceId}/verify`);
+  },
+  async unverifyInvoice(invoiceId: ID): Promise<void> {
+    await api.post(`/invoices/${invoiceId}/unverify`);
+  },
 };

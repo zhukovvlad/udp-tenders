@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { AlertTriangle, FileEdit } from "lucide-react";
+import { FileEdit } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -9,28 +9,42 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui-domain/Button";
-import { ConfidenceBadge } from "@/components/ui-domain/ConfidenceBadge";
+import { StatusPill } from "@/components/ui-domain/StatusPill";
 import { MoneyCell } from "@/components/ui-domain/MoneyCell";
 import { formatDate } from "@/lib/format";
-import { cn } from "@/lib/utils";
 import type { InvoiceRow } from "@/types/invoice";
 
 interface InvoiceTableProps {
   invoices: InvoiceRow[];
 }
 
+type Stage = "confirmed" | "review" | "pending";
+
+function getStage(inv: InvoiceRow): Stage {
+  if (inv.verified) return "confirmed";
+  if (inv.has_issues || (inv.ai_confidence !== null && inv.ai_confidence !== undefined && inv.ai_confidence < 0.75))
+    return "review";
+  return "pending";
+}
+
+const STAGE_CONFIG: Record<Stage, { tone: "success" | "danger" | "neutral"; label: string }> = {
+  confirmed: { tone: "success", label: "Подтверждён" },
+  review:    { tone: "danger",  label: "Разобрать" },
+  pending:   { tone: "neutral", label: "Ожидает" },
+};
+
 export function InvoiceTable({ invoices }: InvoiceTableProps) {
   return (
     <div className="overflow-x-auto">
-      <Table className="min-w-[960px] table-fixed">
+      <Table className="min-w-[860px] table-fixed">
         <colgroup>
-          <col className="w-[7rem]" />
+          <col className="w-[5rem]" />
           <col className="w-[6.5rem]" />
-          <col className="w-[12rem]" />
+          <col className="w-[13rem]" />
           <col />
-          <col className="w-[8rem]" />
-          <col className="w-[4.5rem]" />
-          <col className="w-[3rem]" />
+          <col className="w-[9.5rem]" />
+          <col className="w-[7.5rem]" />
+          <col className="w-[3.5rem]" />
         </colgroup>
         <TableHeader>
           <TableRow>
@@ -39,32 +53,24 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
             <TableHead>Поставщик</TableHead>
             <TableHead>Позиции</TableHead>
             <TableHead className="text-right">Сумма</TableHead>
-            <TableHead>ИИ</TableHead>
+            <TableHead>Статус</TableHead>
             <TableHead></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {invoices.map((inv) => {
             const total = inv.items.reduce((s, it) => s + it.amount, 0);
+            const stage = getStage(inv);
+            const { tone, label } = STAGE_CONFIG[stage];
+            const confidencePct =
+              inv.ai_confidence !== null && inv.ai_confidence !== undefined
+                ? `ИИ: ${Math.round(inv.ai_confidence * 100)}%`
+                : null;
+            const tooltip = [label, confidencePct].filter(Boolean).join(" · ");
             return (
-              <TableRow
-                key={inv.id}
-                className={cn(
-                  "hover:bg-surface-hover",
-                  inv.has_issues && "bg-warning-soft"
-                )}
-              >
-                <TableCell className="font-medium">
-                  <div className="flex items-center gap-1.5">
-                    {inv.has_issues && (
-                      <AlertTriangle
-                        size={14}
-                        className="shrink-0 text-warning"
-                        aria-label="Требует проверки"
-                      />
-                    )}
-                    <span className="truncate">{inv.number}</span>
-                  </div>
+              <TableRow key={inv.id} className="hover:bg-surface-hover">
+                <TableCell className={`font-medium overflow-hidden border-l-2 ${stage === "review" ? "border-danger" : "border-transparent"}`}>
+                  <span className="break-all">{inv.number}</span>
                 </TableCell>
                 <TableCell className="text-fg-secondary tabular-nums">
                   {formatDate(inv.date)}
@@ -98,9 +104,11 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                   <MoneyCell value={total} />
                 </TableCell>
                 <TableCell>
-                  <ConfidenceBadge value={inv.ai_confidence} />
+                  <span title={tooltip}>
+                    <StatusPill tone={tone} label={label} dot />
+                  </span>
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell>
                   <Link to={`/documents/${inv.document_id}`}>
                     <Button variant="ghost" size="sm" aria-label="Редактировать">
                       <FileEdit size={14} />
@@ -115,3 +123,5 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
     </div>
   );
 }
+
+

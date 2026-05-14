@@ -31,6 +31,8 @@ export interface InvoiceRow {
   vat_rate: number;
   ai_confidence: number | null;
   has_issues: boolean;
+  verified: boolean;
+  verified_at: ISODateTime | null;
   items: InvoiceItem[];
 }
 

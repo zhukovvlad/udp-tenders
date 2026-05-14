@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, CheckCircle2, XCircle } from "lucide-react";
 
 import { PageHeader } from "@/components/ui-domain/PageHeader";
 import { Surface } from "@/components/ui-domain/Surface";
@@ -21,6 +21,8 @@ import {
   useUpdateInvoice,
   useReparseDocument,
   useDeleteDocument,
+  useVerifyInvoice,
+  useUnverifyInvoice,
 } from "@/services/queries";
 import { invoicesApi } from "@/services/api/invoices";
 import { formatDate } from "@/lib/format";
@@ -37,6 +39,8 @@ export default function Review() {
   const update = useUpdateInvoice();
   const reparse = useReparseDocument();
   const remove = useDeleteDocument();
+  const verify = useVerifyInvoice();
+  const unverify = useUnverifyInvoice();
 
   const [tab, setTab] = useState<TabKey>("items");
   // Local edits keyed by invoice id — auto-discarded when invoice changes
@@ -101,6 +105,9 @@ export default function Review() {
         actions={
           <>
             <ConfidenceBadge value={inv.ai_confidence} />
+            {inv.verified && (
+              <StatusPill tone="success" label="Проверено" dot />
+            )}
             <StatusPill
               tone={inv.has_issues ? "warning" : "success"}
               label={inv.has_issues ? "требует проверки" : "готово"}
@@ -187,6 +194,31 @@ export default function Review() {
             >
               Удалить
             </Button>
+            {serverInv && (
+              inv.verified ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  leftIcon={<XCircle size={14} />}
+                  disabled={unverify.isPending}
+                  loading={unverify.isPending}
+                  onClick={() => unverify.mutate(serverInv.id)}
+                >
+                  Снять подтверждение
+                </Button>
+              ) : (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<CheckCircle2 size={14} />}
+                  disabled={verify.isPending}
+                  loading={verify.isPending}
+                  onClick={() => verify.mutate(serverInv.id)}
+                >
+                  Подтвердить
+                </Button>
+              )
+            )}
             <Button
               variant="secondary"
               disabled={!dirty || update.isPending}

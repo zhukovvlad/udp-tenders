@@ -32,6 +32,8 @@ export const sampleDocument = {
       vat_rate: 20,
       ai_confidence: 0.92,
       has_issues: false,
+      verified: false,
+      verified_at: null,
       items: [
         {
           id: 1000,
