@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 
 interface ReviewItemsTableProps {
   items: InvoiceItem[];
-  onChange: (items: InvoiceItem[]) => void;
+  onChange?: (items: InvoiceItem[]) => void;
   vatRate?: number;
 }
 
@@ -45,6 +45,7 @@ export function ReviewItemsTable({ items, onChange, vatRate }: ReviewItemsTableP
   const classes = useMaterialClasses();
 
   const update = (idx: number, patch: Partial<InvoiceItem>) => {
+    if (!onChange) return;
     onChange(
       items.map((it, i) => {
         if (i !== idx) return it;
@@ -63,6 +64,7 @@ export function ReviewItemsTable({ items, onChange, vatRate }: ReviewItemsTableP
 
   const withVat = (it: InvoiceItem) => it.amount + (it.vat_amount ?? 0);
   const remove = (idx: number) => {
+    if (!onChange) return;
     onChange(items.filter((_, i) => i !== idx));
   };
 
@@ -76,6 +78,7 @@ export function ReviewItemsTable({ items, onChange, vatRate }: ReviewItemsTableP
   }
 
   return (
+    <fieldset disabled={!onChange} className="contents">
     <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
       {/* Header */}
       <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_9rem_5rem_3.5rem_6rem_7rem_7rem_2.25rem] gap-2 border-b border-border-subtle bg-surface-sunken px-3 py-2 text-2xs uppercase tracking-wider text-fg-tertiary">
@@ -285,5 +288,6 @@ export function ReviewItemsTable({ items, onChange, vatRate }: ReviewItemsTableP
         <div></div>
       </div>
     </div>
+    </fieldset>
   );
 }

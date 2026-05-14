@@ -85,7 +85,8 @@ export default function Review() {
   const doc = docQ.data;
   const inv = draft;
   const threshold = settingsQ.data?.confidence_threshold ?? 0.7;
-  const hasProblems = inv.has_issues || (inv.ai_confidence ?? 0) < threshold;
+  const hasProblems = !inv.verified && (inv.has_issues || (inv.ai_confidence ?? 0) < threshold);
+  const locked = serverInv?.verified ?? false;
 
   const tabs: Array<{ value: TabKey; label: string }> = [
     { value: "header", label: "Шапка" },
@@ -128,14 +129,14 @@ export default function Review() {
             <Surface>
               <ReviewHeader
                 invoice={inv}
-                onChange={(patch) => setOverrides({ invId: inv.id, data: { ...inv, ...patch } })}
+                onChange={locked ? undefined : (patch) => setOverrides({ invId: inv.id, data: { ...inv, ...patch } })}
               />
             </Surface>
           )}
           {tab === "items" && (
             <ReviewItemsTable
               items={inv.items}
-              onChange={(items) => setOverrides({ invId: inv.id, data: { ...inv, items } })}
+              onChange={locked ? undefined : (items) => setOverrides({ invId: inv.id, data: { ...inv, items } })}
               vatRate={inv.vat_rate}
             />
           )}

@@ -119,28 +119,22 @@ describe("ReviewPage", () => {
     });
   });
 
-  it("Снять подтверждение button is disabled when there are unsaved changes (dirty)", async () => {
-    // Start with a verified invoice
+  it("fields are locked and save is disabled when invoice is verified", async () => {
     setHandlerVerified(100, true);
 
     const user = userEvent.setup();
     renderWithProviders(<Review />);
 
-    // Confirm the unverify button is initially enabled
-    const unverifyBtn = await screen.findByRole("button", { name: /Снять подтверждение/i });
-    expect(unverifyBtn).not.toBeDisabled();
-
-    // Switch to header tab and make an edit
     const headerTab = await screen.findByRole("button", { name: /Шапка/i });
     await user.click(headerTab);
 
-    const numberInput = await screen.findByDisplayValue("СФ-101");
-    await user.clear(numberInput);
-    await user.type(numberInput, "СФ-999");
-
+    // All header inputs should be disabled (locked by fieldset disabled)
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Снять подтверждение/i })).toBeDisabled();
+      expect(screen.getByDisplayValue("СФ-101")).toBeDisabled();
     });
+
+    // Save button remains disabled because no edits are possible
+    expect(screen.getByRole("button", { name: /Сохранить/i })).toBeDisabled();
   });
 
   it("shows confidence issue on Проблемы tab when threshold is above ai_confidence", async () => {
