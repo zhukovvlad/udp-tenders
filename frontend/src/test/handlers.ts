@@ -4,6 +4,7 @@ import {
   sampleMaterialClass,
   sampleDocument,
   sampleDashboardSummary,
+  sampleDashboardInvoices,
   sampleReferencePrice,
 } from "./fixtures";
 
@@ -34,9 +35,15 @@ export const handlers = [
   http.delete("/api/invoices/documents/:id", () =>
     HttpResponse.json({ message: "Удалено" })
   ),
+  http.post("/api/invoices/:id/verify", () =>
+    HttpResponse.json({ message: "Проверено", invoice_id: 100, verified_at: "2026-05-14T12:00:00" })
+  ),
+  http.post("/api/invoices/:id/unverify", () =>
+    HttpResponse.json({ message: "Отметка снята", invoice_id: 100 })
+  ),
 
   http.get("/api/dashboard/summary", () => HttpResponse.json(sampleDashboardSummary)),
-  http.get("/api/dashboard/invoices", () => HttpResponse.json([])),
+  http.get("/api/dashboard/invoices", () => HttpResponse.json(sampleDashboardInvoices)),
   http.get("/api/dashboard/calculations", () => HttpResponse.json([])),
   http.post("/api/dashboard/calculate", () =>
     HttpResponse.json({ message: "Рассчитано классов: 1", results: [] })

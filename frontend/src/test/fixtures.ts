@@ -73,3 +73,61 @@ export const sampleReferencePrice = {
   period_end: "2026-12-31",
   source: "Договорённость",
 };
+
+const _baseItem = {
+  id: 1,
+  raw_name: "Бетон В25",
+  item_type: "material" as const,
+  material_class: { id: 1, name: "В25" },
+  material_class_id: 1,
+  quantity: 5.0,
+  unit: "м3",
+  unit_price: 8000.0,
+  amount: 40000.0,
+  vat_amount: 6666.67,
+};
+
+export const sampleDashboardInvoices = [
+  // Подтверждён
+  {
+    id: 201,
+    document_id: 10,
+    number: "СФ-CONFIRMED",
+    date: "2026-03-01",
+    supplier_name: "Поставщик А",
+    vat_rate: 20,
+    ai_confidence: 0.92,
+    has_issues: false,
+    verified: true,
+    verified_at: "2026-03-02T10:00:00",
+    items: [_baseItem],
+  },
+  // Разобрать (низкая уверенность)
+  {
+    id: 202,
+    document_id: 11,
+    number: "СФ-REVIEW",
+    date: "2026-03-05",
+    supplier_name: "Поставщик Б",
+    vat_rate: 20,
+    ai_confidence: 0.65,
+    has_issues: false,
+    verified: false,
+    verified_at: null,
+    items: [_baseItem],
+  },
+  // Ожидает
+  {
+    id: 203,
+    document_id: 12,
+    number: "СФ-PENDING",
+    date: "2026-03-10",
+    supplier_name: "Поставщик В",
+    vat_rate: 20,
+    ai_confidence: 0.88,
+    has_issues: false,
+    verified: false,
+    verified_at: null,
+    items: [_baseItem],
+  },
+];

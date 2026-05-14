@@ -5,7 +5,7 @@ import { http, HttpResponse } from "msw";
 import { Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "@/test/utils";
 import { server } from "@/test/server";
-import { sampleReferencePrice } from "@/test/fixtures";
+import { sampleReferencePrice, sampleDashboardInvoices } from "@/test/fixtures";
 import ProjectPage from "./ProjectPage";
 
 // MSW handlers provide:
@@ -169,5 +169,25 @@ describe("ProjectPage", () => {
     await user.click(confirmBtn);
 
     await waitFor(() => expect(deleteCalled).toBe(true));
+  });
+
+  it("shows all three invoice stages in the invoices tab", async () => {
+    server.use(
+      http.get("/api/dashboard/invoices", () =>
+        HttpResponse.json(sampleDashboardInvoices)
+      )
+    );
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-invoices");
+    await user.click(tab);
+
+    await waitFor(() => {
+      expect(screen.getByText("Подтверждён")).toBeInTheDocument();
+      expect(screen.getByText("Разобрать")).toBeInTheDocument();
+      expect(screen.getByText("Ожидает")).toBeInTheDocument();
+    });
   });
 });

@@ -28,9 +28,7 @@ function getStage(inv: InvoiceRow): Stage {
   if (inv.verified) return "confirmed";
   if (
     inv.has_issues ||
-    (inv.ai_confidence !== null &&
-      inv.ai_confidence !== undefined &&
-      inv.ai_confidence < REVIEW_CONFIDENCE_THRESHOLD)
+    (inv.ai_confidence ?? 0) < REVIEW_CONFIDENCE_THRESHOLD
   )
     return "review";
   return "pending";
@@ -79,7 +77,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
             return (
               <TableRow key={inv.id} className="hover:bg-surface-hover">
                 <TableCell className={`font-medium overflow-hidden border-l-2 ${stage === "review" ? "border-danger" : "border-transparent"}`}>
-                  <span className="break-all">{inv.number}</span>
+                  <span className="block whitespace-normal break-all" title={inv.number}>{inv.number}</span>
                 </TableCell>
                 <TableCell className="text-fg-secondary tabular-nums">
                   {formatDate(inv.date)}
@@ -113,7 +111,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                   <MoneyCell value={total} />
                 </TableCell>
                 <TableCell>
-                  <span title={tooltip}>
+                  <span title={tooltip} aria-label={tooltip}>
                     <StatusPill tone={tone} label={label} dot />
                   </span>
                 </TableCell>

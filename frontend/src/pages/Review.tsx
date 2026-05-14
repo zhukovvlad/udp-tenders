@@ -200,9 +200,10 @@ export default function Review() {
                   variant="ghost"
                   size="sm"
                   leftIcon={<XCircle size={14} />}
-                  disabled={unverify.isPending}
+                  disabled={unverify.isPending || dirty}
                   loading={unverify.isPending}
                   onClick={() => unverify.mutate(serverInv.id)}
+                  title={dirty ? "Сначала сохраните изменения" : undefined}
                 >
                   Снять подтверждение
                 </Button>
