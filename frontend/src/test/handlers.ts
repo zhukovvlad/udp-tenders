@@ -70,7 +70,18 @@ export const handlers = [
   }),
 
   http.get("/api/dashboard/summary", () => HttpResponse.json(sampleDashboardSummary)),
-  http.get("/api/dashboard/invoices", () => HttpResponse.json(sampleDashboardInvoices)),
+  http.get("/api/dashboard/invoices", () =>
+    HttpResponse.json(
+      sampleDashboardInvoices.map((inv) => {
+        const verified = invoiceVerifiedById.get(String(inv.id)) ?? inv.verified;
+        return {
+          ...inv,
+          verified,
+          verified_at: verified ? (inv.verified_at ?? "2026-05-14T12:00:00") : null,
+        };
+      })
+    )
+  ),
   http.get("/api/dashboard/calculations", () => HttpResponse.json([])),
   http.post("/api/dashboard/calculate", () =>
     HttpResponse.json({ message: "Рассчитано классов: 1", results: [] })

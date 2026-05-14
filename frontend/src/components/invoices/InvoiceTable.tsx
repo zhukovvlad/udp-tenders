@@ -80,9 +80,9 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                 : null;
             const verifiedPart =
               stage === "confirmed" && inv.verified_at
-                ? `Подтверждён ${formatDate(inv.verified_at)}`
+                ? `Проверен ${formatDate(inv.verified_at)}`
                 : null;
-            const tooltip = [label, verifiedPart ?? confidencePct].filter(Boolean).join(" · ");
+            const tooltip = [label, confidencePct, verifiedPart].filter(Boolean).join(" · ");
             return (
               <TableRow key={inv.id} className="hover:bg-surface-hover">
                 <TableCell className={`font-medium overflow-hidden border-l-2 ${stage === "review" ? "border-danger" : "border-transparent"}`}>
