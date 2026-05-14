@@ -111,8 +111,17 @@ def test_dashboard_invoices_reflects_unverification(client, factories):
     doc = factories.DocumentFactory.create(project=project)
     invoice = factories.InvoiceFactory.create(document=doc)
 
-    client.post(f"/api/invoices/{invoice.id}/verify")
-    client.post(f"/api/invoices/{invoice.id}/unverify")
+    verify_response = client.post(f"/api/invoices/{invoice.id}/verify")
+    assert verify_response.status_code == 200
+
+    response = client.get(f"/api/dashboard/invoices?project_id={project.id}")
+    assert response.status_code == 200
+    inv = response.json()[0]
+    assert inv["verified"] is True
+    assert inv["verified_at"] is not None
+
+    unverify_response = client.post(f"/api/invoices/{invoice.id}/unverify")
+    assert unverify_response.status_code == 200
 
     response = client.get(f"/api/dashboard/invoices?project_id={project.id}")
     assert response.status_code == 200

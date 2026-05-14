@@ -1,8 +1,8 @@
 import api from "@/lib/api";
 
 export interface AppSettings {
-  ai_provider: "openrouter" | "anthropic" | "off";
-  ai_model: string;
+  api_key_set: boolean;
+  model: string;
   confidence_threshold: number;
   // расширяется по мере добавления полей в backend
   [key: string]: unknown;
