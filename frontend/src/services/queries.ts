@@ -188,7 +188,7 @@ export function useVerifyInvoice() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["document"] });
       qc.invalidateQueries({ queryKey: ["dashboard", "invoices"] });
-      toast.success("СФ подтверждена");
+      toast.success("СФ подтверждён");
     },
   });
 }

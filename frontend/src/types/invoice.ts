@@ -10,9 +10,11 @@ export interface InvoiceItem {
   raw_name: string;
   item_type: "material" | "delivery" | "other";
   /**
-   * Класс материала, привязанный к позиции. Бэкенд сериализует как {id, name} либо null.
+   * Класс материала, привязанный к позиции.
+   * Детальный endpoint (документ) возвращает {id, name};
+   * dashboard endpoint возвращает строку с именем класса либо null.
    */
-  material_class: MaterialClassRef | null;
+  material_class: MaterialClassRef | string | null;
   material_class_id?: ID | null;
   quantity: number;
   unit: string;

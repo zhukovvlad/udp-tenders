@@ -16,6 +16,7 @@ import type { InvoiceRow } from "@/types/invoice";
 
 interface InvoiceTableProps {
   invoices: InvoiceRow[];
+  confidenceThreshold?: number;
 }
 
 type Stage = "confirmed" | "review" | "pending";
@@ -24,11 +25,13 @@ type Stage = "confirmed" | "review" | "pending";
 // Совпадает с порогом в ConfidenceBadge / ReviewIssues.
 const REVIEW_CONFIDENCE_THRESHOLD = 0.70;
 
-function getStage(inv: InvoiceRow): Stage {
+function getStage(inv: InvoiceRow, threshold: number): Stage {
   if (inv.verified) return "confirmed";
   if (
     inv.has_issues ||
-    (inv.ai_confidence ?? 0) < REVIEW_CONFIDENCE_THRESHOLD
+    !inv.supplier_name ||
+    !inv.number ||
+    (inv.ai_confidence ?? 0) < threshold
   )
     return "review";
   return "pending";
@@ -40,7 +43,7 @@ const STAGE_CONFIG: Record<Stage, { tone: "success" | "danger" | "neutral"; labe
   pending:   { tone: "neutral", label: "Ожидает" },
 };
 
-export function InvoiceTable({ invoices }: InvoiceTableProps) {
+export function InvoiceTable({ invoices, confidenceThreshold = REVIEW_CONFIDENCE_THRESHOLD }: InvoiceTableProps) {
   return (
     <div className="overflow-x-auto">
       <Table className="min-w-[860px] table-fixed">
@@ -67,7 +70,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
         <TableBody>
           {invoices.map((inv) => {
             const total = inv.items.reduce((s, it) => s + it.amount, 0);
-            const stage = getStage(inv);
+            const stage = getStage(inv, confidenceThreshold);
             const { tone, label } = STAGE_CONFIG[stage];
             const confidencePct =
               inv.ai_confidence !== null && inv.ai_confidence !== undefined
@@ -94,7 +97,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                         title={it.raw_name ?? ""}
                       >
                         <span className="text-fg-tertiary">
-                          {it.material_class?.name || it.item_type}
+                          {(typeof it.material_class === "string" ? it.material_class : it.material_class?.name) || it.item_type}
                         </span>
                         {" · "}
                         {it.raw_name}
@@ -130,5 +133,3 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
     </div>
   );
 }
-
-

@@ -75,16 +75,13 @@ export const sampleReferencePrice = {
 };
 
 const _baseItem = {
-  id: 1,
   raw_name: "Бетон В25",
   item_type: "material" as const,
-  material_class: { id: 1, name: "В25" },
-  material_class_id: 1,
+  material_class: "В25",
   quantity: 5.0,
   unit: "м3",
   unit_price: 8000.0,
   amount: 40000.0,
-  vat_amount: 6666.67,
 };
 
 export const sampleDashboardInvoices = [
