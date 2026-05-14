@@ -211,9 +211,10 @@ export default function Review() {
                   variant="secondary"
                   size="sm"
                   leftIcon={<CheckCircle2 size={14} />}
-                  disabled={verify.isPending}
+                  disabled={verify.isPending || dirty}
                   loading={verify.isPending}
                   onClick={() => verify.mutate(serverInv.id)}
+                  title={dirty ? "Сначала сохраните изменения" : undefined}
                 >
                   Подтвердить
                 </Button>

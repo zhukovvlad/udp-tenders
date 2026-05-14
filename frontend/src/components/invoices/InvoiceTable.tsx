@@ -20,9 +20,18 @@ interface InvoiceTableProps {
 
 type Stage = "confirmed" | "review" | "pending";
 
+// Граница уверенности ИИ, ниже которой счёт требует ручного разбора.
+// Совпадает с порогом в ConfidenceBadge / ReviewIssues.
+const REVIEW_CONFIDENCE_THRESHOLD = 0.70;
+
 function getStage(inv: InvoiceRow): Stage {
   if (inv.verified) return "confirmed";
-  if (inv.has_issues || (inv.ai_confidence !== null && inv.ai_confidence !== undefined && inv.ai_confidence < 0.75))
+  if (
+    inv.has_issues ||
+    (inv.ai_confidence !== null &&
+      inv.ai_confidence !== undefined &&
+      inv.ai_confidence < REVIEW_CONFIDENCE_THRESHOLD)
+  )
     return "review";
   return "pending";
 }

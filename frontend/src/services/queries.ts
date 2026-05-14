@@ -187,7 +187,7 @@ export function useVerifyInvoice() {
     mutationFn: (invoiceId: ID) => invoicesApi.verifyInvoice(invoiceId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["document"] });
-      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["dashboard", "invoices"] });
       toast.success("СФ подтверждена");
     },
   });
@@ -199,7 +199,7 @@ export function useUnverifyInvoice() {
     mutationFn: (invoiceId: ID) => invoicesApi.unverifyInvoice(invoiceId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["document"] });
-      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["dashboard", "invoices"] });
       toast.success("Подтверждение снято");
     },
   });
