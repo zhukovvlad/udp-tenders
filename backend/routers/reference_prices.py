@@ -41,6 +41,33 @@ def create_reference_price(data: ReferencePriceCreate, db: Session = Depends(get
     rp = crud.create_reference_price(db, data.project_id, data.material_class_id, data.price, data.period_start, data.period_end, data.source)
     return {"id": rp.id}
 
+class ReferencePriceUpdate(BaseModel):
+    price: float | None = None
+    period_start: date | None = None
+    period_end: date | None = None
+    source: str | None = None
+
+@router.put("/{rp_id}")
+def update_reference_price(rp_id: int, data: ReferencePriceUpdate, db: Session = Depends(get_db)):
+    rp = crud.update_reference_price(
+        db, rp_id,
+        price=data.price,
+        period_start=data.period_start,
+        period_end=data.period_end,
+        source=data.source,
+    )
+    if not rp:
+        raise HTTPException(status_code=404, detail="Эталон не найден")
+    return {
+        "id": rp.id,
+        "project_id": rp.project_id,
+        "material_class_id": rp.material_class_id,
+        "price": rp.price,
+        "period_start": rp.period_start.isoformat(),
+        "period_end": rp.period_end.isoformat(),
+        "source": rp.source,
+    }
+
 @router.delete("/{rp_id}")
 def delete_reference_price(rp_id: int, db: Session = Depends(get_db)):
     rp = crud.delete_reference_price(db, rp_id)

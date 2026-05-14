@@ -2,6 +2,7 @@ import api from "@/lib/api";
 import type {
   ReferencePrice,
   ReferencePriceCreateInput,
+  ReferencePriceUpdateInput,
 } from "@/types/referencePrice";
 import type { ID } from "@/types/common";
 
@@ -17,6 +18,10 @@ export const referencePricesApi = {
   },
   async create(input: ReferencePriceCreateInput): Promise<ReferencePrice> {
     const { data } = await api.post<ReferencePrice>("/reference-prices", input);
+    return data;
+  },
+  async update(id: ID, input: ReferencePriceUpdateInput): Promise<ReferencePrice> {
+    const { data } = await api.put<ReferencePrice>(`/reference-prices/${id}`, input);
     return data;
   },
   async remove(id: ID): Promise<void> {

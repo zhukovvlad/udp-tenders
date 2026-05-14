@@ -59,3 +59,15 @@ export const sampleDashboardSummary = {
   last_invoice_date: "2026-04-15",
   full_deviation_amount: null,
 };
+
+export const sampleReferencePrice = {
+  id: 1,
+  project_id: 1,
+  project_name: "ЖК Радуга",
+  material_class_id: 1,
+  material_class_name: "В25",
+  price: 6010,
+  period_start: "2025-01-01",
+  period_end: "2026-12-31",
+  source: "Договорённость",
+};

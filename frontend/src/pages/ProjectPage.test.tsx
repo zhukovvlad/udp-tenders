@@ -1,10 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "@/test/utils";
 import { server } from "@/test/server";
+import { sampleReferencePrice } from "@/test/fixtures";
 import ProjectPage from "./ProjectPage";
 
 // MSW handlers provide:
@@ -100,5 +101,72 @@ describe("ProjectPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Нет плановых цен")).toBeInTheDocument();
     });
+  });
+
+  it("shows edit and delete buttons when reference prices exist", async () => {
+    server.use(
+      http.get("/api/reference-prices", () =>
+        HttpResponse.json([sampleReferencePrice])
+      )
+    );
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-prices");
+    await user.click(tab);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Редактировать")).toBeInTheDocument();
+      expect(screen.getByLabelText("Удалить")).toBeInTheDocument();
+    });
+  });
+
+  it("opens edit dialog when pencil button is clicked", async () => {
+    server.use(
+      http.get("/api/reference-prices", () =>
+        HttpResponse.json([sampleReferencePrice])
+      )
+    );
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-prices");
+    await user.click(tab);
+
+    const editBtn = await screen.findByLabelText("Редактировать");
+    await user.click(editBtn);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Редактировать плановую цену")
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("calls delete API when delete confirmed", async () => {
+    let deleteCalled = false;
+    server.use(
+      http.get("/api/reference-prices", () =>
+        HttpResponse.json([sampleReferencePrice])
+      ),
+      http.delete("/api/reference-prices/:id", () => {
+        deleteCalled = true;
+        return HttpResponse.json({ message: "Удалено" });
+      })
+    );
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-prices");
+    await user.click(tab);
+
+    const deleteBtn = await screen.findByLabelText("Удалить");
+    await user.click(deleteBtn);
+
+    await waitFor(() => expect(deleteCalled).toBe(true));
+
+    vi.restoreAllMocks();
   });
 });

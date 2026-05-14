@@ -114,6 +114,25 @@ def create_reference_price(db: Session, project_id: int, material_class_id: int,
     return rp
 
 
+def update_reference_price(db: Session, rp_id: int, price: float = None,
+                           period_start: date = None, period_end: date = None,
+                           source: str = None) -> ReferencePrice | None:
+    rp = db.query(ReferencePrice).filter(ReferencePrice.id == rp_id).first()
+    if not rp:
+        return None
+    if price is not None:
+        rp.price = price
+    if period_start is not None:
+        rp.period_start = period_start
+    if period_end is not None:
+        rp.period_end = period_end
+    if source is not None:
+        rp.source = source if source.strip() else None
+    db.commit()
+    db.refresh(rp)
+    return rp
+
+
 def delete_reference_price(db: Session, rp_id: int):
     rp = db.query(ReferencePrice).filter(ReferencePrice.id == rp_id).first()
     if rp:
