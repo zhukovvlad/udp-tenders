@@ -96,7 +96,7 @@ export default function SettingsPage() {
                   <Input
                     value={String(draft.model ?? "")}
                     onChange={(e) => setOverrides({ ...draft, model: e.target.value })}
-                    placeholder="например, anthropic/claude-sonnet-4-5"
+                    placeholder="например, anthropic/claude-sonnet-4.6"
                     className="max-w-md"
                   />
                   <p className="text-xs text-fg-tertiary">

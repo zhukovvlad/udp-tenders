@@ -18,7 +18,8 @@ export function ReviewIssues({ invoice }: ReviewIssuesProps) {
   if (!invoice.number) issues.push("Не указан номер СФ.");
   if (invoice.items.length === 0) issues.push("Нет ни одной позиции.");
   invoice.items.forEach((it, i) => {
-    if (!it.raw_name) issues.push(`Позиция ${i + 1}: пустое наименование.`);
+    if (!it.raw_name?.trim()) issues.push(`Позиция ${i + 1}: пустое наименование.`);
+    if ((it.quantity ?? 0) <= 0) issues.push(`Позиция ${i + 1}: некорректное количество.`);
     if (it.item_type === "material" && !it.material_class) {
       issues.push(`Позиция ${i + 1}: не определён класс материала.`);
     }
