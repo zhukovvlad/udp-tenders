@@ -101,6 +101,26 @@ def test_update_reference_price_clears_source(client, factories):
     assert response.json()["source"] is None
 
 
+def test_update_reference_price_rejects_null_price(client, factories):
+    rp = factories.ReferencePriceFactory.create()
+
+    response = client.patch(
+        f"/api/reference-prices/{rp.id}",
+        json={"price": None},
+    )
+    assert response.status_code == 422
+
+
+def test_update_reference_price_rejects_null_period(client, factories):
+    rp = factories.ReferencePriceFactory.create()
+
+    response = client.patch(
+        f"/api/reference-prices/{rp.id}",
+        json={"period_start": None},
+    )
+    assert response.status_code == 422
+
+
 def test_update_reference_price_response_includes_relations(client, factories):
     rp = factories.ReferencePriceFactory.create(price=5000.0)
 

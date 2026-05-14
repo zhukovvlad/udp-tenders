@@ -1,7 +1,7 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 import crud
@@ -46,6 +46,13 @@ class ReferencePriceUpdate(BaseModel):
     period_start: date | None = None
     period_end: date | None = None
     source: str | None = None
+
+    @field_validator("price", "period_start", "period_end", mode="before")
+    @classmethod
+    def not_null(cls, v, info):
+        if v is None:
+            raise ValueError(f"{info.field_name} не может быть null")
+        return v
 
 @router.patch("/{rp_id}")
 def update_reference_price(rp_id: int, data: ReferencePriceUpdate, db: Session = Depends(get_db)):

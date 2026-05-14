@@ -116,8 +116,8 @@ describe("ProjectPage", () => {
     await user.click(tab);
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Редактировать")).toBeInTheDocument();
-      expect(screen.getByLabelText("Удалить")).toBeInTheDocument();
+      expect(screen.getByTestId(`rp-edit-${sampleReferencePrice.id}`)).toBeInTheDocument();
+      expect(screen.getByTestId(`rp-delete-${sampleReferencePrice.id}`)).toBeInTheDocument();
     });
   });
 
@@ -133,7 +133,7 @@ describe("ProjectPage", () => {
     const tab = await screen.findByTestId("project-tab-prices");
     await user.click(tab);
 
-    const editBtn = await screen.findByLabelText("Редактировать");
+    const editBtn = await screen.findByTestId(`rp-edit-${sampleReferencePrice.id}`);
     await user.click(editBtn);
 
     await waitFor(() => {
@@ -161,7 +161,7 @@ describe("ProjectPage", () => {
     const tab = await screen.findByTestId("project-tab-prices");
     await user.click(tab);
 
-    const deleteBtn = await screen.findByLabelText("Удалить");
+    const deleteBtn = await screen.findByTestId(`rp-delete-${sampleReferencePrice.id}`);
     await user.click(deleteBtn);
 
     // Confirmation dialog appears

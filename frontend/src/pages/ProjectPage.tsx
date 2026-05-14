@@ -249,6 +249,10 @@ export default function ProjectPage() {
         setDeleteDialogOpen(false);
         setDeleteRpId(null);
       },
+      onError: () => {
+        setDeleteDialogOpen(false);
+        setDeleteRpId(null);
+      },
     });
   }
 
@@ -591,6 +595,7 @@ export default function ProjectPage() {
                               size="sm"
                               onClick={() => openEditDialog(rp)}
                               aria-label="Редактировать"
+                              data-testid={`rp-edit-${rp.id}`}
                             >
                               <Pencil size={14} />
                             </Button>
@@ -599,6 +604,7 @@ export default function ProjectPage() {
                               size="sm"
                               onClick={() => openDeleteDialog(rp.id)}
                               aria-label="Удалить"
+                              data-testid={`rp-delete-${rp.id}`}
                             >
                               <Trash2 size={14} />
                             </Button>
