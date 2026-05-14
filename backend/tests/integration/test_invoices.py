@@ -145,3 +145,55 @@ def test_delete_document_removes_from_s3(
     response = client.delete(f"/api/invoices/documents/{doc.id}")
     assert response.status_code == 200
     assert "2026/05/test.pdf" not in in_memory_s3
+
+
+# --- Верификация СФ ---
+
+def test_invoice_unverified_by_default(client, factories):
+    invoice = factories.InvoiceFactory.create()
+    doc = client.get(f"/api/invoices/documents/{invoice.document_id}").json()
+    inv = doc["invoices"][0]
+    assert inv["verified"] is False
+    assert inv["verified_at"] is None
+
+
+def test_verify_invoice(client, factories):
+    invoice = factories.InvoiceFactory.create()
+    response = client.post(f"/api/invoices/{invoice.id}/verify")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["invoice_id"] == invoice.id
+    assert body["verified_at"] is not None
+
+
+def test_verify_invoice_reflected_in_document(client, factories):
+    invoice = factories.InvoiceFactory.create()
+    client.post(f"/api/invoices/{invoice.id}/verify")
+
+    doc = client.get(f"/api/invoices/documents/{invoice.document_id}").json()
+    inv = doc["invoices"][0]
+    assert inv["verified"] is True
+    assert inv["verified_at"] is not None
+
+
+def test_unverify_invoice(client, factories):
+    invoice = factories.InvoiceFactory.create()
+    client.post(f"/api/invoices/{invoice.id}/verify")
+
+    response = client.post(f"/api/invoices/{invoice.id}/unverify")
+    assert response.status_code == 200
+
+    doc = client.get(f"/api/invoices/documents/{invoice.document_id}").json()
+    inv = doc["invoices"][0]
+    assert inv["verified"] is False
+    assert inv["verified_at"] is None
+
+
+def test_verify_nonexistent_invoice_returns_404(client):
+    response = client.post("/api/invoices/9999/verify")
+    assert response.status_code == 404
+
+
+def test_unverify_nonexistent_invoice_returns_404(client):
+    response = client.post("/api/invoices/9999/unverify")
+    assert response.status_code == 404
