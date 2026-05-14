@@ -40,6 +40,7 @@ export interface DashboardInvoiceRow {
   number: string;
   date: ISODate;
   supplier_name: string | null;
+  supplier_inn: string | null;
   vat_rate: number;
   ai_confidence: number | null;
   has_issues: boolean;

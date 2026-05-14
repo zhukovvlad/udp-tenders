@@ -45,7 +45,6 @@ import {
   useUpdateReferencePrice,
   useDeleteReferencePrice,
   useMaterialClasses,
-  useSettings,
 } from "@/services/queries";
 
 import { formatDate, formatMoney, formatNumber, formatPercent } from "@/lib/format";
@@ -113,7 +112,6 @@ export default function ProjectPage() {
     { enabled: hasValidProjectId },
   );
   const materialClassesQ = useMaterialClasses();
-  const settingsQ = useSettings();
 
   // ── mutations ──
   const calculateMut = useCalculate();
@@ -537,7 +535,7 @@ export default function ProjectPage() {
               />
             ) : (
               <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
-                <InvoiceTable invoices={invoices} confidenceThreshold={settingsQ.data?.confidence_threshold} />
+                <InvoiceTable invoices={invoices} />
               </div>
             )}
           </TabsContent>

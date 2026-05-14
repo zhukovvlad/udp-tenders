@@ -54,21 +54,18 @@ describe("ReviewPage", () => {
   });
 
   it("clicking Подтвердить calls POST /api/invoices/100/verify", async () => {
-    let verifyCalled = false;
-    server.use(
-      http.post("/api/invoices/:id/verify", ({ params }) => {
-        if (params.id === "100") verifyCalled = true;
-        return HttpResponse.json({ message: "Проверено", invoice_id: 100, verified_at: "2026-05-14T12:00:00" });
-      })
-    );
-
+    // Используем дефолтный stateful handler: после мутации GET /documents/:id
+    // вернёт verified: true, что подтверждает корректную инвалидацию кэша.
     const user = userEvent.setup();
     renderWithProviders(<Review />);
 
     const btn = await screen.findByRole("button", { name: /Подтвердить/i });
     await user.click(btn);
 
-    await waitFor(() => expect(verifyCalled).toBe(true));
+    // После рефетча UI переключается на «Снять подтверждение».
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Снять подтверждение/i })).toBeInTheDocument();
+    });
   });
 
   it("shows Снять подтверждение button when invoice is verified", async () => {
