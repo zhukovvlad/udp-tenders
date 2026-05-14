@@ -13,7 +13,7 @@ import { qk } from "./queryKeys";
 import type { ID } from "@/types/common";
 import type { ProjectCreateInput, ProjectUpdateInput } from "@/types/project";
 import type { MaterialClassCreateInput } from "@/types/materialClass";
-import type { ReferencePriceCreateInput } from "@/types/referencePrice";
+import type { ReferencePriceCreateInput, ReferencePriceUpdateInput } from "@/types/referencePrice";
 import type { InvoiceUpdateInput } from "@/types/invoice";
 import type { CalculateInput } from "@/types/dashboard";
 import type { AppSettings } from "./api/settings";
@@ -109,6 +109,18 @@ export function useCreateReferencePrice() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
       toast.success("Плановая цена сохранена");
+    },
+  });
+}
+
+export function useUpdateReferencePrice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: ID; input: ReferencePriceUpdateInput }) =>
+      referencePricesApi.update(id, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
+      toast.success("Плановая цена обновлена");
     },
   });
 }

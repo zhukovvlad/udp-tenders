@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Download, Plus } from "lucide-react";
+import { ArrowLeft, Download, Plus, Trash2, Pencil } from "lucide-react";
 
 import { Breadcrumbs } from "@/components/ui-domain/Breadcrumbs";
 import { PageHeader } from "@/components/ui-domain/PageHeader";
@@ -42,11 +42,14 @@ import {
   useCalculate,
   useReferencePrices,
   useCreateReferencePrice,
+  useUpdateReferencePrice,
+  useDeleteReferencePrice,
   useMaterialClasses,
 } from "@/services/queries";
 
 import { formatDate, formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import type { ID } from "@/types/common";
+import type { ReferencePrice } from "@/types/referencePrice";
 import type { DashboardCalculation } from "@/types/dashboard";
 
 // ─────────────────────────────────────────────
@@ -84,6 +87,18 @@ export default function ProjectPage() {
   const [rpEnd, setRpEnd] = useState("");
   const [rpSource, setRpSource] = useState("");
 
+  // ── edit reference price dialog ──
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editRpId, setEditRpId] = useState<number | null>(null);
+  const [editPrice, setEditPrice] = useState("");
+  const [editStart, setEditStart] = useState("");
+  const [editEnd, setEditEnd] = useState("");
+  const [editSource, setEditSource] = useState("");
+
+  // ── delete reference price dialog ──
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteRpId, setDeleteRpId] = useState<number | null>(null);
+
   // ── queries ──
   const projectsQ = useProjects();
   const project = projectsQ.data?.find((p) => p.id === projectId) ?? null;
@@ -101,6 +116,8 @@ export default function ProjectPage() {
   // ── mutations ──
   const calculateMut = useCalculate();
   const createRefPrice = useCreateReferencePrice();
+  const updateRefPrice = useUpdateReferencePrice();
+  const deleteRefPrice = useDeleteReferencePrice();
 
   // ── derived ──
   const calculations = calculationsQ.data ?? [];
@@ -187,6 +204,56 @@ export default function ProjectPage() {
         },
       }
     );
+  }
+
+  function openEditDialog(rp: ReferencePrice) {
+    setEditRpId(rp.id);
+    setEditPrice(String(rp.price));
+    setEditStart(rp.period_start);
+    setEditEnd(rp.period_end);
+    setEditSource(rp.source ?? "");
+    setEditDialogOpen(true);
+  }
+
+  function handleEditReferencePrice() {
+    const parsedPrice = parseFloat(editPrice);
+    if (!editRpId || !Number.isFinite(parsedPrice) || parsedPrice < 0 || !editStart || !editEnd) return;
+    updateRefPrice.mutate(
+      {
+        id: editRpId,
+        input: {
+          price: parsedPrice,
+          period_start: editStart,
+          period_end: editEnd,
+          source: editSource || null,
+        },
+      },
+      {
+        onSuccess: () => {
+          setEditDialogOpen(false);
+          setEditRpId(null);
+        },
+      }
+    );
+  }
+
+  function openDeleteDialog(id: number) {
+    setDeleteRpId(id);
+    setDeleteDialogOpen(true);
+  }
+
+  function handleDeleteReferencePrice() {
+    if (!deleteRpId) return;
+    deleteRefPrice.mutate(deleteRpId, {
+      onSuccess: () => {
+        setDeleteDialogOpen(false);
+        setDeleteRpId(null);
+      },
+      onError: () => {
+        setDeleteDialogOpen(false);
+        setDeleteRpId(null);
+      },
+    });
   }
 
   return (
@@ -500,6 +567,7 @@ export default function ProjectPage() {
                       <th className="px-4 py-2 font-medium text-right">Цена</th>
                       <th className="px-4 py-2 font-medium">Период</th>
                       <th className="px-4 py-2 font-medium">Источник</th>
+                      <th className="px-4 py-2 w-20"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -519,6 +587,28 @@ export default function ProjectPage() {
                         </td>
                         <td className="px-4 py-2 text-fg-secondary">
                           {rp.source ?? "—"}
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="flex items-center gap-1 justify-end">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEditDialog(rp)}
+                              aria-label="Редактировать"
+                              data-testid={`rp-edit-${rp.id}`}
+                            >
+                              <Pencil size={14} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openDeleteDialog(rp.id)}
+                              aria-label="Удалить"
+                              data-testid={`rp-delete-${rp.id}`}
+                            >
+                              <Trash2 size={14} />
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -619,9 +709,87 @@ export default function ProjectPage() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
-          </TabsContent>
 
-          {/* ────────── TAB: Поставщики ────────── */}
+            {/* Edit reference price dialog */}
+            <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Редактировать плановую цену</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3 py-2">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-fg-secondary">Цена (₽)</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      placeholder="0.00"
+                      value={editPrice}
+                      onChange={(e) => setEditPrice(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-fg-secondary">Период с</label>
+                      <Input
+                        type="date"
+                        value={editStart}
+                        onChange={(e) => setEditStart(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-fg-secondary">Период по</label>
+                      <Input
+                        type="date"
+                        value={editEnd}
+                        onChange={(e) => setEditEnd(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-fg-secondary">Источник</label>
+                    <Input
+                      placeholder="Необязательно"
+                      value={editSource}
+                      onChange={(e) => setEditSource(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button
+                    onClick={handleEditReferencePrice}
+                    loading={updateRefPrice.isPending}
+                    disabled={!Number.isFinite(parseFloat(editPrice)) || parseFloat(editPrice) < 0 || !editStart || !editEnd}
+                  >
+                    Сохранить
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+            {/* Delete confirmation dialog */}
+            <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Удалить плановую цену?</DialogTitle>
+                </DialogHeader>
+                <p className="text-sm text-fg-secondary py-2">
+                  Это действие нельзя отменить.
+                </p>
+                <DialogFooter>
+                  <Button variant="ghost" onClick={() => setDeleteDialogOpen(false)}>
+                    Отмена
+                  </Button>
+                  <Button
+                    data-testid="rp-delete-confirm"
+                    onClick={handleDeleteReferencePrice}
+                    loading={deleteRefPrice.isPending}
+                  >
+                    Удалить
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </TabsContent>
           <TabsContent value="suppliers" className="mt-6">
             {invoicesQ.isLoading ? (
               <Skeleton className="h-32" />

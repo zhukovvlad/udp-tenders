@@ -5,6 +5,7 @@ import { http, HttpResponse } from "msw";
 import { Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "@/test/utils";
 import { server } from "@/test/server";
+import { sampleReferencePrice } from "@/test/fixtures";
 import ProjectPage from "./ProjectPage";
 
 // MSW handlers provide:
@@ -100,5 +101,73 @@ describe("ProjectPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Нет плановых цен")).toBeInTheDocument();
     });
+  });
+
+  it("shows edit and delete buttons when reference prices exist", async () => {
+    server.use(
+      http.get("/api/reference-prices", () =>
+        HttpResponse.json([sampleReferencePrice])
+      )
+    );
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-prices");
+    await user.click(tab);
+
+    await waitFor(() => {
+      expect(screen.getByTestId(`rp-edit-${sampleReferencePrice.id}`)).toBeInTheDocument();
+      expect(screen.getByTestId(`rp-delete-${sampleReferencePrice.id}`)).toBeInTheDocument();
+    });
+  });
+
+  it("opens edit dialog when pencil button is clicked", async () => {
+    server.use(
+      http.get("/api/reference-prices", () =>
+        HttpResponse.json([sampleReferencePrice])
+      )
+    );
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-prices");
+    await user.click(tab);
+
+    const editBtn = await screen.findByTestId(`rp-edit-${sampleReferencePrice.id}`);
+    await user.click(editBtn);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Редактировать плановую цену")
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("calls delete API when delete confirmed via dialog", async () => {
+    let deleteCalled = false;
+    server.use(
+      http.get("/api/reference-prices", () =>
+        HttpResponse.json([sampleReferencePrice])
+      ),
+      http.delete("/api/reference-prices/:id", () => {
+        deleteCalled = true;
+        return HttpResponse.json({ message: "Удалено" });
+      })
+    );
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-prices");
+    await user.click(tab);
+
+    const deleteBtn = await screen.findByTestId(`rp-delete-${sampleReferencePrice.id}`);
+    await user.click(deleteBtn);
+
+    // Confirmation dialog appears
+    const confirmBtn = await screen.findByTestId("rp-delete-confirm");
+    await user.click(confirmBtn);
+
+    await waitFor(() => expect(deleteCalled).toBe(true));
   });
 });

@@ -20,3 +20,10 @@ export interface ReferencePriceCreateInput {
   period_end: ISODate;
   source?: string | null;
 }
+
+export interface ReferencePriceUpdateInput {
+  price?: number;
+  period_start?: ISODate;
+  period_end?: ISODate;
+  source?: string | null;
+}
