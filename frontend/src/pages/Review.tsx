@@ -90,8 +90,8 @@ export default function Review() {
     !inv.verified &&
     (inv.has_issues ||
       (inv.ai_confidence ?? 0) < threshold ||
-      !inv.supplier_name ||
-      !inv.number ||
+      !inv.supplier_name?.trim() ||
+      !inv.number?.trim() ||
       inv.items.length === 0 ||
       inv.items.some((it) => !it.raw_name?.trim() || it.quantity <= 0));
   const locked = serverInv?.verified ?? false;

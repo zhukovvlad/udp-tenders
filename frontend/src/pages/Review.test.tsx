@@ -125,16 +125,23 @@ describe("ReviewPage", () => {
     const user = userEvent.setup();
     renderWithProviders(<Review />);
 
+    // Header inputs locked
     const headerTab = await screen.findByRole("button", { name: /Шапка/i });
     await user.click(headerTab);
-
-    // All header inputs should be disabled (locked by fieldset disabled)
     await waitFor(() => {
       expect(screen.getByDisplayValue("СФ-101")).toBeDisabled();
     });
-
-    // Save button remains disabled because no edits are possible
     expect(screen.getByRole("button", { name: /Сохранить/i })).toBeDisabled();
+
+    // Items tab: all item inputs locked (raw_name input)
+    const itemsTab = screen.getByRole("button", { name: /Позиции/i });
+    await user.click(itemsTab);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue(/Бетон В25/)).toBeDisabled();
+    });
+
+    // Reparse button disabled
+    expect(screen.getByRole("button", { name: /Переразобрать/i })).toBeDisabled();
   });
 
   it("shows confidence issue on Проблемы tab when threshold is above ai_confidence", async () => {
