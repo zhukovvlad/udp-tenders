@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { renderWithProviders } from "@/test/utils";
 import { server } from "@/test/server";
+import { setHandlerVerified } from "@/test/handlers";
 import { sampleDocument } from "@/test/fixtures";
 import Review from "./Review";
 
@@ -69,12 +70,11 @@ describe("ReviewPage", () => {
   });
 
   it("shows Снять подтверждение button when invoice is verified", async () => {
-    const verifiedDoc = {
-      ...sampleDocument,
-      invoices: [{ ...sampleDocument.invoices[0], verified: true, verified_at: "2026-05-14T12:00:00" }],
-    };
     server.use(
-      http.get("/api/invoices/documents/:id", () => HttpResponse.json(verifiedDoc))
+      http.get("/api/invoices/documents/:id", () => HttpResponse.json({
+        ...sampleDocument,
+        invoices: [{ ...sampleDocument.invoices[0], verified: true, verified_at: "2026-05-14T12:00:00" }],
+      }))
     );
 
     renderWithProviders(<Review />);
@@ -84,18 +84,9 @@ describe("ReviewPage", () => {
   });
 
   it("clicking Снять подтверждение calls POST /api/invoices/100/unverify", async () => {
-    let unverifyCalled = false;
-    const verifiedDoc = {
-      ...sampleDocument,
-      invoices: [{ ...sampleDocument.invoices[0], verified: true, verified_at: "2026-05-14T12:00:00" }],
-    };
-    server.use(
-      http.get("/api/invoices/documents/:id", () => HttpResponse.json(verifiedDoc)),
-      http.post("/api/invoices/:id/unverify", ({ params }) => {
-        if (params.id === "100") unverifyCalled = true;
-        return HttpResponse.json({ message: "Отметка снята", invoice_id: 100 });
-      })
-    );
+    // Устанавливаем stateful состояние verified=true. После мутации unverify
+    // дефолтный handler сбрасывает флаг и рефетч возвращает verified=false.
+    setHandlerVerified(100, true);
 
     const user = userEvent.setup();
     renderWithProviders(<Review />);
@@ -103,7 +94,10 @@ describe("ReviewPage", () => {
     const btn = await screen.findByRole("button", { name: /Снять подтверждение/i });
     await user.click(btn);
 
-    await waitFor(() => expect(unverifyCalled).toBe(true));
+    // После рефетча UI переключается на «Подтвердить».
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Подтвердить/i })).toBeInTheDocument();
+    });
   });
 
   it("Подтвердить button is disabled when there are unsaved changes (dirty)", async () => {

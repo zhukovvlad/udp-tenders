@@ -9,10 +9,15 @@ import {
 } from "./fixtures";
 
 // Mutable state so that verify/unverify mutations are reflected in subsequent GETs.
-let _invoiceVerified = false;
+// Keyed by invoice id (as string) so each invoice's state is independent.
+const invoiceVerifiedById = new Map<string, boolean>();
 
 export function resetHandlerState() {
-  _invoiceVerified = false;
+  invoiceVerifiedById.clear();
+}
+
+export function setHandlerVerified(invoiceId: number | string, v: boolean) {
+  invoiceVerifiedById.set(String(invoiceId), v);
 }
 
 export const handlers = [
@@ -32,32 +37,36 @@ export const handlers = [
   http.delete("/api/reference-prices/:id", () => HttpResponse.json({ message: "Удалено" })),
 
   http.get("/api/invoices/documents", () => HttpResponse.json([sampleDocument])),
-  http.get("/api/invoices/documents/:id", () =>
-    HttpResponse.json({
+  http.get("/api/invoices/documents/:id", () => {
+    const inv0 = sampleDocument.invoices[0];
+    const verified = invoiceVerifiedById.get(String(inv0.id)) ?? false;
+    return HttpResponse.json({
       ...sampleDocument,
       invoices: [{
-        ...sampleDocument.invoices[0],
-        verified: _invoiceVerified,
-        verified_at: _invoiceVerified ? "2026-05-14T12:00:00" : null,
+        ...inv0,
+        verified,
+        verified_at: verified ? "2026-05-14T12:00:00" : null,
       }],
-    })
-  ),
+    });
+  }),
   http.post("/api/invoices/upload", () => HttpResponse.json(sampleDocument)),
   http.post("/api/invoices/documents/:id/reparse", () => HttpResponse.json(sampleDocument)),
-  http.put("/api/invoices/:id", () =>
-    HttpResponse.json({ message: "Сохранено", invoice_id: 100 })
+  http.put("/api/invoices/:id", ({ params }) =>
+    HttpResponse.json({ message: "Сохранено", invoice_id: Number(params.id) })
   ),
   http.delete("/api/invoices/:id", () => HttpResponse.json({ message: "СФ удалена" })),
   http.delete("/api/invoices/documents/:id", () =>
     HttpResponse.json({ message: "Удалено" })
   ),
-  http.post("/api/invoices/:id/verify", () => {
-    _invoiceVerified = true;
-    return HttpResponse.json({ message: "Проверено", invoice_id: 100, verified_at: "2026-05-14T12:00:00" });
+  http.post("/api/invoices/:id/verify", ({ params }) => {
+    const id = String(params.id);
+    invoiceVerifiedById.set(id, true);
+    return HttpResponse.json({ message: "Проверено", invoice_id: Number(id), verified_at: "2026-05-14T12:00:00" });
   }),
-  http.post("/api/invoices/:id/unverify", () => {
-    _invoiceVerified = false;
-    return HttpResponse.json({ message: "Отметка снята", invoice_id: 100 });
+  http.post("/api/invoices/:id/unverify", ({ params }) => {
+    const id = String(params.id);
+    invoiceVerifiedById.set(id, false);
+    return HttpResponse.json({ message: "Отметка снята", invoice_id: Number(id) });
   }),
 
   http.get("/api/dashboard/summary", () => HttpResponse.json(sampleDashboardSummary)),

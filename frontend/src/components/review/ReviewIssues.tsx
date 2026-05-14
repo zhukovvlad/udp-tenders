@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { useSettings } from "@/services/queries";
 import type { InvoiceRow } from "@/types/invoice";
 
 interface ReviewIssuesProps {
@@ -6,8 +7,10 @@ interface ReviewIssuesProps {
 }
 
 export function ReviewIssues({ invoice }: ReviewIssuesProps) {
+  const settingsQ = useSettings();
+  const threshold = settingsQ.data?.confidence_threshold ?? 0.7;
   const issues: string[] = [];
-  if ((invoice.ai_confidence ?? 0) < 0.7) {
+  if ((invoice.ai_confidence ?? 0) < threshold) {
     issues.push("Низкая уверенность ИИ — проверьте все поля вручную.");
   }
   if (!invoice.supplier_name) issues.push("Не указан поставщик.");

@@ -12,17 +12,16 @@ import { Button } from "@/components/ui-domain/Button";
 import { StatusPill } from "@/components/ui-domain/StatusPill";
 import { MoneyCell } from "@/components/ui-domain/MoneyCell";
 import { formatDate } from "@/lib/format";
+import { useSettings } from "@/services/queries";
 import type { DashboardInvoiceRow } from "@/types/invoice";
 
 interface InvoiceTableProps {
   invoices: DashboardInvoiceRow[];
-  confidenceThreshold?: number;
 }
 
 type Stage = "confirmed" | "review" | "pending";
 
-// Граница уверенности ИИ, ниже которой счёт требует ручного разбора.
-// Совпадает с порогом в ConfidenceBadge / ReviewIssues.
+// Фоллбэк-порог, если настройка ещё не загрузилась.
 const REVIEW_CONFIDENCE_THRESHOLD = 0.70;
 
 function getStage(inv: DashboardInvoiceRow, threshold: number): Stage {
@@ -31,6 +30,7 @@ function getStage(inv: DashboardInvoiceRow, threshold: number): Stage {
     inv.has_issues ||
     !inv.supplier_name ||
     !inv.number ||
+    inv.items.some((it) => it.item_type === "material" && !it.material_class) ||
     (inv.ai_confidence ?? 0) < threshold
   )
     return "review";
@@ -43,7 +43,9 @@ const STAGE_CONFIG: Record<Stage, { tone: "success" | "danger" | "neutral"; labe
   pending:   { tone: "neutral", label: "Ожидает" },
 };
 
-export function InvoiceTable({ invoices, confidenceThreshold = REVIEW_CONFIDENCE_THRESHOLD }: InvoiceTableProps) {
+export function InvoiceTable({ invoices }: InvoiceTableProps) {
+  const settingsQ = useSettings();
+  const threshold = settingsQ.data?.confidence_threshold ?? REVIEW_CONFIDENCE_THRESHOLD;
   return (
     <div className="overflow-x-auto">
       <Table className="min-w-[860px] table-fixed">
@@ -70,17 +72,21 @@ export function InvoiceTable({ invoices, confidenceThreshold = REVIEW_CONFIDENCE
         <TableBody>
           {invoices.map((inv) => {
             const total = inv.items.reduce((s, it) => s + it.amount, 0);
-            const stage = getStage(inv, confidenceThreshold);
+            const stage = getStage(inv, threshold);
             const { tone, label } = STAGE_CONFIG[stage];
             const confidencePct =
               inv.ai_confidence !== null && inv.ai_confidence !== undefined
                 ? `ИИ: ${Math.round(inv.ai_confidence * 100)}%`
                 : null;
-            const tooltip = [label, confidencePct].filter(Boolean).join(" · ");
+            const verifiedPart =
+              stage === "confirmed" && inv.verified_at
+                ? `Подтверждён ${formatDate(inv.verified_at)}`
+                : null;
+            const tooltip = [label, verifiedPart ?? confidencePct].filter(Boolean).join(" · ");
             return (
               <TableRow key={inv.id} className="hover:bg-surface-hover">
                 <TableCell className={`font-medium overflow-hidden border-l-2 ${stage === "review" ? "border-danger" : "border-transparent"}`}>
-                  <span className="block whitespace-normal break-all" title={inv.number}>{inv.number}</span>
+                  <span className="block whitespace-normal break-all" title={inv.number || "—"}>{inv.number || "—"}</span>
                 </TableCell>
                 <TableCell className="text-fg-secondary tabular-nums">
                   {formatDate(inv.date)}

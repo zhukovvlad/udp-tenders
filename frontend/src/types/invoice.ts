@@ -33,7 +33,7 @@ export interface DashboardInvoiceItem {
   amount: number;
 }
 
-/** Счёт в формате dashboard/invoices (без supplier_inn, позиции без id/vat_amount). */
+/** Счёт в формате dashboard/invoices (позиции без id/vat_amount). */
 export interface DashboardInvoiceRow {
   id: ID;
   document_id: ID;
