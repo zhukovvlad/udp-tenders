@@ -116,7 +116,7 @@ export default function SettingsPage() {
                     onChange={(e) =>
                       setOverrides({
                         ...draft,
-                        confidence_threshold: Number(e.target.value) || 0,
+                        confidence_threshold: Math.min(1, Math.max(0, Number(e.target.value) || 0)),
                       })
                     }
                     className="w-[160px]"

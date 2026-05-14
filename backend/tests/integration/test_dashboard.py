@@ -88,8 +88,10 @@ def test_dashboard_invoices_includes_verified_fields(client, factories):
     inv = response.json()[0]
     assert "verified" in inv
     assert "verified_at" in inv
+    assert "supplier_inn" in inv
     assert inv["verified"] is False
     assert inv["verified_at"] is None
+    assert inv["supplier_inn"] == "0000000000"
 
 
 def test_dashboard_invoices_reflects_verification(client, factories):

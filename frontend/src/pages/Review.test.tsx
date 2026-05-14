@@ -118,4 +118,47 @@ describe("ReviewPage", () => {
       expect(verifyBtn).toBeDisabled();
     });
   });
+
+  it("Снять подтверждение button is disabled when there are unsaved changes (dirty)", async () => {
+    // Start with a verified invoice
+    setHandlerVerified(100, true);
+
+    const user = userEvent.setup();
+    renderWithProviders(<Review />);
+
+    // Confirm the unverify button is initially enabled
+    const unverifyBtn = await screen.findByRole("button", { name: /Снять подтверждение/i });
+    expect(unverifyBtn).not.toBeDisabled();
+
+    // Switch to header tab and make an edit
+    const headerTab = await screen.findByRole("button", { name: /Шапка/i });
+    await user.click(headerTab);
+
+    const numberInput = await screen.findByDisplayValue("СФ-101");
+    await user.clear(numberInput);
+    await user.type(numberInput, "СФ-999");
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Снять подтверждение/i })).toBeDisabled();
+    });
+  });
+
+  it("shows confidence issue on Проблемы tab when threshold is above ai_confidence", async () => {
+    // sampleDocument.invoices[0].ai_confidence = 0.92; setting threshold to 0.95 triggers the issue
+    server.use(
+      http.get("/api/settings", () =>
+        HttpResponse.json({ api_key_set: true, model: "m", confidence_threshold: 0.95 })
+      )
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<Review />);
+
+    const issuesTab = await screen.findByRole("button", { name: /Проблемы/i });
+    await user.click(issuesTab);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Низкая уверенность/i)).toBeInTheDocument();
+    });
+  });
 });

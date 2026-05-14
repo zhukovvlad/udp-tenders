@@ -190,4 +190,28 @@ describe("ProjectPage", () => {
       expect(screen.getByText("Ожидает")).toBeInTheDocument();
     });
   });
+
+  it("uses configured confidence threshold for stage classification", async () => {
+    // At threshold 0.9, invoice id=203 (ai_confidence=0.88) becomes
+    // "Разобрать" instead of "Ожидает", so two invoices show "Разобрать".
+    server.use(
+      http.get("/api/settings", () =>
+        HttpResponse.json({ api_key_set: true, model: "m", confidence_threshold: 0.9 })
+      ),
+      http.get("/api/dashboard/invoices", () =>
+        HttpResponse.json(sampleDashboardInvoices)
+      )
+    );
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-invoices");
+    await user.click(tab);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Разобрать")).toHaveLength(2);
+      expect(screen.queryByText("Ожидает")).not.toBeInTheDocument();
+    });
+  });
 });
