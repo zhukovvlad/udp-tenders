@@ -11,6 +11,7 @@ from models import (
     PriceCalculation,
     Project,
     ReferencePrice,
+    Supplier,
 )
 
 # Sentinel: field was not provided in the update payload (differs from explicit None)
@@ -180,12 +181,22 @@ def delete_document(db: Session, doc_id: int):
 def create_invoice(db: Session, document_id: int, number: str, invoice_date: date,
                    supplier_name: str, supplier_inn: str, vat_rate: float,
                    confidence: float, items: list[dict]) -> Invoice:
+    # Нормализуем: пустые строки → None
+    _inn = supplier_inn.strip() if supplier_inn else None
+    _name = supplier_name.strip() if supplier_name else None
+
+    supplier_id = None
+    if _name:
+        supplier = get_or_create_supplier(db, name=_name, inn=_inn or None)
+        supplier_id = supplier.id
+
     invoice = Invoice(
         document_id=document_id,
+        supplier_id=supplier_id,
         number=number,
         date=invoice_date,
-        supplier_name=supplier_name,
-        supplier_inn=supplier_inn,
+        supplier_name=_name,
+        supplier_inn=_inn,
         vat_rate=vat_rate,
         ai_confidence=confidence,
     )
@@ -426,3 +437,94 @@ def recalculate_prices(db: Session, project_id: int, material_class_id: int,
         db.commit()
         db.refresh(calc)
     return calc
+
+
+# --- Suppliers ---
+
+def get_suppliers(db: Session) -> list[tuple]:
+    """Возвращает список (Supplier, invoice_count)."""
+    results = (
+        db.query(Supplier, func.count(Invoice.id).label("invoice_count"))
+        .outerjoin(Invoice, Invoice.supplier_id == Supplier.id)
+        .group_by(Supplier.id)
+        .order_by(Supplier.name)
+        .all()
+    )
+    return results
+
+
+def get_supplier(db: Session, supplier_id: int) -> Supplier | None:
+    return db.query(Supplier).filter(Supplier.id == supplier_id).first()
+
+
+def get_supplier_invoices(db: Session, supplier_id: int) -> list[Invoice]:
+    return (
+        db.query(Invoice)
+        .filter(Invoice.supplier_id == supplier_id)
+        .order_by(Invoice.date.desc())
+        .all()
+    )
+
+
+def get_or_create_supplier(db: Session, name: str, inn: str | None) -> Supplier:
+    """Найти или создать поставщика. По ИНН если задан, иначе по имени (без ИНН)."""
+    if inn:
+        supplier = db.query(Supplier).filter(Supplier.inn == inn).first()
+        if not supplier:
+            supplier = Supplier(name=name, inn=inn)
+            db.add(supplier)
+            db.commit()
+            db.refresh(supplier)
+    else:
+        supplier = db.query(Supplier).filter(Supplier.inn.is_(None), Supplier.name == name).first()
+        if not supplier:
+            supplier = Supplier(name=name, inn=None)
+            db.add(supplier)
+            db.commit()
+            db.refresh(supplier)
+    return supplier
+
+
+def merge_suppliers(db: Session, source_id: int, target_id: int) -> Supplier | None:
+    """Перенести все инвойсы от source к target и удалить source."""
+    source = db.query(Supplier).filter(Supplier.id == source_id).first()
+    target = db.query(Supplier).filter(Supplier.id == target_id).first()
+    if not source or not target:
+        return None
+    db.query(Invoice).filter(Invoice.supplier_id == source_id).update(
+        {Invoice.supplier_id: target_id}, synchronize_session=False
+    )
+    db.delete(source)
+    db.commit()
+    db.refresh(target)
+    return target
+
+
+def _find_duplicate_pairs(
+    suppliers: list, threshold: float = 85.0
+) -> list[tuple]:
+    """Чистая функция: сравнивает имена поставщиков по fuzzy ratio и возвращает
+    список кортежей (supplier_a, supplier_b, score) для пар с score >= threshold.
+
+    Принимает любые объекты с атрибутами .id и .name — удобно для тестирования
+    без базы данных.
+    """
+    from rapidfuzz import fuzz
+
+    pairs = []
+    for i in range(len(suppliers)):
+        for j in range(i + 1, len(suppliers)):
+            a = suppliers[i]
+            b = suppliers[j]
+            score = fuzz.WRatio(a.name, b.name)
+            if score >= threshold:
+                pairs.append((a, b, float(score)))
+    return pairs
+
+
+def get_supplier_duplicates(db: Session, threshold: float = 85.0) -> list[tuple]:
+    """Вернуть пары поставщиков без ИНН с похожими названиями (fuzzy match)."""
+    suppliers_no_inn = (
+        db.query(Supplier).filter(Supplier.inn.is_(None)).order_by(Supplier.name).all()
+    )
+    return _find_duplicate_pairs(suppliers_no_inn, threshold)

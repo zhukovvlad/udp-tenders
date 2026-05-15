@@ -62,11 +62,23 @@ class Document(Base):
     invoices = relationship("Invoice", back_populates="document", cascade="all, delete-orphan")
 
 
+class Supplier(Base):
+    __tablename__ = "suppliers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    inn = Column(String, nullable=True, unique=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
+
+    invoices = relationship("Invoice", back_populates="supplier")
+
+
 class Invoice(Base):
     __tablename__ = "invoices"
 
     id = Column(Integer, primary_key=True, index=True)
     document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
     number = Column(String, nullable=False)
     date = Column(Date, nullable=False)
     supplier_name = Column(String)
@@ -78,6 +90,7 @@ class Invoice(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
 
     document = relationship("Document", back_populates="invoices")
+    supplier = relationship("Supplier", back_populates="invoices")
     items = relationship("InvoiceItem", back_populates="invoice", cascade="all, delete-orphan")
 
 
