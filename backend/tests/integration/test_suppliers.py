@@ -116,8 +116,9 @@ def test_duplicates_empty(client):
 
 
 def test_duplicates_finds_similar_names(client, factories):
+    # Одна и та же компания — слова переставлены местами (типичный случай для РФ)
     factories.SupplierFactory.create(name="ООО СтройБетон", inn=None)
-    factories.SupplierFactory.create(name="ООО Строй Бетон", inn=None)
+    factories.SupplierFactory.create(name="СтройБетон ООО", inn=None)
 
     response = client.get("/api/suppliers/duplicates")
     assert response.status_code == 200
@@ -125,7 +126,7 @@ def test_duplicates_finds_similar_names(client, factories):
     assert len(pairs) == 1
     names = {pairs[0]["supplier_a"]["name"], pairs[0]["supplier_b"]["name"]}
     assert "ООО СтройБетон" in names
-    assert "ООО Строй Бетон" in names
+    assert "СтройБетон ООО" in names
     assert pairs[0]["score"] >= 85.0
 
 

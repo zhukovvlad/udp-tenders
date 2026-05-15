@@ -211,7 +211,7 @@ async def upload_pdf(
     file_bytes = await file.read()
     logger.info(f"Upload: получен файл '{file.filename}' (project={project_id}, размер={len(file_bytes)})")
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     object_name = f"{now.year}/{now.month:02d}/{uuid.uuid4().hex}_{file.filename}"
 
     try:

@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime
 
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, aliased
 from rapidfuzz import fuzz
 
 from models import (
@@ -579,9 +579,21 @@ def _find_duplicate_pairs(
     return pairs
 
 
+
 def get_supplier_duplicates(db: Session, threshold: float = 85.0) -> list[tuple]:
-    """Вернуть пары поставщиков без ИНН с похожими названиями (fuzzy match)."""
-    suppliers_no_inn = (
-        db.query(Supplier).filter(Supplier.inn.is_(None)).order_by(Supplier.name).all()
+    """Вернуть пары поставщиков без ИНН с похожими названиями.
+
+    Использует pg_trgm similarity() на стороне БД — работает с GIN-индексом.
+    threshold задаётся в диапазоне 0–100 (как fuzz.WRatio), similarity() внутри 0.0–1.0.
+    """
+    S1 = aliased(Supplier)
+    S2 = aliased(Supplier)
+    rows = (
+        db.query(S1, S2, func.similarity(S1.name, S2.name).label("score"))
+        .filter(S1.id < S2.id)
+        .filter(S1.inn.is_(None), S2.inn.is_(None))
+        .filter(func.similarity(S1.name, S2.name) >= threshold / 100.0)
+        .order_by(func.similarity(S1.name, S2.name).desc())
+        .all()
     )
-    return _find_duplicate_pairs(suppliers_no_inn, threshold)
+    return [(s1, s2, round(float(score) * 100, 1)) for s1, s2, score in rows]
