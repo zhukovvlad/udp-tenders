@@ -17,6 +17,12 @@
   `PriceCalculation` не имеет составного индекса по этим четырём полям,
   по которым идёт DELETE + SELECT в каждом вызове `recalculate_prices`.
 
+- [ ] **SQLAlchemy: синхронный движок вместо async**
+  `database.py` использует `create_engine` + синхронный `Session`. FastAPI запускает синхронные
+  зависимости в threadpool, что добавляет накладные расходы на переключение потоков.
+  **Решение:** перейти на `asyncpg` DSN (`postgresql+asyncpg://`), `AsyncEngine`, `AsyncSession`,
+  заменить `db.query()` на `await db.execute(select(...))` и все endpoint-функции сделать `async def`.
+
 ---
 
 ## Frontend

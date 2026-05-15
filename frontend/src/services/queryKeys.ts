@@ -21,6 +21,7 @@ export const qk = {
     calculations: (projectId: ID) =>
       ["dashboard", "calculations", projectId] as const,
     calculationsAll: ["dashboard", "calculations", "all"] as const,
+    monthly: (projectId: ID) => ["dashboard", "monthly", projectId] as const,
   },
   settings: { current: ["settings"] as const },
 };

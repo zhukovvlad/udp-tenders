@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Download, Plus, Trash2, Pencil } from "lucide-react";
 
@@ -11,6 +11,7 @@ import { KpiCard } from "@/components/ui-domain/KpiCard";
 import { InvoiceTable } from "@/components/invoices/InvoiceTable";
 import { UploadSheet } from "@/components/projects/UploadSheet";
 import { DeviationChart } from "@/components/projects/DeviationChart";
+import { MonthlyTab } from "@/components/projects/MonthlyTab";
 
 import {
   Tabs,
@@ -26,6 +27,14 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Select,
   SelectTrigger,
@@ -48,6 +57,7 @@ import {
 } from "@/services/queries";
 
 import { formatDate, formatMoney, formatNumber, formatPercent } from "@/lib/format";
+import { MONTH_NAMES_RU } from "@/lib/constants";
 import type { ID } from "@/types/common";
 import type { ReferencePrice } from "@/types/referencePrice";
 import type { DashboardCalculation } from "@/types/dashboard";
@@ -78,6 +88,15 @@ export default function ProjectPage() {
 
   // ── active tab ──
   const [activeTab, setActiveTab] = useState("overview");
+
+  // ── invoice month filter (set when navigating from «По месяцам» tab) ──
+  const [invoiceMonthFilter, setInvoiceMonthFilter] = useState<{ year: number; month: number } | null>(null);
+
+  // Reset per-project state when projectId changes (same component instance, different route)
+  useEffect(() => {
+    setInvoiceMonthFilter(null);
+    setActiveTab("overview");
+  }, [projectId]);
 
   // ── reference price dialog ──
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
@@ -126,6 +145,17 @@ export default function ProjectPage() {
   const materialClasses = materialClassesQ.data ?? [];
 
   const hasCalculations = calculations.length > 0;
+
+  const filteredInvoices = useMemo(() => {
+    if (!invoiceMonthFilter) return invoices;
+    return invoices.filter((inv) => {
+      const [yearPart, monthPart] = (inv.date ?? "").split("-");
+      return (
+        Number(yearPart) === invoiceMonthFilter.year &&
+        Number(monthPart) === invoiceMonthFilter.month
+      );
+    });
+  }, [invoices, invoiceMonthFilter]);
 
   // Aggregate suppliers from invoices
   const supplierMap = new Map<string, { displayName: string; count: number }>();
@@ -311,6 +341,7 @@ export default function ProjectPage() {
             <TabsTrigger value="suppliers" data-testid="project-tab-suppliers">
               Поставщики{suppliers.length > 0 ? ` · ${suppliers.length}` : ""}
             </TabsTrigger>
+            <TabsTrigger value="monthly" data-testid="project-tab-monthly">По месяцам</TabsTrigger>
           </TabsList>
 
           {/* ────────── TAB: Обзор ────────── */}
@@ -448,41 +479,40 @@ export default function ProjectPage() {
             {/* Calculations table */}
             {hasCalculations && (
               <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border-subtle text-left text-xs text-fg-tertiary">
-                      <th className="px-4 py-2 font-medium">Класс</th>
-                      <th className="px-4 py-2 font-medium">Период</th>
-                      <th className="px-4 py-2 font-medium text-right">Ср.цена</th>
-                      <th className="px-4 py-2 font-medium text-right">Плановая цена</th>
-                      <th className="px-4 py-2 font-medium text-right">Откл.%</th>
-                      <th className="px-4 py-2 font-medium text-right">Откл.₽</th>
-                      <th className="px-4 py-2 font-medium text-right">Объём</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <Table className="min-w-max">
+                  <TableHeader>
+                    <TableRow className="text-xs text-fg-tertiary hover:bg-transparent">
+                      <TableHead className="font-medium">Класс</TableHead>
+                      <TableHead className="font-medium">Период</TableHead>
+                      <TableHead className="font-medium text-right">Ср.цена</TableHead>
+                      <TableHead className="font-medium text-right">Плановая цена</TableHead>
+                      <TableHead className="font-medium text-right">Откл.%</TableHead>
+                      <TableHead className="font-medium text-right">Откл.₽</TableHead>
+                      <TableHead className="font-medium text-right">Объём</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {calculations.map((c) => (
-                      <tr
+                      <TableRow
                         key={`${c.material_class_name ?? ""}-${c.period_start}-${c.period_end}`}
-                        className="border-b border-border-subtle last:border-0 hover:bg-surface-hover"
                       >
-                        <td className="px-4 py-2 text-fg">
+                        <TableCell className="text-fg">
                           {c.material_class_name}
-                        </td>
-                        <td className="px-4 py-2 text-fg-secondary whitespace-nowrap">
+                        </TableCell>
+                        <TableCell className="text-fg-secondary whitespace-nowrap">
                           {formatDate(c.period_start)} — {formatDate(c.period_end)}
-                        </td>
-                        <td className="px-4 py-2 text-right font-mono text-fg">
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-fg">
                           {formatMoney(c.avg_price)}
-                        </td>
-                        <td className="px-4 py-2 text-right font-mono text-fg-secondary">
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-fg-secondary">
                           {c.reference_price !== null
                             ? formatMoney(c.reference_price)
                             : "—"}
-                        </td>
-                        <td
+                        </TableCell>
+                        <TableCell
                           className={
-                            "px-4 py-2 text-right font-mono " +
+                            "text-right font-mono " +
                             (c.deviation_pct == null
                               ? "text-fg-secondary"
                               : c.deviation_pct > 0
@@ -491,10 +521,10 @@ export default function ProjectPage() {
                           }
                         >
                           {formatPercent(c.deviation_pct, true)}
-                        </td>
-                        <td
+                        </TableCell>
+                        <TableCell
                           className={
-                            "px-4 py-2 text-right font-mono " +
+                            "text-right font-mono " +
                             (c.deviation_amount == null
                               ? "text-fg-secondary"
                               : c.deviation_amount > 0
@@ -505,14 +535,14 @@ export default function ProjectPage() {
                           {c.deviation_amount !== null
                             ? formatMoney(c.deviation_amount)
                             : "—"}
-                        </td>
-                        <td className="px-4 py-2 text-right font-mono text-fg-secondary">
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-fg-secondary">
                           {formatNumber(c.total_qty)}
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             )}
           </TabsContent>
@@ -534,9 +564,26 @@ export default function ProjectPage() {
                 }
               />
             ) : (
-              <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
-                <InvoiceTable invoices={invoices} />
-              </div>
+              <>
+                {invoiceMonthFilter && (
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="text-xs text-fg-secondary">
+                      Фильтр: {MONTH_NAMES_RU[invoiceMonthFilter.month - 1]} {invoiceMonthFilter.year}
+                    </span>
+                    <button
+                      className="text-xs text-fg-tertiary hover:text-fg underline"
+                      onClick={() => setInvoiceMonthFilter(null)}
+                    >
+                      Сбросить
+                    </button>
+                  </div>
+                )}
+                <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
+                  <InvoiceTable
+                    invoices={filteredInvoices}
+                  />
+                </div>
+              </>
             )}
           </TabsContent>
 
@@ -790,6 +837,18 @@ export default function ProjectPage() {
               </DialogContent>
             </Dialog>
           </TabsContent>
+          {/* ────────── TAB: По месяцам ────────── */}
+          <TabsContent value="monthly">
+            <MonthlyTab
+              projectId={projectId}
+              projectName={project.name}
+              onNavigateToMonth={(year, month) => {
+                setInvoiceMonthFilter({ year, month });
+                setActiveTab("invoices");
+              }}
+            />
+          </TabsContent>
+
           <TabsContent value="suppliers" className="mt-6">
             {invoicesQ.isLoading ? (
               <Skeleton className="h-32" />

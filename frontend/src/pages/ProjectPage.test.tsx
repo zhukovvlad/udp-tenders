@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
@@ -40,6 +40,7 @@ describe("ProjectPage", () => {
       expect(screen.getByTestId("project-tab-invoices")).toBeInTheDocument();
       expect(screen.getByTestId("project-tab-prices")).toBeInTheDocument();
       expect(screen.getByTestId("project-tab-suppliers")).toBeInTheDocument();
+      expect(screen.getByTestId("project-tab-monthly")).toBeInTheDocument();
     });
   });
 
@@ -213,5 +214,155 @@ describe("ProjectPage", () => {
       expect(screen.getAllByText("Разобрать")).toHaveLength(2);
       expect(screen.queryByText("Ожидает")).not.toBeInTheDocument();
     });
+  });
+
+  // ── По месяцам tab ──────────────────────────────────────────────────────
+
+  it("renders По месяцам tab and shows month rows", async () => {
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-monthly");
+    await user.click(tab);
+
+    // Январь и Март присутствуют из фикстуры
+    await waitFor(() => {
+      expect(screen.getByText(/Январь 2026/)).toBeInTheDocument();
+      expect(screen.getByText(/Март 2026/)).toBeInTheDocument();
+    });
+  });
+
+  it("shows empty month row (Февраль) between data months", async () => {
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-monthly");
+    await user.click(tab);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Февраль 2026/)).toBeInTheDocument();
+    });
+  });
+
+  it("shows empty state in По месяцам when no invoices", async () => {
+    server.use(
+      http.get("/api/dashboard/monthly-summary", () => HttpResponse.json([]))
+    );
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-monthly");
+    await user.click(tab);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Нет счетов по этому объекту/)).toBeInTheDocument();
+    });
+  });
+
+  it("clicking a month row navigates to Счета tab with filter applied", async () => {
+    server.use(
+      http.get("/api/dashboard/invoices", () =>
+        HttpResponse.json(sampleDashboardInvoices)
+      )
+    );
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-monthly");
+    await user.click(tab);
+
+    // Click the Январь row (non-empty)
+    const janRow = await screen.findByText(/Январь 2026/);
+    await user.click(janRow);
+
+    // Should now be on Счета tab with a month filter badge visible
+    await waitFor(() => {
+      expect(screen.getByText(/Фильтр: Январь 2026/)).toBeInTheDocument();
+    });
+  });
+
+  it("month filter reset button clears filter", async () => {
+    server.use(
+      http.get("/api/dashboard/invoices", () =>
+        HttpResponse.json(sampleDashboardInvoices)
+      )
+    );
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-monthly");
+    await user.click(tab);
+
+    const janRow = await screen.findByText(/Январь 2026/);
+    await user.click(janRow);
+
+    const resetBtn = await screen.findByText("Сбросить");
+    await user.click(resetBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Фильтр:/)).not.toBeInTheDocument();
+    });
+  });
+
+  it("CSV export button triggers download with correct filename and BOM content", async () => {
+    const user = userEvent.setup();
+    renderProject();
+
+    // Navigate to monthly tab before mocking anything (avoids interfering with render)
+    const tab = await screen.findByTestId("project-tab-monthly");
+    await user.click(tab);
+    const exportBtn = await screen.findByRole("button", { name: /Экспорт CSV/i });
+
+    // Set up mocks only after the component has rendered
+    const capturedBlobParts: string[] = [];
+    const anchorClicks: { download: string }[] = [];
+    const origCreateObjectURL = URL.createObjectURL;
+
+    try {
+      URL.createObjectURL = (_blob: Blob) => "blob:fake";
+
+      const realBlob = globalThis.Blob;
+      const capturedBlobPartsRef = capturedBlobParts;
+      class CsvCapturingBlob extends realBlob {
+        constructor(parts?: BlobPart[], opts?: BlobPropertyBag) {
+          super(parts ?? [], opts);
+          if (opts?.type?.includes("csv") && parts) {
+            parts.forEach((p) => typeof p === "string" && capturedBlobPartsRef.push(p));
+          }
+        }
+      }
+      vi.stubGlobal("Blob", CsvCapturingBlob);
+
+      const origCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+        const el = origCreateElement(tag);
+        if (tag === "a") {
+          vi.spyOn(el as HTMLAnchorElement, "click").mockImplementation(() => {
+            anchorClicks.push({ download: (el as HTMLAnchorElement).download });
+          });
+        }
+        return el;
+      });
+
+      await user.click(exportBtn);
+
+      // Filename is correct
+      expect(anchorClicks).toHaveLength(1);
+      expect(anchorClicks[0].download).toMatch(/закупки-по-месяцам-.*\.csv/);
+
+      // Blob starts with UTF-8 BOM and contains expected semicolon-delimited CSV structure
+      expect(capturedBlobParts).toHaveLength(1);
+      expect(capturedBlobParts[0].startsWith("\uFEFF")).toBe(true);
+      expect(capturedBlobParts[0]).toContain("Период;Оборот (₽);Объём (м³);Счетов");
+      expect(capturedBlobParts[0]).toContain("Январь 2026");
+      expect(capturedBlobParts[0]).toContain("Март 2026");
+    } finally {
+      URL.createObjectURL = origCreateObjectURL;
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
   });
 });

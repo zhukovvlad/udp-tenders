@@ -2,7 +2,7 @@ from calendar import monthrange
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func
+from sqlalchemy import distinct, extract, func
 from sqlalchemy.orm import Session
 
 import crud
@@ -202,6 +202,43 @@ def auto_calculate(project_id: int, db: Session = Depends(get_db)):
         "period_end": period_end.isoformat(),
         "results": results,
     }
+
+
+@router.get("/monthly-summary")
+def get_monthly_summary(project_id: int, db: Session = Depends(get_db)):
+    """Помесячная агрегация по проекту: оборот (материалы), объём, количество СФ."""
+    year_expr = extract("year", Invoice.date)
+    month_expr = extract("month", Invoice.date)
+
+    rows = (
+        db.query(
+            year_expr.label("year"),
+            month_expr.label("month"),
+            func.sum(InvoiceItem.amount).label("total_amount"),
+            func.sum(InvoiceItem.quantity).label("total_qty"),
+            func.count(distinct(Invoice.id)).label("invoice_count"),
+        )
+        .join(Document, Invoice.document_id == Document.id)
+        .join(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
+        .filter(
+            Document.project_id == project_id,
+            InvoiceItem.item_type == "material",
+        )
+        .group_by(year_expr, month_expr)
+        .order_by(year_expr, month_expr)
+        .all()
+    )
+
+    return [
+        {
+            "year": int(r.year),
+            "month": int(r.month),
+            "total_amount": round(float(r.total_amount or 0), 2),
+            "total_qty": round(float(r.total_qty or 0), 2),
+            "invoice_count": int(r.invoice_count),
+        }
+        for r in rows
+    ]
 
 
 @router.post("/calculate")

@@ -5,6 +5,7 @@ import {
   sampleDocument,
   sampleDashboardSummary,
   sampleDashboardInvoices,
+  sampleMonthlySummary,
   sampleReferencePrice,
 } from "./fixtures";
 
@@ -83,6 +84,7 @@ export const handlers = [
     )
   ),
   http.get("/api/dashboard/calculations", () => HttpResponse.json([])),
+  http.get("/api/dashboard/monthly-summary", () => HttpResponse.json(sampleMonthlySummary)),
   http.post("/api/dashboard/calculate", () =>
     HttpResponse.json({ message: "Рассчитано классов: 1", results: [] })
   ),

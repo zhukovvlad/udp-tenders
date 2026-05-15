@@ -232,6 +232,14 @@ export function useDashboardCalculations(projectId: ID | null) {
   });
 }
 
+export function useDashboardMonthlySummary(projectId: ID | null) {
+  return useQuery({
+    queryKey: projectId ? qk.dashboard.monthly(projectId) : ["dashboard", "monthly", "none"],
+    queryFn: () => dashboardApi.monthlySummary(projectId as ID),
+    enabled: projectId !== null,
+  });
+}
+
 export function useAutoCalculate() {
   const qc = useQueryClient();
   return useMutation({
