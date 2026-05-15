@@ -43,6 +43,12 @@ def create_supplier(data: SupplierCreate, db: Session = Depends(get_db)):
     if not name:
         raise HTTPException(status_code=422, detail="Название поставщика не может быть пустым")
     supplier = crud.get_or_create_supplier(db, name=name, inn=inn)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Не удалось сохранить поставщика")
+    db.refresh(supplier)
     logger.info("Created/found supplier id=%s name=%s inn=%s", supplier.id, supplier.name, supplier.inn)
     return {"id": supplier.id, "name": supplier.name, "inn": supplier.inn}
 

@@ -1,7 +1,9 @@
 from datetime import UTC, date, datetime
 
 from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, joinedload
+from rapidfuzz import fuzz
 
 from models import (
     Document,
@@ -511,13 +513,23 @@ def get_or_create_supplier(db: Session, name: str, inn: str | None) -> Supplier:
     """Найти или создать поставщика. По ИНН если задан, иначе по имени (без ИНН).
 
     Не делает commit — использует flush чтобы оставаться в транзакции вызывающего.
+    Защищён от race condition на уникальный ИНН через INSERT ... ON CONFLICT DO NOTHING.
     """
     if inn:
         supplier = db.query(Supplier).filter(Supplier.inn == inn).first()
         if not supplier:
-            supplier = Supplier(name=name, inn=inn)
-            db.add(supplier)
-            db.flush()
+            stmt = (
+                pg_insert(Supplier)
+                .values(name=name, inn=inn)
+                .on_conflict_do_nothing(index_elements=["inn"])
+                .returning(Supplier.id)
+            )
+            result = db.execute(stmt)
+            row = result.fetchone()
+            if row:
+                db.flush()
+            # Повторный SELECT — либо только что вставленная, либо вставленная конкурентом
+            supplier = db.query(Supplier).filter(Supplier.inn == inn).first()
     else:
         supplier = db.query(Supplier).filter(Supplier.inn.is_(None), Supplier.name == name).first()
         if not supplier:
@@ -556,8 +568,6 @@ def _find_duplicate_pairs(
     Принимает любые объекты с атрибутами .id и .name — удобно для тестирования
     без базы данных.
     """
-    from rapidfuzz import fuzz
-
     pairs = []
     for i in range(len(suppliers)):
         for j in range(i + 1, len(suppliers)):

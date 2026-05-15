@@ -40,20 +40,27 @@ def upgrade() -> None:
     op.execute(
         """
         INSERT INTO suppliers (name, inn, created_at)
-        SELECT ranked.supplier_name, ranked.supplier_inn, (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
-        FROM (
+        WITH counts AS (
             SELECT supplier_inn,
                    supplier_name,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY supplier_inn
-                       ORDER BY COUNT(*) DESC, supplier_name
-                   ) AS rn
+                   COUNT(*) AS cnt
             FROM invoices
             WHERE supplier_inn IS NOT NULL AND supplier_inn != ''
               AND supplier_name IS NOT NULL AND supplier_name != ''
             GROUP BY supplier_inn, supplier_name
-        ) ranked
-        WHERE ranked.rn = 1
+        ),
+        ranked AS (
+            SELECT supplier_inn,
+                   supplier_name,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY supplier_inn
+                       ORDER BY cnt DESC, supplier_name
+                   ) AS rn
+            FROM counts
+        )
+        SELECT supplier_name, supplier_inn, (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+        FROM ranked
+        WHERE rn = 1
         """
     )
 

@@ -175,6 +175,10 @@ def test_create_supplier(client):
     assert body["name"] == "ООО Новый"
     assert body["inn"] == "1230001230"
     assert isinstance(body["id"], int)
+    # Проверяем что запись действительно сохранилась в БД (не только flush без commit)
+    get_response = client.get(f"/api/suppliers/{body['id']}")
+    assert get_response.status_code == 200
+    assert get_response.json()["name"] == "ООО Новый"
 
 
 def test_create_supplier_no_inn(client):
