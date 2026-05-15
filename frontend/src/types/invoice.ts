@@ -21,6 +21,34 @@ export interface InvoiceItem {
   vat_amount?: number | null;
 }
 
+/** Позиция счёта в сокращённом виде, как возвращает /dashboard/invoices. */
+export interface DashboardInvoiceItem {
+  raw_name: string | null;
+  item_type: "material" | "delivery" | "other";
+  /** Имя класса материала или null — бэкенд сериализует как строку. */
+  material_class: string | null;
+  quantity: number;
+  unit: string | null;
+  unit_price: number;
+  amount: number;
+}
+
+/** Счёт в формате dashboard/invoices (позиции без id/vat_amount). */
+export interface DashboardInvoiceRow {
+  id: ID;
+  document_id: ID;
+  number: string;
+  date: ISODate;
+  supplier_name: string | null;
+  supplier_inn: string | null;
+  vat_rate: number;
+  ai_confidence: number | null;
+  has_issues: boolean;
+  verified: boolean;
+  verified_at: ISODateTime | null;
+  items: DashboardInvoiceItem[];
+}
+
 export interface InvoiceRow {
   id: ID;
   document_id: ID;
@@ -31,6 +59,8 @@ export interface InvoiceRow {
   vat_rate: number;
   ai_confidence: number | null;
   has_issues: boolean;
+  verified: boolean;
+  verified_at: ISODateTime | null;
   items: InvoiceItem[];
 }
 

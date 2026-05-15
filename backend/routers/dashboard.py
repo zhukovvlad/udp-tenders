@@ -86,9 +86,12 @@ def list_project_invoices(project_id: int, db: Session = Depends(get_db)):
             "number": inv.number,
             "date": inv.date.isoformat(),
             "supplier_name": inv.supplier_name,
+            "supplier_inn": inv.supplier_inn,
             "vat_rate": inv.vat_rate,
             "ai_confidence": inv.ai_confidence,
             "has_issues": _has_issues(inv),
+            "verified": inv.verified,
+            "verified_at": inv.verified_at.isoformat() if inv.verified_at else None,
             "items": [
                 {
                     "raw_name": item.raw_name,

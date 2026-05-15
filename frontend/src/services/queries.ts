@@ -181,6 +181,30 @@ export function useDeleteDocument() {
   });
 }
 
+export function useVerifyInvoice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (invoiceId: ID) => invoicesApi.verifyInvoice(invoiceId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["document"] });
+      qc.invalidateQueries({ queryKey: ["dashboard", "invoices"] });
+      toast.success("СФ подтверждён");
+    },
+  });
+}
+
+export function useUnverifyInvoice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (invoiceId: ID) => invoicesApi.unverifyInvoice(invoiceId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["document"] });
+      qc.invalidateQueries({ queryKey: ["dashboard", "invoices"] });
+      toast.success("Подтверждение снято");
+    },
+  });
+}
+
 // ========== Dashboard ==========
 export function useDashboardSummary(projectId: ID | null) {
   return useQuery({

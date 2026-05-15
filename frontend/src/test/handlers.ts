@@ -4,8 +4,21 @@ import {
   sampleMaterialClass,
   sampleDocument,
   sampleDashboardSummary,
+  sampleDashboardInvoices,
   sampleReferencePrice,
 } from "./fixtures";
+
+// Mutable state so that verify/unverify mutations are reflected in subsequent GETs.
+// Keyed by invoice id (as string) so each invoice's state is independent.
+const invoiceVerifiedById = new Map<string, boolean>();
+
+export function resetHandlerState() {
+  invoiceVerifiedById.clear();
+}
+
+export function setHandlerVerified(invoiceId: number | string, v: boolean) {
+  invoiceVerifiedById.set(String(invoiceId), v);
+}
 
 export const handlers = [
   http.get("/api/health", () => HttpResponse.json({ status: "ok" })),
@@ -24,19 +37,51 @@ export const handlers = [
   http.delete("/api/reference-prices/:id", () => HttpResponse.json({ message: "Удалено" })),
 
   http.get("/api/invoices/documents", () => HttpResponse.json([sampleDocument])),
-  http.get("/api/invoices/documents/:id", () => HttpResponse.json(sampleDocument)),
+  http.get("/api/invoices/documents/:id", () => {
+    const inv0 = sampleDocument.invoices[0];
+    const verified = invoiceVerifiedById.get(String(inv0.id)) ?? false;
+    return HttpResponse.json({
+      ...sampleDocument,
+      invoices: [{
+        ...inv0,
+        verified,
+        verified_at: verified ? "2026-05-14T12:00:00" : null,
+      }],
+    });
+  }),
   http.post("/api/invoices/upload", () => HttpResponse.json(sampleDocument)),
   http.post("/api/invoices/documents/:id/reparse", () => HttpResponse.json(sampleDocument)),
-  http.put("/api/invoices/:id", () =>
-    HttpResponse.json({ message: "Сохранено", invoice_id: 100 })
+  http.put("/api/invoices/:id", ({ params }) =>
+    HttpResponse.json({ message: "Сохранено", invoice_id: Number(params.id) })
   ),
   http.delete("/api/invoices/:id", () => HttpResponse.json({ message: "СФ удалена" })),
   http.delete("/api/invoices/documents/:id", () =>
     HttpResponse.json({ message: "Удалено" })
   ),
+  http.post("/api/invoices/:id/verify", ({ params }) => {
+    const id = String(params.id);
+    invoiceVerifiedById.set(id, true);
+    return HttpResponse.json({ message: "Проверено", invoice_id: Number(id), verified_at: "2026-05-14T12:00:00" });
+  }),
+  http.post("/api/invoices/:id/unverify", ({ params }) => {
+    const id = String(params.id);
+    invoiceVerifiedById.set(id, false);
+    return HttpResponse.json({ message: "Отметка снята", invoice_id: Number(id) });
+  }),
 
   http.get("/api/dashboard/summary", () => HttpResponse.json(sampleDashboardSummary)),
-  http.get("/api/dashboard/invoices", () => HttpResponse.json([])),
+  http.get("/api/dashboard/invoices", () =>
+    HttpResponse.json(
+      sampleDashboardInvoices.map((inv) => {
+        const verified = invoiceVerifiedById.get(String(inv.id)) ?? inv.verified;
+        return {
+          ...inv,
+          verified,
+          verified_at: verified ? (inv.verified_at ?? "2026-05-14T12:00:00") : null,
+        };
+      })
+    )
+  ),
   http.get("/api/dashboard/calculations", () => HttpResponse.json([])),
   http.post("/api/dashboard/calculate", () =>
     HttpResponse.json({ message: "Рассчитано классов: 1", results: [] })

@@ -32,6 +32,8 @@ export const sampleDocument = {
       vat_rate: 20,
       ai_confidence: 0.92,
       has_issues: false,
+      verified: false,
+      verified_at: null,
       items: [
         {
           id: 1000,
@@ -71,3 +73,61 @@ export const sampleReferencePrice = {
   period_end: "2026-12-31",
   source: "Договорённость",
 };
+
+const _baseItem = {
+  raw_name: "Бетон В25",
+  item_type: "material" as const,
+  material_class: "В25",
+  quantity: 5.0,
+  unit: "м3",
+  unit_price: 8000.0,
+  amount: 40000.0,
+};
+
+export const sampleDashboardInvoices = [
+  // Подтверждён
+  {
+    id: 201,
+    document_id: 10,
+    number: "СФ-CONFIRMED",
+    date: "2026-03-01",
+    supplier_name: "Поставщик А",
+    supplier_inn: null,
+    vat_rate: 20,
+    ai_confidence: 0.92,
+    has_issues: false,
+    verified: true,
+    verified_at: "2026-03-02T10:00:00",
+    items: [_baseItem],
+  },
+  // Разобрать (низкая уверенность)
+  {
+    id: 202,
+    document_id: 11,
+    number: "СФ-REVIEW",
+    date: "2026-03-05",
+    supplier_name: "Поставщик Б",
+    supplier_inn: null,
+    vat_rate: 20,
+    ai_confidence: 0.65,
+    has_issues: false,
+    verified: false,
+    verified_at: null,
+    items: [_baseItem],
+  },
+  // Ожидает
+  {
+    id: 203,
+    document_id: 12,
+    number: "СФ-PENDING",
+    date: "2026-03-10",
+    supplier_name: "Поставщик В",
+    supplier_inn: null,
+    vat_rate: 20,
+    ai_confidence: 0.88,
+    has_issues: false,
+    verified: false,
+    verified_at: null,
+    items: [_baseItem],
+  },
+];

@@ -1,4 +1,6 @@
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { useSettings } from "@/services/queries";
+import { DEFAULT_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import type { InvoiceRow } from "@/types/invoice";
 
 interface ReviewIssuesProps {
@@ -6,18 +8,18 @@ interface ReviewIssuesProps {
 }
 
 export function ReviewIssues({ invoice }: ReviewIssuesProps) {
+  const settingsQ = useSettings();
+  const threshold = settingsQ.data?.confidence_threshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
   const issues: string[] = [];
-  if ((invoice.ai_confidence ?? 0) < 0.7) {
+  if ((invoice.ai_confidence ?? 0) < threshold) {
     issues.push("Низкая уверенность ИИ — проверьте все поля вручную.");
   }
-  if (!invoice.supplier_name) issues.push("Не указан поставщик.");
-  if (!invoice.number) issues.push("Не указан номер СФ.");
+  if (!invoice.supplier_name?.trim()) issues.push("Не указан поставщик.");
+  if (!invoice.number?.trim()) issues.push("Не указан номер СФ.");
   if (invoice.items.length === 0) issues.push("Нет ни одной позиции.");
   invoice.items.forEach((it, i) => {
-    if (!it.raw_name) issues.push(`Позиция ${i + 1}: пустое наименование.`);
-    if (it.item_type === "material" && !it.material_class) {
-      issues.push(`Позиция ${i + 1}: не определён класс материала.`);
-    }
+    if (!it.raw_name?.trim()) issues.push(`Позиция ${i + 1}: пустое наименование.`);
+    if ((it.quantity ?? 0) <= 0) issues.push(`Позиция ${i + 1}: некорректное количество.`);
   });
 
   if (issues.length === 0) {

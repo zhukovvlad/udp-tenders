@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, CheckCircle2, XCircle } from "lucide-react";
 
 import { PageHeader } from "@/components/ui-domain/PageHeader";
 import { Surface } from "@/components/ui-domain/Surface";
@@ -21,9 +21,13 @@ import {
   useUpdateInvoice,
   useReparseDocument,
   useDeleteDocument,
+  useVerifyInvoice,
+  useUnverifyInvoice,
+  useSettings,
 } from "@/services/queries";
 import { invoicesApi } from "@/services/api/invoices";
 import { formatDate } from "@/lib/format";
+import { DEFAULT_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import type { InvoiceRow } from "@/types/invoice";
 
 type TabKey = "header" | "items" | "issues";
@@ -37,6 +41,9 @@ export default function Review() {
   const update = useUpdateInvoice();
   const reparse = useReparseDocument();
   const remove = useDeleteDocument();
+  const verify = useVerifyInvoice();
+  const unverify = useUnverifyInvoice();
+  const settingsQ = useSettings();
 
   const [tab, setTab] = useState<TabKey>("items");
   // Local edits keyed by invoice id — auto-discarded when invoice changes
@@ -78,6 +85,17 @@ export default function Review() {
 
   const doc = docQ.data;
   const inv = draft;
+  const threshold = settingsQ.data?.confidence_threshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
+  const hasProblems =
+    !inv.verified &&
+    (inv.has_issues ||
+      (inv.ai_confidence ?? 0) < threshold ||
+      !inv.supplier_name?.trim() ||
+      !inv.number?.trim() ||
+      inv.items.length === 0 ||
+      inv.items.some((it) => !it.raw_name?.trim() || it.quantity <= 0));
+  const locked = inv.verified;
+  const documentLocked = doc.invoices.some((invoice) => invoice.verified);
 
   const tabs: Array<{ value: TabKey; label: string }> = [
     { value: "header", label: "Шапка" },
@@ -101,9 +119,12 @@ export default function Review() {
         actions={
           <>
             <ConfidenceBadge value={inv.ai_confidence} />
+            {serverInv?.verified && (
+              <StatusPill tone="success" label="Проверено" dot />
+            )}
             <StatusPill
-              tone={inv.has_issues ? "warning" : "success"}
-              label={inv.has_issues ? "требует проверки" : "готово"}
+              tone={hasProblems ? "warning" : "success"}
+              label={hasProblems ? "требует проверки" : "готово"}
               dot
             />
           </>
@@ -117,14 +138,14 @@ export default function Review() {
             <Surface>
               <ReviewHeader
                 invoice={inv}
-                onChange={(patch) => setOverrides({ invId: inv.id, data: { ...inv, ...patch } })}
+                onChange={locked ? undefined : (patch) => setOverrides({ invId: inv.id, data: { ...inv, ...patch } })}
               />
             </Surface>
           )}
           {tab === "items" && (
             <ReviewItemsTable
               items={inv.items}
-              onChange={(items) => setOverrides({ invId: inv.id, data: { ...inv, items } })}
+              onChange={locked ? undefined : (items) => setOverrides({ invId: inv.id, data: { ...inv, items } })}
               vatRate={inv.vat_rate}
             />
           )}
@@ -147,7 +168,8 @@ export default function Review() {
             <button
               type="button"
               onClick={() => reparse.mutate(docId)}
-              disabled={reparse.isPending}
+              disabled={reparse.isPending || verify.isPending || unverify.isPending || documentLocked}
+              title={documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
               className="text-fg-secondary underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
             >
               Переразобрать
@@ -177,6 +199,8 @@ export default function Review() {
             <Button
               variant="danger"
               size="sm"
+              disabled={verify.isPending || unverify.isPending || documentLocked}
+              title={documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
               onClick={() => {
                 if (window.confirm("Удалить документ?")) {
                   remove.mutate(docId, {
@@ -187,6 +211,33 @@ export default function Review() {
             >
               Удалить
             </Button>
+            {serverInv && (
+              serverInv.verified ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  leftIcon={<XCircle size={14} />}
+                  disabled={unverify.isPending || dirty}
+                  loading={unverify.isPending}
+                  onClick={() => unverify.mutate(serverInv.id, { onSuccess: () => setOverrides(null) })}
+                  title={dirty ? "Сначала сохраните изменения" : undefined}
+                >
+                  Снять подтверждение
+                </Button>
+              ) : (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<CheckCircle2 size={14} />}
+                  disabled={verify.isPending || dirty}
+                  loading={verify.isPending}
+                  onClick={() => verify.mutate(serverInv.id, { onSuccess: () => setOverrides(null) })}
+                  title={dirty ? "Сначала сохраните изменения" : undefined}
+                >
+                  Подтвердить
+                </Button>
+              )
+            )}
             <Button
               variant="secondary"
               disabled={!dirty || update.isPending}

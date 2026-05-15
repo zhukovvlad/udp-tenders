@@ -1,15 +1,9 @@
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
+import { DEFAULT_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 import { PageHeader } from "@/components/ui-domain/PageHeader";
 import { Surface } from "@/components/ui-domain/Surface";
@@ -97,38 +91,17 @@ export default function SettingsPage() {
               <div className="mt-4 space-y-4">
                 <div className="space-y-1.5">
                   <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
-                    Провайдер ИИ
-                  </Label>
-                  <Select
-                    value={String(draft.ai_provider ?? "off")}
-                    onValueChange={(v: string | null) =>
-                      setOverrides({ ...draft, ai_provider: (v ?? "off") as AppSettings["ai_provider"] })
-                    }
-                  >
-                    <SelectTrigger className="w-[280px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="openrouter">OpenRouter</SelectItem>
-                      <SelectItem value="anthropic">Anthropic</SelectItem>
-                      <SelectItem value="off">Отключено</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-fg-tertiary">
-                    Сервис, который парсит таблицу позиций из СФ.
-                  </p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
                     Модель
                   </Label>
                   <Input
-                    value={String(draft.ai_model ?? "")}
-                    onChange={(e) => setOverrides({ ...draft, ai_model: e.target.value })}
-                    placeholder="например, anthropic/claude-haiku-4-5"
+                    value={String(draft.model ?? "")}
+                    onChange={(e) => setOverrides({ ...draft, model: e.target.value })}
+                    placeholder="например, anthropic/claude-sonnet-4.6"
                     className="max-w-md"
                   />
+                  <p className="text-xs text-fg-tertiary">
+                    Модель ИИ для парсинга таблицы позиций из СФ.
+                  </p>
                 </div>
 
                 <div className="space-y-1.5">
@@ -140,11 +113,17 @@ export default function SettingsPage() {
                     step="0.05"
                     min="0"
                     max="1"
-                    value={String(draft.parse_threshold ?? 0.7)}
+                    value={String(draft.confidence_threshold ?? DEFAULT_CONFIDENCE_THRESHOLD)}
                     onChange={(e) =>
                       setOverrides({
                         ...draft,
-                        parse_threshold: Number(e.target.value) || 0,
+                        confidence_threshold: Number(e.target.value) || 0,
+                      })
+                    }
+                    onBlur={(e) =>
+                      setOverrides({
+                        ...draft,
+                        confidence_threshold: Math.min(1, Math.max(0, Number(e.target.value) || 0)),
                       })
                     }
                     className="w-[160px]"

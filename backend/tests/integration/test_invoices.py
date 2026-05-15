@@ -197,3 +197,47 @@ def test_verify_nonexistent_invoice_returns_404(client):
 def test_unverify_nonexistent_invoice_returns_404(client):
     response = client.post("/api/invoices/9999/unverify")
     assert response.status_code == 404
+
+
+def test_update_verified_invoice_returns_409(client, factories):
+    invoice = factories.InvoiceFactory.create()
+    client.post(f"/api/invoices/{invoice.id}/verify")
+
+    response = client.put(
+        f"/api/invoices/{invoice.id}",
+        json={
+            "number": "СФ-HACK",
+            "date": "2026-05-01",
+            "supplier_name": "Хакер",
+            "supplier_inn": None,
+            "vat_rate": 20.0,
+            "items": [],
+        },
+    )
+    assert response.status_code == 409
+
+
+def test_reparse_verified_document_returns_409(client, factories):
+    doc = factories.DocumentFactory.create()
+    invoice = factories.InvoiceFactory.create(document=doc)
+    client.post(f"/api/invoices/{invoice.id}/verify")
+
+    response = client.post(f"/api/invoices/documents/{doc.id}/reparse")
+    assert response.status_code == 409
+
+
+def test_delete_verified_invoice_returns_409(client, factories):
+    invoice = factories.InvoiceFactory.create()
+    client.post(f"/api/invoices/{invoice.id}/verify")
+
+    response = client.delete(f"/api/invoices/{invoice.id}")
+    assert response.status_code == 409
+
+
+def test_delete_document_with_verified_invoice_returns_409(client, factories):
+    doc = factories.DocumentFactory.create()
+    invoice = factories.InvoiceFactory.create(document=doc)
+    client.post(f"/api/invoices/{invoice.id}/verify")
+
+    response = client.delete(f"/api/invoices/documents/{doc.id}")
+    assert response.status_code == 409

@@ -1,5 +1,5 @@
 import type { ID, ISODate } from "./common";
-import type { InvoiceRow } from "./invoice";
+import type { DashboardInvoiceRow } from "./invoice";
 
 export interface DashboardSummary {
   doc_count: number;
@@ -37,4 +37,4 @@ export interface CalculateInput {
   period_end: ISODate;
 }
 
-export type DashboardInvoices = InvoiceRow[];
+export type DashboardInvoices = DashboardInvoiceRow[];
