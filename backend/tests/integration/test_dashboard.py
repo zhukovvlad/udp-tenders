@@ -130,3 +130,90 @@ def test_dashboard_invoices_reflects_unverification(client, factories):
     inv = response.json()[0]
     assert inv["verified"] is False
     assert inv["verified_at"] is None
+
+
+# ── /monthly-summary ─────────────────────────────────────────────────────────
+
+def test_monthly_summary_empty(client, factories):
+    project = factories.ProjectFactory.create()
+    response = client.get(f"/api/dashboard/monthly-summary?project_id={project.id}")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_monthly_summary_aggregates_by_month(client, factories):
+    project = factories.ProjectFactory.create()
+    doc = factories.DocumentFactory.create(project=project)
+
+    inv_jan = factories.InvoiceFactory.create(document=doc, date=date(2026, 1, 10))
+    factories.InvoiceItemFactory.create(
+        invoice=inv_jan, item_type="material", quantity=5.0, amount=40000.0,
+    )
+    # delivery не должна попасть в оборот и объём
+    factories.InvoiceItemFactory.create(
+        invoice=inv_jan, item_type="delivery", quantity=1.0, amount=3000.0,
+    )
+
+    inv_mar = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 5))
+    factories.InvoiceItemFactory.create(
+        invoice=inv_mar, item_type="material", quantity=10.0, amount=80000.0,
+    )
+
+    response = client.get(f"/api/dashboard/monthly-summary?project_id={project.id}")
+    assert response.status_code == 200
+
+    rows = {(r["year"], r["month"]): r for r in response.json()}
+    # Должно быть ровно два месяца (февраль восстанавливает фронт, не бэк)
+    assert set(rows.keys()) == {(2026, 1), (2026, 3)}
+
+    jan = rows[(2026, 1)]
+    assert jan["total_amount"] == 40000.0
+    assert jan["total_qty"] == 5.0
+    assert jan["invoice_count"] == 1
+
+    mar = rows[(2026, 3)]
+    assert mar["total_amount"] == 80000.0
+    assert mar["total_qty"] == 10.0
+    assert mar["invoice_count"] == 1
+
+
+def test_monthly_summary_counts_invoices_not_items(client, factories):
+    """Несколько позиций в одном счёте — invoice_count = 1, а не кол-во позиций."""
+    project = factories.ProjectFactory.create()
+    doc = factories.DocumentFactory.create(project=project)
+    inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 2, 1))
+    factories.InvoiceItemFactory.create(invoice=inv, item_type="material", quantity=3.0, amount=24000.0)
+    factories.InvoiceItemFactory.create(invoice=inv, item_type="material", quantity=2.0, amount=16000.0)
+
+    response = client.get(f"/api/dashboard/monthly-summary?project_id={project.id}")
+    assert response.status_code == 200
+    row = response.json()[0]
+    assert row["invoice_count"] == 1
+    assert row["total_qty"] == 5.0
+    assert row["total_amount"] == 40000.0
+
+
+def test_monthly_summary_ordered_chronologically(client, factories):
+    project = factories.ProjectFactory.create()
+    doc = factories.DocumentFactory.create(project=project)
+
+    for m in [3, 1, 2]:
+        inv = factories.InvoiceFactory.create(document=doc, date=date(2026, m, 1))
+        factories.InvoiceItemFactory.create(invoice=inv, item_type="material", quantity=1.0, amount=1000.0)
+
+    response = client.get(f"/api/dashboard/monthly-summary?project_id={project.id}")
+    months = [(r["year"], r["month"]) for r in response.json()]
+    assert months == sorted(months)
+
+
+def test_monthly_summary_isolated_between_projects(client, factories):
+    p1 = factories.ProjectFactory.create()
+    p2 = factories.ProjectFactory.create()
+
+    doc1 = factories.DocumentFactory.create(project=p1)
+    inv1 = factories.InvoiceFactory.create(document=doc1, date=date(2026, 1, 1))
+    factories.InvoiceItemFactory.create(invoice=inv1, item_type="material", quantity=1.0, amount=1000.0)
+
+    response = client.get(f"/api/dashboard/monthly-summary?project_id={p2.id}")
+    assert response.status_code == 200
+    assert response.json() == []

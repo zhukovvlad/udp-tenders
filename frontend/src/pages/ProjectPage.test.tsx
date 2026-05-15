@@ -5,7 +5,7 @@ import { http, HttpResponse } from "msw";
 import { Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "@/test/utils";
 import { server } from "@/test/server";
-import { sampleReferencePrice, sampleDashboardInvoices } from "@/test/fixtures";
+import { sampleReferencePrice, sampleDashboardInvoices, sampleMonthlySummary } from "@/test/fixtures";
 import ProjectPage from "./ProjectPage";
 
 // MSW handlers provide:
@@ -40,6 +40,7 @@ describe("ProjectPage", () => {
       expect(screen.getByTestId("project-tab-invoices")).toBeInTheDocument();
       expect(screen.getByTestId("project-tab-prices")).toBeInTheDocument();
       expect(screen.getByTestId("project-tab-suppliers")).toBeInTheDocument();
+      expect(screen.getByTestId("project-tab-monthly")).toBeInTheDocument();
     });
   });
 
@@ -212,6 +213,97 @@ describe("ProjectPage", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Разобрать")).toHaveLength(2);
       expect(screen.queryByText("Ожидает")).not.toBeInTheDocument();
+    });
+  });
+
+  // ── По месяцам tab ──────────────────────────────────────────────────────
+
+  it("renders По месяцам tab and shows month rows", async () => {
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-monthly");
+    await user.click(tab);
+
+    // Январь и Март присутствуют из фикстуры
+    await waitFor(() => {
+      expect(screen.getByText(/Январь 2026/)).toBeInTheDocument();
+      expect(screen.getByText(/Март 2026/)).toBeInTheDocument();
+    });
+  });
+
+  it("shows empty month row (Февраль) between data months", async () => {
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-monthly");
+    await user.click(tab);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Февраль 2026/)).toBeInTheDocument();
+    });
+  });
+
+  it("shows empty state in По месяцам when no invoices", async () => {
+    server.use(
+      http.get("/api/dashboard/monthly-summary", () => HttpResponse.json([]))
+    );
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-monthly");
+    await user.click(tab);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Нет счетов по этому объекту/)).toBeInTheDocument();
+    });
+  });
+
+  it("clicking a month row navigates to Счета tab with filter applied", async () => {
+    server.use(
+      http.get("/api/dashboard/invoices", () =>
+        HttpResponse.json(sampleDashboardInvoices)
+      )
+    );
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-monthly");
+    await user.click(tab);
+
+    // Click the Январь row (non-empty)
+    const janRow = await screen.findByText(/Январь 2026/);
+    await user.click(janRow);
+
+    // Should now be on Счета tab with a month filter badge visible
+    await waitFor(() => {
+      expect(screen.getByText(/Фильтр: Январь 2026/)).toBeInTheDocument();
+    });
+  });
+
+  it("month filter reset button clears filter", async () => {
+    server.use(
+      http.get("/api/dashboard/invoices", () =>
+        HttpResponse.json(sampleDashboardInvoices)
+      )
+    );
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-monthly");
+    await user.click(tab);
+
+    const janRow = await screen.findByText(/Январь 2026/);
+    await user.click(janRow);
+
+    const resetBtn = await screen.findByText("Сбросить");
+    await user.click(resetBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Фильтр:/)).not.toBeInTheDocument();
     });
   });
 });

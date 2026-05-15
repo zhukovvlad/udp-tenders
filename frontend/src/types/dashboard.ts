@@ -38,3 +38,11 @@ export interface CalculateInput {
 }
 
 export type DashboardInvoices = DashboardInvoiceRow[];
+
+export interface MonthlyBucketRaw {
+  year: number;
+  month: number;
+  total_amount: number;
+  total_qty: number;
+  invoice_count: number;
+}

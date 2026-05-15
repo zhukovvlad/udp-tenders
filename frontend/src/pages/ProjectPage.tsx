@@ -11,6 +11,7 @@ import { KpiCard } from "@/components/ui-domain/KpiCard";
 import { InvoiceTable } from "@/components/invoices/InvoiceTable";
 import { UploadSheet } from "@/components/projects/UploadSheet";
 import { DeviationChart } from "@/components/projects/DeviationChart";
+import { MonthlyTab } from "@/components/projects/MonthlyTab";
 
 import {
   Tabs,
@@ -78,6 +79,9 @@ export default function ProjectPage() {
 
   // ── active tab ──
   const [activeTab, setActiveTab] = useState("overview");
+
+  // ── invoice month filter (set when navigating from «По месяцам» tab) ──
+  const [invoiceMonthFilter, setInvoiceMonthFilter] = useState<{ year: number; month: number } | null>(null);
 
   // ── reference price dialog ──
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
@@ -311,6 +315,7 @@ export default function ProjectPage() {
             <TabsTrigger value="suppliers" data-testid="project-tab-suppliers">
               Поставщики{suppliers.length > 0 ? ` · ${suppliers.length}` : ""}
             </TabsTrigger>
+            <TabsTrigger value="monthly" data-testid="project-tab-monthly">По месяцам</TabsTrigger>
           </TabsList>
 
           {/* ────────── TAB: Обзор ────────── */}
@@ -534,9 +539,42 @@ export default function ProjectPage() {
                 }
               />
             ) : (
-              <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
-                <InvoiceTable invoices={invoices} />
-              </div>
+              <>
+                {invoiceMonthFilter && (() => {
+                  const MONTH_NAMES_RU = [
+                    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+                    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+                  ];
+                  return (
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className="text-xs text-fg-secondary">
+                        Фильтр: {MONTH_NAMES_RU[invoiceMonthFilter.month - 1]} {invoiceMonthFilter.year}
+                      </span>
+                      <button
+                        className="text-xs text-fg-tertiary hover:text-fg underline"
+                        onClick={() => setInvoiceMonthFilter(null)}
+                      >
+                        Сбросить
+                      </button>
+                    </div>
+                  );
+                })()}
+                <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
+                  <InvoiceTable
+                    invoices={
+                      invoiceMonthFilter
+                        ? invoices.filter((inv) => {
+                            const d = new Date(inv.date);
+                            return (
+                              d.getFullYear() === invoiceMonthFilter.year &&
+                              d.getMonth() + 1 === invoiceMonthFilter.month
+                            );
+                          })
+                        : invoices
+                    }
+                  />
+                </div>
+              </>
             )}
           </TabsContent>
 
@@ -790,6 +828,17 @@ export default function ProjectPage() {
               </DialogContent>
             </Dialog>
           </TabsContent>
+          {/* ────────── TAB: По месяцам ────────── */}
+          <TabsContent value="monthly">
+            <MonthlyTab
+              projectId={projectId}
+              onNavigateToMonth={(year, month) => {
+                setInvoiceMonthFilter({ year, month });
+                setActiveTab("invoices");
+              }}
+            />
+          </TabsContent>
+
           <TabsContent value="suppliers" className="mt-6">
             {invoicesQ.isLoading ? (
               <Skeleton className="h-32" />

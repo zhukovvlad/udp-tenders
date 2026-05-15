@@ -1,4 +1,5 @@
 import { Bar, BarChart, Cell, LabelList, ReferenceLine, XAxis, YAxis } from "recharts";
+import type { LabelProps } from "recharts";
 import {
   ChartContainer,
   ChartTooltip,
@@ -24,7 +25,7 @@ const chartConfig = {
 } satisfies ChartConfig;
 
 // Custom label: renders coloured % text after each bar
-function PctLabel(props: Record<string, unknown>) {
+function PctLabel(props: LabelProps) {
   const x = Number(props.x ?? 0);
   const y = Number(props.y ?? 0);
   const width = Number(props.width ?? 0);

@@ -84,6 +84,12 @@ const _baseItem = {
   amount: 40000.0,
 };
 
+export const sampleMonthlySummary = [
+  { year: 2026, month: 1, total_amount: 120000, total_qty: 15.0, invoice_count: 2 },
+  // февраль пропущен — фронт должен достроить его
+  { year: 2026, month: 3, total_amount: 80000,  total_qty: 10.0, invoice_count: 1 },
+];
+
 export const sampleDashboardInvoices = [
   // Подтверждён
   {

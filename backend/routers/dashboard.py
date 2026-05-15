@@ -204,6 +204,48 @@ def auto_calculate(project_id: int, db: Session = Depends(get_db)):
     }
 
 
+@router.get("/monthly-summary")
+def get_monthly_summary(project_id: int, db: Session = Depends(get_db)):
+    """Помесячная агрегация по проекту: оборот (материалы), объём, количество СФ."""
+    from sqlalchemy import distinct, extract
+
+    rows = (
+        db.query(
+            extract("year", Invoice.date).label("year"),
+            extract("month", Invoice.date).label("month"),
+            func.sum(InvoiceItem.amount).label("total_amount"),
+            func.sum(InvoiceItem.quantity).label("total_qty"),
+            func.count(distinct(Invoice.id)).label("invoice_count"),
+        )
+        .join(Document, Invoice.document_id == Document.id)
+        .join(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
+        .filter(
+            Document.project_id == project_id,
+            InvoiceItem.item_type == "material",
+        )
+        .group_by(
+            extract("year", Invoice.date),
+            extract("month", Invoice.date),
+        )
+        .order_by(
+            extract("year", Invoice.date),
+            extract("month", Invoice.date),
+        )
+        .all()
+    )
+
+    return [
+        {
+            "year": int(r.year),
+            "month": int(r.month),
+            "total_amount": round(float(r.total_amount or 0), 2),
+            "total_qty": round(float(r.total_qty or 0), 2),
+            "invoice_count": int(r.invoice_count),
+        }
+        for r in rows
+    ]
+
+
 @router.post("/calculate")
 def run_calculation(project_id: int, period_start: date, period_end: date,
                     material_class_id: int | None = None,

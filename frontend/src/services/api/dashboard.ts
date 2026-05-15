@@ -5,6 +5,7 @@ import type {
   DashboardCalculation,
   DashboardInvoices,
   DashboardSummary,
+  MonthlyBucketRaw,
 } from "@/types/dashboard";
 import type { ID } from "@/types/common";
 
@@ -50,5 +51,11 @@ export const dashboardApi = {
       params.material_class_id = input.material_class_id;
     }
     await api.post("/dashboard/calculate", null, { params });
+  },
+  async monthlySummary(projectId: ID): Promise<MonthlyBucketRaw[]> {
+    const { data } = await api.get<MonthlyBucketRaw[]>("/dashboard/monthly-summary", {
+      params: { project_id: projectId },
+    });
+    return data;
   },
 };
