@@ -188,10 +188,22 @@ def test_create_supplier_empty_name_rejected(client):
     assert response.status_code == 422
 
 
-def test_create_supplier_duplicate_inn_rejected(client, factories):
-    factories.SupplierFactory.create(name="ООО Альфа", inn="5550005550")
+def test_create_supplier_duplicate_inn_returns_existing(client, factories):
+    """POST с существующим ИНН возвращает имеющегося поставщика, не создаёт дубль."""
+    existing = factories.SupplierFactory.create(name="ООО Альфа", inn="5550005550")
     response = client.post("/api/suppliers", json={"name": "ООО Другой", "inn": "5550005550"})
-    assert response.status_code == 409
+    assert response.status_code == 200
+    # возвращается существующая запись, не новая
+    assert response.json()["id"] == existing.id
+    assert response.json()["name"] == existing.name
+
+
+def test_create_supplier_duplicate_name_no_inn_returns_existing(client, factories):
+    """POST с тем же именем (без ИНН) возвращает имеющегося поставщика."""
+    existing = factories.SupplierFactory.create(name="ООО Без ИНН", inn=None)
+    response = client.post("/api/suppliers", json={"name": "ООО Без ИНН"})
+    assert response.status_code == 200
+    assert response.json()["id"] == existing.id
 
 
 # --- PUT /api/suppliers/{id} ---

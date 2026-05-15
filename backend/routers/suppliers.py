@@ -42,12 +42,8 @@ def create_supplier(data: SupplierCreate, db: Session = Depends(get_db)):
     inn = (data.inn.strip() or None) if data.inn else None
     if not name:
         raise HTTPException(status_code=422, detail="Название поставщика не может быть пустым")
-    try:
-        supplier = crud.create_supplier(db, name=name, inn=inn)
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Поставщик с таким ИНН уже существует")
-    logger.info("Created supplier id=%s name=%s inn=%s", supplier.id, supplier.name, supplier.inn)
+    supplier = crud.get_or_create_supplier(db, name=name, inn=inn)
+    logger.info("Created/found supplier id=%s name=%s inn=%s", supplier.id, supplier.name, supplier.inn)
     return {"id": supplier.id, "name": supplier.name, "inn": supplier.inn}
 
 

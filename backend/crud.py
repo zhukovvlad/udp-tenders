@@ -179,13 +179,13 @@ def delete_document(db: Session, doc_id: int):
 # --- Invoices ---
 
 def create_invoice(db: Session, document_id: int, number: str, invoice_date: date,
-                   supplier_name: str, supplier_inn: str, vat_rate: float,
+                   supplier_name: str | None, supplier_inn: str | None, vat_rate: float,
                    confidence: float, items: list[dict]) -> Invoice:
     # Нормализуем: пустые строки и whitespace → None
     _inn = (supplier_inn.strip() or None) if supplier_inn else None
     _name = (supplier_name.strip() or None) if supplier_name else None
 
-    # Если поставщик уже есть в БД (напр., по Тому же ИНН) — берём каноническое имя из БД,
+    # Если поставщик уже есть в БД (напр., по тому же ИНН) — берём каноническое имя из БД,
     # а не сырой текст из документа.
     supplier_id = None
     if _name:

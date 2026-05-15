@@ -40,7 +40,7 @@ def upgrade() -> None:
     op.execute(
         """
         INSERT INTO suppliers (name, inn, created_at)
-        SELECT ranked.supplier_name, ranked.supplier_inn, NOW()
+        SELECT ranked.supplier_name, ranked.supplier_inn, (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
         FROM (
             SELECT supplier_inn,
                    supplier_name,
@@ -63,7 +63,7 @@ def upgrade() -> None:
     op.execute(
         """
         INSERT INTO suppliers (name, inn, created_at)
-        SELECT DISTINCT supplier_name, NULL, NOW()
+        SELECT DISTINCT supplier_name, NULL, (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
         FROM invoices
         WHERE (supplier_inn IS NULL OR supplier_inn = '')
           AND supplier_name IS NOT NULL AND supplier_name != ''
