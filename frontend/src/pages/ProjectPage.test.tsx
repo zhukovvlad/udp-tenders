@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
@@ -305,5 +305,48 @@ describe("ProjectPage", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Фильтр:/)).not.toBeInTheDocument();
     });
+  });
+
+  it("CSV export button triggers download with correct filename and BOM content", async () => {
+    const createdObjectUrls: string[] = [];
+    const anchorClicks: { download: string; href: string }[] = [];
+
+    const origCreateObjectURL = URL.createObjectURL;
+    URL.createObjectURL = (blob: Blob) => {
+      const url = `blob:fake-${createdObjectUrls.length}`;
+      createdObjectUrls.push(url);
+      return url;
+    };
+
+    const origCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+      const el = origCreateElement(tag);
+      if (tag === "a") {
+        vi.spyOn(el as HTMLAnchorElement, "click").mockImplementation(() => {
+          anchorClicks.push({
+            download: (el as HTMLAnchorElement).download,
+            href: (el as HTMLAnchorElement).href,
+          });
+        });
+      }
+      return el;
+    });
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-monthly");
+    await user.click(tab);
+
+    const exportBtn = await screen.findByRole("button", { name: /Экспорт CSV/i });
+    await user.click(exportBtn);
+
+    expect(anchorClicks).toHaveLength(1);
+    expect(anchorClicks[0].download).toMatch(/закупки-по-месяцам-ЖК Радуга.*\.csv/);
+    expect(createdObjectUrls).toHaveLength(1);
+
+    // Restore
+    URL.createObjectURL = origCreateObjectURL;
+    vi.restoreAllMocks();
   });
 });

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Download, Plus, Trash2, Pencil } from "lucide-react";
 
@@ -91,6 +91,12 @@ export default function ProjectPage() {
 
   // ── invoice month filter (set when navigating from «По месяцам» tab) ──
   const [invoiceMonthFilter, setInvoiceMonthFilter] = useState<{ year: number; month: number } | null>(null);
+
+  // Reset per-project state when projectId changes (same component instance, different route)
+  useEffect(() => {
+    setInvoiceMonthFilter(null);
+    setActiveTab("overview");
+  }, [projectId]);
 
   // ── reference price dialog ──
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
@@ -558,22 +564,20 @@ export default function ProjectPage() {
                 }
               />
             ) : (
-              <>
-                {invoiceMonthFilter && (() => {
-                  return (
-                    <div className="mb-3 flex items-center gap-2">
-                      <span className="text-xs text-fg-secondary">
-                        Фильтр: {MONTH_NAMES_RU[invoiceMonthFilter.month - 1]} {invoiceMonthFilter.year}
-                      </span>
-                      <button
-                        className="text-xs text-fg-tertiary hover:text-fg underline"
-                        onClick={() => setInvoiceMonthFilter(null)}
-                      >
-                        Сбросить
-                      </button>
-                    </div>
-                  );
-                })()}
+              <>  
+                {invoiceMonthFilter && (
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="text-xs text-fg-secondary">
+                      Фильтр: {MONTH_NAMES_RU[invoiceMonthFilter.month - 1]} {invoiceMonthFilter.year}
+                    </span>
+                    <button
+                      className="text-xs text-fg-tertiary hover:text-fg underline"
+                      onClick={() => setInvoiceMonthFilter(null)}
+                    >
+                      Сбросить
+                    </button>
+                  </div>
+                )}
                 <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
                   <InvoiceTable
                     invoices={filteredInvoices}

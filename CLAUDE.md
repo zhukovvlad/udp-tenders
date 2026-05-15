@@ -12,7 +12,7 @@ Target user: тендерный менеджер (procurement/tender manager) in
 
 | Layer | Technology |
 |---|---|
-| Backend | Python 3.14+, FastAPI, SQLAlchemy (sync), Alembic |
+| Backend | Python 3.12+, FastAPI, SQLAlchemy (sync), Alembic |
 | Database | PostgreSQL via **Neon** (serverless) — `postgresql+psycopg://` DSN |
 | File storage | MinIO (S3-compatible), local binary `minio.exe` |
 | PDF parsing | OpenRouter API (`OPENROUTER_API_KEY`) — Mistral OCR / Claude Vision |
