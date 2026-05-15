@@ -168,8 +168,8 @@ export default function Review() {
             <button
               type="button"
               onClick={() => reparse.mutate(docId)}
-              disabled={reparse.isPending || documentLocked}
-              title={documentLocked ? "Сначала снимите подтверждение" : undefined}
+              disabled={reparse.isPending || verify.isPending || unverify.isPending || documentLocked}
+              title={documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
               className="text-fg-secondary underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
             >
               Переразобрать
@@ -199,8 +199,8 @@ export default function Review() {
             <Button
               variant="danger"
               size="sm"
-              disabled={documentLocked}
-              title={documentLocked ? "Сначала снимите подтверждение" : undefined}
+              disabled={verify.isPending || unverify.isPending || documentLocked}
+              title={documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
               onClick={() => {
                 if (window.confirm("Удалить документ?")) {
                   remove.mutate(docId, {

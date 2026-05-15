@@ -120,7 +120,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                   <MoneyCell value={total} />
                 </TableCell>
                 <TableCell>
-                  <span title={tooltip} aria-label={tooltip}>
+                  <span title={tooltip} aria-label={tooltip} tabIndex={0}>
                     <StatusPill tone={tone} label={label} dot />
                   </span>
                 </TableCell>
