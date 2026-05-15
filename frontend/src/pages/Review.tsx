@@ -94,7 +94,7 @@ export default function Review() {
       !inv.number?.trim() ||
       inv.items.length === 0 ||
       inv.items.some((it) => !it.raw_name?.trim() || it.quantity <= 0));
-  const locked = serverInv?.verified ?? false;
+  const locked = doc.invoices.some((invoice) => invoice.verified);
 
   const tabs: Array<{ value: TabKey; label: string }> = [
     { value: "header", label: "Шапка" },

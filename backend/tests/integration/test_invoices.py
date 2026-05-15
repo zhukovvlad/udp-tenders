@@ -224,3 +224,20 @@ def test_reparse_verified_document_returns_409(client, factories):
 
     response = client.post(f"/api/invoices/documents/{doc.id}/reparse")
     assert response.status_code == 409
+
+
+def test_delete_verified_invoice_returns_409(client, factories):
+    invoice = factories.InvoiceFactory.create()
+    client.post(f"/api/invoices/{invoice.id}/verify")
+
+    response = client.delete(f"/api/invoices/{invoice.id}")
+    assert response.status_code == 409
+
+
+def test_delete_document_with_verified_invoice_returns_409(client, factories):
+    doc = factories.DocumentFactory.create()
+    invoice = factories.InvoiceFactory.create(document=doc)
+    client.post(f"/api/invoices/{invoice.id}/verify")
+
+    response = client.delete(f"/api/invoices/documents/{doc.id}")
+    assert response.status_code == 409
