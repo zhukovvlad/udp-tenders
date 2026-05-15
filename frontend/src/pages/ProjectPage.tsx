@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Download, Plus, Trash2, Pencil } from "lucide-react";
 
@@ -139,6 +139,17 @@ export default function ProjectPage() {
   const materialClasses = materialClassesQ.data ?? [];
 
   const hasCalculations = calculations.length > 0;
+
+  const filteredInvoices = useMemo(() => {
+    if (!invoiceMonthFilter) return invoices;
+    return invoices.filter((inv) => {
+      const [yearPart, monthPart] = (inv.date ?? "").split("-");
+      return (
+        Number(yearPart) === invoiceMonthFilter.year &&
+        Number(monthPart) === invoiceMonthFilter.month
+      );
+    });
+  }, [invoices, invoiceMonthFilter]);
 
   // Aggregate suppliers from invoices
   const supplierMap = new Map<string, { displayName: string; count: number }>();
@@ -565,17 +576,7 @@ export default function ProjectPage() {
                 })()}
                 <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
                   <InvoiceTable
-                    invoices={
-                      invoiceMonthFilter
-                        ? invoices.filter((inv) => {
-                            const [yearPart, monthPart] = (inv.date ?? "").split("-");
-                            return (
-                              Number(yearPart) === invoiceMonthFilter.year &&
-                              Number(monthPart) === invoiceMonthFilter.month
-                            );
-                          })
-                        : invoices
-                    }
+                    invoices={filteredInvoices}
                   />
                 </div>
               </>

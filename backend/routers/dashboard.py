@@ -2,7 +2,7 @@ from calendar import monthrange
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func
+from sqlalchemy import distinct, extract, func
 from sqlalchemy.orm import Session
 
 import crud
@@ -207,8 +207,6 @@ def auto_calculate(project_id: int, db: Session = Depends(get_db)):
 @router.get("/monthly-summary")
 def get_monthly_summary(project_id: int, db: Session = Depends(get_db)):
     """Помесячная агрегация по проекту: оборот (материалы), объём, количество СФ."""
-    from sqlalchemy import distinct, extract
-
     year_expr = extract("year", Invoice.date)
     month_expr = extract("month", Invoice.date)
 
