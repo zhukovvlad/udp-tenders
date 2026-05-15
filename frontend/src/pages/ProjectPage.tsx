@@ -49,6 +49,7 @@ import {
 } from "@/services/queries";
 
 import { formatDate, formatMoney, formatNumber, formatPercent } from "@/lib/format";
+import { MONTH_NAMES_RU } from "@/lib/constants";
 import type { ID } from "@/types/common";
 import type { ReferencePrice } from "@/types/referencePrice";
 import type { DashboardCalculation } from "@/types/dashboard";
@@ -541,10 +542,6 @@ export default function ProjectPage() {
             ) : (
               <>
                 {invoiceMonthFilter && (() => {
-                  const MONTH_NAMES_RU = [
-                    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-                    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
-                  ];
                   return (
                     <div className="mb-3 flex items-center gap-2">
                       <span className="text-xs text-fg-secondary">
@@ -564,10 +561,10 @@ export default function ProjectPage() {
                     invoices={
                       invoiceMonthFilter
                         ? invoices.filter((inv) => {
-                            const d = new Date(inv.date);
+                            const [yearPart, monthPart] = (inv.date ?? "").split("-");
                             return (
-                              d.getFullYear() === invoiceMonthFilter.year &&
-                              d.getMonth() + 1 === invoiceMonthFilter.month
+                              Number(yearPart) === invoiceMonthFilter.year &&
+                              Number(monthPart) === invoiceMonthFilter.month
                             );
                           })
                         : invoices
@@ -832,6 +829,7 @@ export default function ProjectPage() {
           <TabsContent value="monthly">
             <MonthlyTab
               projectId={projectId}
+              projectName={project.name}
               onNavigateToMonth={(year, month) => {
                 setInvoiceMonthFilter({ year, month });
                 setActiveTab("invoices");

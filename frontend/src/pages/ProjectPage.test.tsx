@@ -5,7 +5,7 @@ import { http, HttpResponse } from "msw";
 import { Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "@/test/utils";
 import { server } from "@/test/server";
-import { sampleReferencePrice, sampleDashboardInvoices, sampleMonthlySummary } from "@/test/fixtures";
+import { sampleReferencePrice, sampleDashboardInvoices } from "@/test/fixtures";
 import ProjectPage from "./ProjectPage";
 
 // MSW handlers provide:

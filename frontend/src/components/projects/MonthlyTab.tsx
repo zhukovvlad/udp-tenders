@@ -5,6 +5,7 @@ import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from "recharts";
 import { Skeleton } from "@/components/ui-domain/Skeleton";
 import { EmptyState } from "@/components/ui-domain/EmptyState";
 import { Button } from "@/components/ui-domain/Button";
+import { MONTH_NAMES_RU } from "@/lib/constants";
 import {
   ChartContainer,
   ChartTooltip,
@@ -30,17 +31,13 @@ interface MonthlyBucket {
 
 interface MonthlyTabProps {
   projectId: ID;
+  projectName: string;
   onNavigateToMonth: (year: number, month: number) => void;
 }
 
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
-const MONTH_NAMES_RU = [
-  "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
-];
-
 function buildFullSequence(raw: MonthlyBucketRaw[]): MonthlyBucket[] {
   if (raw.length === 0) return [];
 
@@ -96,7 +93,9 @@ function exportToCsv(rows: MonthlyBucket[], projectName: string) {
   const a = document.createElement("a");
   a.href = url;
   a.download = `закупки-по-месяцам-${projectName}.csv`;
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 
@@ -177,7 +176,7 @@ function TurnoverChart({ buckets }: { buckets: MonthlyBucket[] }) {
 // ─────────────────────────────────────────────
 // Main Component
 // ─────────────────────────────────────────────
-export function MonthlyTab({ projectId, onNavigateToMonth }: MonthlyTabProps) {
+export function MonthlyTab({ projectId, projectName, onNavigateToMonth }: MonthlyTabProps) {
   const monthlyQ = useDashboardMonthlySummary(projectId);
 
   const buckets = useMemo(
@@ -255,7 +254,7 @@ export function MonthlyTab({ projectId, onNavigateToMonth }: MonthlyTabProps) {
           variant="secondary"
           size="sm"
           leftIcon={<FileDown size={14} />}
-          onClick={() => exportToCsv(buckets, String(projectId))}
+          onClick={() => exportToCsv(buckets, projectName)}
         >
           Экспорт CSV
         </Button>
@@ -358,10 +357,13 @@ function MonthRow({
 
   return (
     <tr
-      className="border-b border-border-subtle last:border-0 hover:bg-surface-hover cursor-pointer group"
+      className="border-b border-border-subtle last:border-0 hover:bg-surface-hover group"
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick?.(); } }}
     >
-      <td className="px-4 py-2 text-fg group-hover:text-accent-text transition-colors">
+      <td className="px-4 py-2 text-fg group-hover:text-accent-text transition-colors cursor-pointer">
         {label}
       </td>
       <td className="px-4 py-2 text-right font-mono text-fg tabular-nums">
