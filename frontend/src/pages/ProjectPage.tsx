@@ -478,8 +478,8 @@ export default function ProjectPage() {
 
             {/* Calculations table */}
             {hasCalculations && (
-              <div className="rounded-lg border border-border-subtle bg-surface">
-                <Table>
+              <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface">
+                <Table className="min-w-max">
                   <TableHeader>
                     <TableRow className="text-xs text-fg-tertiary hover:bg-transparent">
                       <TableHead className="font-medium">Класс</TableHead>
@@ -564,7 +564,7 @@ export default function ProjectPage() {
                 }
               />
             ) : (
-              <>  
+              <>
                 {invoiceMonthFilter && (
                   <div className="mb-3 flex items-center gap-2">
                     <span className="text-xs text-fg-secondary">

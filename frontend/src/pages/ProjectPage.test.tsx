@@ -308,45 +308,61 @@ describe("ProjectPage", () => {
   });
 
   it("CSV export button triggers download with correct filename and BOM content", async () => {
-    const createdObjectUrls: string[] = [];
-    const anchorClicks: { download: string; href: string }[] = [];
-
-    const origCreateObjectURL = URL.createObjectURL;
-    URL.createObjectURL = (_blob: Blob) => {
-      const url = `blob:fake-${createdObjectUrls.length}`;
-      createdObjectUrls.push(url);
-      return url;
-    };
-
-    const origCreateElement = document.createElement.bind(document);
-    vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
-      const el = origCreateElement(tag);
-      if (tag === "a") {
-        vi.spyOn(el as HTMLAnchorElement, "click").mockImplementation(() => {
-          anchorClicks.push({
-            download: (el as HTMLAnchorElement).download,
-            href: (el as HTMLAnchorElement).href,
-          });
-        });
-      }
-      return el;
-    });
-
     const user = userEvent.setup();
     renderProject();
 
+    // Navigate to monthly tab before mocking anything (avoids interfering with render)
     const tab = await screen.findByTestId("project-tab-monthly");
     await user.click(tab);
-
     const exportBtn = await screen.findByRole("button", { name: /Экспорт CSV/i });
-    await user.click(exportBtn);
 
-    expect(anchorClicks).toHaveLength(1);
-    expect(anchorClicks[0].download).toMatch(/закупки-по-месяцам-ЖК Радуга.*\.csv/);
-    expect(createdObjectUrls).toHaveLength(1);
+    // Set up mocks only after the component has rendered
+    const capturedBlobParts: string[] = [];
+    const anchorClicks: { download: string }[] = [];
+    const origCreateObjectURL = URL.createObjectURL;
 
-    // Restore
-    URL.createObjectURL = origCreateObjectURL;
-    vi.restoreAllMocks();
+    try {
+      URL.createObjectURL = (_blob: Blob) => "blob:fake";
+
+      const realBlob = globalThis.Blob;
+      const capturedBlobPartsRef = capturedBlobParts;
+      class CsvCapturingBlob extends realBlob {
+        constructor(parts?: BlobPart[], opts?: BlobPropertyBag) {
+          super(parts ?? [], opts);
+          if (opts?.type?.includes("csv") && parts) {
+            parts.forEach((p) => typeof p === "string" && capturedBlobPartsRef.push(p));
+          }
+        }
+      }
+      vi.stubGlobal("Blob", CsvCapturingBlob);
+
+      const origCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+        const el = origCreateElement(tag);
+        if (tag === "a") {
+          vi.spyOn(el as HTMLAnchorElement, "click").mockImplementation(() => {
+            anchorClicks.push({ download: (el as HTMLAnchorElement).download });
+          });
+        }
+        return el;
+      });
+
+      await user.click(exportBtn);
+
+      // Filename is correct
+      expect(anchorClicks).toHaveLength(1);
+      expect(anchorClicks[0].download).toMatch(/закупки-по-месяцам-.*\.csv/);
+
+      // Blob starts with UTF-8 BOM and contains expected semicolon-delimited CSV structure
+      expect(capturedBlobParts).toHaveLength(1);
+      expect(capturedBlobParts[0].startsWith("\uFEFF")).toBe(true);
+      expect(capturedBlobParts[0]).toContain("Период;Оборот (₽);Объём (м³);Счетов");
+      expect(capturedBlobParts[0]).toContain("Январь 2026");
+      expect(capturedBlobParts[0]).toContain("Март 2026");
+    } finally {
+      URL.createObjectURL = origCreateObjectURL;
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
   });
 });
