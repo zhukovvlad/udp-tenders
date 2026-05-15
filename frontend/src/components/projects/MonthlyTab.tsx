@@ -7,6 +7,15 @@ import { EmptyState } from "@/components/ui-domain/EmptyState";
 import { Button } from "@/components/ui-domain/Button";
 import { MONTH_NAMES_RU } from "@/lib/constants";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
@@ -92,7 +101,7 @@ function exportToCsv(rows: MonthlyBucket[], projectName: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `закупки-по-месяцам-${projectName}.csv`;
+  a.download = `закупки-по-месяцам-${projectName.replace(/[\\/:*?"<>|]/g, "_").slice(0, 80)}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -266,35 +275,28 @@ export function MonthlyTab({ projectId, projectName, onNavigateToMonth }: Monthl
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface">
-        <table className="w-full text-sm">
-          <colgroup>
-            <col />
-            <col className="w-44" />
-            <col className="w-36" />
-            <col className="w-24" />
-          </colgroup>
-          <thead>
-            <tr className="border-b border-border-subtle text-left text-xs text-fg-tertiary">
-              <th className="px-4 py-2 font-medium">Месяц</th>
-              <th className="px-4 py-2 font-medium text-right">Оборот, ₽</th>
-              <th className="px-4 py-2 font-medium text-right">Объём, м³</th>
-              <th className="px-4 py-2 font-medium text-right">Счетов</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="rounded-lg border border-border-subtle bg-surface">
+        <Table>
+          <TableHeader>
+            <TableRow className="text-xs text-fg-tertiary hover:bg-transparent">
+              <TableHead className="font-medium">Месяц</TableHead>
+              <TableHead className="font-medium text-right">Оборот, ₽</TableHead>
+              <TableHead className="font-medium text-right">Объём, м³</TableHead>
+              <TableHead className="font-medium text-right">Счетов</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {byYear.map(([year, yearBuckets]) => (
               <Fragment key={year}>
-                {/* Year subheading — only when multiple years */}
                 {multiYear && (
-                  <tr key={`year-${year}`} className="border-b border-border-subtle bg-surface-hover">
-                    <td
+                  <TableRow className="bg-surface-hover hover:bg-surface-hover">
+                    <TableCell
                       colSpan={4}
-                      className="px-4 py-1 text-xs font-semibold text-fg-tertiary tracking-wide uppercase"
+                      className="py-1 text-xs font-semibold text-fg-tertiary tracking-wide uppercase"
                     >
                       {year}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 )}
                 {yearBuckets.map((b) => (
                   <MonthRow
@@ -305,22 +307,22 @@ export function MonthlyTab({ projectId, projectName, onNavigateToMonth }: Monthl
                 ))}
               </Fragment>
             ))}
-          </tbody>
-          <tfoot>
-            <tr className="border-t-2 border-border-subtle bg-surface-hover font-medium">
-              <td className="px-4 py-2 text-fg-secondary text-xs uppercase tracking-wide">Итого</td>
-              <td className="px-4 py-2 text-right font-mono text-fg tabular-nums">
+          </TableBody>
+          <TableFooter className="font-medium">
+            <TableRow>
+              <TableCell className="text-fg-secondary text-xs uppercase tracking-wide">Итого</TableCell>
+              <TableCell className="text-right font-mono text-fg tabular-nums">
                 {formatMoney(totals.amount)}
-              </td>
-              <td className="px-4 py-2 text-right font-mono text-fg tabular-nums">
+              </TableCell>
+              <TableCell className="text-right font-mono text-fg tabular-nums">
                 {formatNumber(totals.qty)}
-              </td>
-              <td className="px-4 py-2 text-right font-mono text-fg tabular-nums">
+              </TableCell>
+              <TableCell className="text-right font-mono text-fg tabular-nums">
                 {formatNumber(totals.count)}
-              </td>
-            </tr>
-          </tfoot>
-        </table>
+              </TableCell>
+            </TableRow>
+          </TableFooter>
+        </Table>
       </div>
     </div>
   );
@@ -340,41 +342,41 @@ function MonthRow({
 
   if (bucket.empty) {
     return (
-      <tr
-        className="border-b border-border-subtle last:border-0"
+      <TableRow
+        className="hover:bg-transparent"
         style={{
           backgroundImage:
             "repeating-linear-gradient(-45deg, transparent, transparent 4px, rgba(255,255,255,0.02) 4px, rgba(255,255,255,0.02) 8px)",
         }}
       >
-        <td className="px-4 py-2 text-fg-tertiary">{label}</td>
-        <td className="px-4 py-2 text-right font-mono text-fg-tertiary tabular-nums">—</td>
-        <td className="px-4 py-2 text-right font-mono text-fg-tertiary tabular-nums">—</td>
-        <td className="px-4 py-2 text-right font-mono text-fg-tertiary tabular-nums">—</td>
-      </tr>
+        <TableCell className="text-fg-tertiary">{label}</TableCell>
+        <TableCell className="text-right font-mono text-fg-tertiary tabular-nums">—</TableCell>
+        <TableCell className="text-right font-mono text-fg-tertiary tabular-nums">—</TableCell>
+        <TableCell className="text-right font-mono text-fg-tertiary tabular-nums">—</TableCell>
+      </TableRow>
     );
   }
 
   return (
-    <tr
-      className="border-b border-border-subtle last:border-0 hover:bg-surface-hover group"
-      role="button"
-      tabIndex={0}
-      onClick={onClick}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick?.(); } }}
-    >
-      <td className="px-4 py-2 text-fg group-hover:text-accent-text transition-colors cursor-pointer">
-        {label}
-      </td>
-      <td className="px-4 py-2 text-right font-mono text-fg tabular-nums">
+    <TableRow className="group">
+      <TableCell className="p-0">
+        <button
+          type="button"
+          onClick={onClick}
+          className="w-full text-left px-2 py-2 text-fg group-hover:text-accent-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+        >
+          {label}
+        </button>
+      </TableCell>
+      <TableCell className="text-right font-mono text-fg tabular-nums">
         {formatMoney(bucket.total_amount)}
-      </td>
-      <td className="px-4 py-2 text-right font-mono text-fg tabular-nums">
+      </TableCell>
+      <TableCell className="text-right font-mono text-fg tabular-nums">
         {formatNumber(bucket.total_qty)}
-      </td>
-      <td className="px-4 py-2 text-right font-mono text-fg tabular-nums">
+      </TableCell>
+      <TableCell className="text-right font-mono text-fg tabular-nums">
         {formatNumber(bucket.invoice_count)}
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }

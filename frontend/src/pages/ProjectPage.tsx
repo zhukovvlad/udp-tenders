@@ -28,6 +28,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   Select,
   SelectTrigger,
   SelectValue,
@@ -453,42 +461,41 @@ export default function ProjectPage() {
 
             {/* Calculations table */}
             {hasCalculations && (
-              <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border-subtle text-left text-xs text-fg-tertiary">
-                      <th className="px-4 py-2 font-medium">Класс</th>
-                      <th className="px-4 py-2 font-medium">Период</th>
-                      <th className="px-4 py-2 font-medium text-right">Ср.цена</th>
-                      <th className="px-4 py-2 font-medium text-right">Плановая цена</th>
-                      <th className="px-4 py-2 font-medium text-right">Откл.%</th>
-                      <th className="px-4 py-2 font-medium text-right">Откл.₽</th>
-                      <th className="px-4 py-2 font-medium text-right">Объём</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+              <div className="rounded-lg border border-border-subtle bg-surface">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="text-xs text-fg-tertiary hover:bg-transparent">
+                      <TableHead className="font-medium">Класс</TableHead>
+                      <TableHead className="font-medium">Период</TableHead>
+                      <TableHead className="font-medium text-right">Ср.цена</TableHead>
+                      <TableHead className="font-medium text-right">Плановая цена</TableHead>
+                      <TableHead className="font-medium text-right">Откл.%</TableHead>
+                      <TableHead className="font-medium text-right">Откл.₽</TableHead>
+                      <TableHead className="font-medium text-right">Объём</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {calculations.map((c) => (
-                      <tr
+                      <TableRow
                         key={`${c.material_class_name ?? ""}-${c.period_start}-${c.period_end}`}
-                        className="border-b border-border-subtle last:border-0 hover:bg-surface-hover"
                       >
-                        <td className="px-4 py-2 text-fg">
+                        <TableCell className="text-fg">
                           {c.material_class_name}
-                        </td>
-                        <td className="px-4 py-2 text-fg-secondary whitespace-nowrap">
+                        </TableCell>
+                        <TableCell className="text-fg-secondary whitespace-nowrap">
                           {formatDate(c.period_start)} — {formatDate(c.period_end)}
-                        </td>
-                        <td className="px-4 py-2 text-right font-mono text-fg">
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-fg">
                           {formatMoney(c.avg_price)}
-                        </td>
-                        <td className="px-4 py-2 text-right font-mono text-fg-secondary">
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-fg-secondary">
                           {c.reference_price !== null
                             ? formatMoney(c.reference_price)
                             : "—"}
-                        </td>
-                        <td
+                        </TableCell>
+                        <TableCell
                           className={
-                            "px-4 py-2 text-right font-mono " +
+                            "text-right font-mono " +
                             (c.deviation_pct == null
                               ? "text-fg-secondary"
                               : c.deviation_pct > 0
@@ -497,10 +504,10 @@ export default function ProjectPage() {
                           }
                         >
                           {formatPercent(c.deviation_pct, true)}
-                        </td>
-                        <td
+                        </TableCell>
+                        <TableCell
                           className={
-                            "px-4 py-2 text-right font-mono " +
+                            "text-right font-mono " +
                             (c.deviation_amount == null
                               ? "text-fg-secondary"
                               : c.deviation_amount > 0
@@ -511,14 +518,14 @@ export default function ProjectPage() {
                           {c.deviation_amount !== null
                             ? formatMoney(c.deviation_amount)
                             : "—"}
-                        </td>
-                        <td className="px-4 py-2 text-right font-mono text-fg-secondary">
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-fg-secondary">
                           {formatNumber(c.total_qty)}
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             )}
           </TabsContent>
