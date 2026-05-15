@@ -250,11 +250,12 @@ def test_upload_creates_supplier_record(client, factories, sample_pdf_bytes, moc
     from models import Invoice, Supplier
 
     project = factories.ProjectFactory.create()
-    client.post(
+    resp = client.post(
         "/api/invoices/upload",
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
         data={"project_id": project.id},
     )
+    assert resp.status_code == 200
 
     # Фикстура happy_path содержит supplier_inn="0000000000", supplier_name="ООО Поставщик"
     supplier = db_session.query(Supplier).filter(Supplier.inn == "0000000000").first()
@@ -274,16 +275,18 @@ def test_upload_reuse_existing_supplier(client, factories, sample_pdf_bytes, moc
     p1 = factories.ProjectFactory.create()
     p2 = factories.ProjectFactory.create()
 
-    client.post(
+    resp1 = client.post(
         "/api/invoices/upload",
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
         data={"project_id": p1.id},
     )
-    client.post(
+    assert resp1.status_code == 200
+    resp2 = client.post(
         "/api/invoices/upload",
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
         data={"project_id": p2.id},
     )
+    assert resp2.status_code == 200
 
     suppliers = db_session.query(Supplier).filter(Supplier.inn == "0000000000").all()
     assert len(suppliers) == 1
@@ -299,7 +302,7 @@ def test_update_invoice_links_supplier(client, factories, db_session):
 
     invoice = factories.InvoiceFactory.create(supplier_id=None, supplier_name=None, supplier_inn=None)
 
-    client.put(
+    resp = client.put(
         f"/api/invoices/{invoice.id}",
         json={
             "number": "СФ-UPD",
@@ -310,6 +313,7 @@ def test_update_invoice_links_supplier(client, factories, db_session):
             "items": [],
         },
     )
+    assert resp.status_code == 200
 
     db_session.expire_all()
     inv = db_session.query(Invoice).filter(Invoice.id == invoice.id).first()
@@ -326,7 +330,7 @@ def test_update_invoice_clears_supplier_when_name_empty(client, factories, db_se
     supplier = factories.SupplierFactory.create(name="ООО Старый", inn="1231231230")
     invoice = factories.InvoiceFactory.create(supplier_id=supplier.id, supplier_name="ООО Старый")
 
-    client.put(
+    resp = client.put(
         f"/api/invoices/{invoice.id}",
         json={
             "number": invoice.number,
@@ -337,6 +341,7 @@ def test_update_invoice_clears_supplier_when_name_empty(client, factories, db_se
             "items": [],
         },
     )
+    assert resp.status_code == 200
 
     db_session.expire_all()
     inv = db_session.query(Invoice).filter(Invoice.id == invoice.id).first()

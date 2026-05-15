@@ -50,13 +50,16 @@ def upgrade() -> None:
                    ) AS rn
             FROM invoices
             WHERE supplier_inn IS NOT NULL AND supplier_inn != ''
+              AND supplier_name IS NOT NULL AND supplier_name != ''
             GROUP BY supplier_inn, supplier_name
         ) ranked
         WHERE ranked.rn = 1
         """
     )
 
-    #    3b. Без ИНН: каждый уникальный supplier_name — отдельный поставщик
+    #    3b. Без ИНН: каждый уникальный supplier_name — отдельный поставщик.
+    #    Исключаем имена, уже добавленные в шаге 3a (один поставщик мог иметь
+    #    инвойсы и с ИНН, и без него).
     op.execute(
         """
         INSERT INTO suppliers (name, inn, created_at)
@@ -64,6 +67,7 @@ def upgrade() -> None:
         FROM invoices
         WHERE (supplier_inn IS NULL OR supplier_inn = '')
           AND supplier_name IS NOT NULL AND supplier_name != ''
+          AND supplier_name NOT IN (SELECT name FROM suppliers)
         """
     )
 

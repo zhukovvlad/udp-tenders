@@ -71,6 +71,9 @@ def test_merge_suppliers_moves_invoices(client, factories, db_session):
     from models import Invoice
     updated_inv = db_session.query(Invoice).filter(Invoice.id == inv.id).first()
     assert updated_inv.supplier_id == target.id
+    # supplier_name/inn в инвойсе должны обновиться до канонических значений target
+    assert updated_inv.supplier_name == target.name
+    assert updated_inv.supplier_inn == target.inn
 
     # source удалён
     from models import Supplier
@@ -161,3 +164,102 @@ def test_get_or_create_supplier_different_names_no_inn(db_session):
     s1 = crud.get_or_create_supplier(db_session, name="ООО Ромашка", inn=None)
     s2 = crud.get_or_create_supplier(db_session, name="ООО Лютик", inn=None)
     assert s1.id != s2.id
+
+
+# --- POST /api/suppliers ---
+
+def test_create_supplier(client):
+    response = client.post("/api/suppliers", json={"name": "ООО Новый", "inn": "1230001230"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "ООО Новый"
+    assert body["inn"] == "1230001230"
+    assert isinstance(body["id"], int)
+
+
+def test_create_supplier_no_inn(client):
+    response = client.post("/api/suppliers", json={"name": "ООО БезИНН"})
+    assert response.status_code == 200
+    assert response.json()["inn"] is None
+
+
+def test_create_supplier_empty_name_rejected(client):
+    response = client.post("/api/suppliers", json={"name": "  ", "inn": None})
+    assert response.status_code == 422
+
+
+def test_create_supplier_duplicate_inn_rejected(client, factories):
+    factories.SupplierFactory.create(name="ООО Альфа", inn="5550005550")
+    response = client.post("/api/suppliers", json={"name": "ООО Другой", "inn": "5550005550"})
+    assert response.status_code == 409
+
+
+# --- PUT /api/suppliers/{id} ---
+
+def test_update_supplier_name(client, factories):
+    supplier = factories.SupplierFactory.create(name="ООО Старый", inn="6660006660")
+    response = client.put(
+        f"/api/suppliers/{supplier.id}",
+        json={"name": "ООО Новое имя", "inn": "6660006660"},
+    )
+    assert response.status_code == 200
+    assert response.json()["name"] == "ООО Новое имя"
+
+
+def test_update_supplier_syncs_invoices(client, factories, db_session):
+    """PUT /suppliers/{id} обновляет supplier_name/inn в связанных инвойсах."""
+    from models import Invoice
+
+    supplier = factories.SupplierFactory.create(name="ООО Старый", inn="7770007770")
+    doc = factories.DocumentFactory.create()
+    inv = factories.InvoiceFactory.create(document=doc, supplier_id=supplier.id, supplier_name="ООО Старый")
+
+    resp = client.put(
+        f"/api/suppliers/{supplier.id}",
+        json={"name": "ООО Новое имя", "inn": "7770007770"},
+    )
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    updated = db_session.query(Invoice).filter(Invoice.id == inv.id).first()
+    assert updated.supplier_name == "ООО Новое имя"
+
+
+def test_update_supplier_404(client):
+    response = client.put("/api/suppliers/99999", json={"name": "X", "inn": None})
+    assert response.status_code == 404
+
+
+def test_update_supplier_duplicate_inn_rejected(client, factories):
+    factories.SupplierFactory.create(name="ООО Занятый", inn="8880008880")
+    target = factories.SupplierFactory.create(name="ООО Цель", inn="9990009990")
+    response = client.put(
+        f"/api/suppliers/{target.id}",
+        json={"name": "ООО Цель", "inn": "8880008880"},
+    )
+    assert response.status_code == 409
+
+
+# --- DELETE /api/suppliers/{id} ---
+
+def test_delete_supplier_no_invoices(client, factories):
+    supplier = factories.SupplierFactory.create(name="ООО Удаляемый", inn=None)
+    response = client.delete(f"/api/suppliers/{supplier.id}")
+    assert response.status_code == 200
+
+    check = client.get(f"/api/suppliers/{supplier.id}")
+    assert check.status_code == 404
+
+
+def test_delete_supplier_with_invoices_rejected(client, factories):
+    supplier = factories.SupplierFactory.create(name="ООО Занятый Инвойсами", inn=None)
+    doc = factories.DocumentFactory.create()
+    factories.InvoiceFactory.create(document=doc, supplier_id=supplier.id)
+
+    response = client.delete(f"/api/suppliers/{supplier.id}")
+    assert response.status_code == 409
+
+
+def test_delete_supplier_404(client):
+    response = client.delete("/api/suppliers/99999")
+    assert response.status_code == 404

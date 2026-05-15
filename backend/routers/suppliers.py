@@ -2,6 +2,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import crud
@@ -10,6 +11,16 @@ from database import get_db
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class SupplierCreate(BaseModel):
+    name: str
+    inn: str | None = None
+
+
+class SupplierUpdate(BaseModel):
+    name: str
+    inn: str | None = None
 
 
 class MergeRequest(BaseModel):
@@ -23,6 +34,21 @@ def list_suppliers(db: Session = Depends(get_db)):
         {"id": s.id, "name": s.name, "inn": s.inn, "invoice_count": count}
         for s, count in results
     ]
+
+
+@router.post("")
+def create_supplier(data: SupplierCreate, db: Session = Depends(get_db)):
+    name = data.name.strip() if data.name else None
+    inn = (data.inn.strip() or None) if data.inn else None
+    if not name:
+        raise HTTPException(status_code=422, detail="Название поставщика не может быть пустым")
+    try:
+        supplier = crud.create_supplier(db, name=name, inn=inn)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Поставщик с таким ИНН уже существует")
+    logger.info("Created supplier id=%s name=%s inn=%s", supplier.id, supplier.name, supplier.inn)
+    return {"id": supplier.id, "name": supplier.name, "inn": supplier.inn}
 
 
 @router.get("/duplicates")
@@ -55,6 +81,39 @@ def get_supplier(supplier_id: int, db: Session = Depends(get_db)):
             for inv in invoices
         ],
     }
+
+
+@router.put("/{supplier_id}")
+def update_supplier(supplier_id: int, data: SupplierUpdate, db: Session = Depends(get_db)):
+    name = data.name.strip() if data.name else None
+    inn = (data.inn.strip() or None) if data.inn else None
+    if not name:
+        raise HTTPException(status_code=422, detail="Название поставщика не может быть пустым")
+    try:
+        supplier = crud.update_supplier(db, supplier_id, name=name, inn=inn)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Поставщик с таким ИНН уже существует")
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Поставщик не найден")
+    logger.info("Updated supplier id=%s name=%s inn=%s", supplier.id, supplier.name, supplier.inn)
+    return {"id": supplier.id, "name": supplier.name, "inn": supplier.inn}
+
+
+@router.delete("/{supplier_id}")
+def delete_supplier(supplier_id: int, db: Session = Depends(get_db)):
+    from models import Invoice
+    linked = db.query(Invoice).filter(Invoice.supplier_id == supplier_id).count()
+    if linked:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Нельзя удалить: поставщик связан с {linked} инвойсами. Используйте merge.",
+        )
+    supplier = crud.delete_supplier(db, supplier_id)
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Поставщик не найден")
+    logger.info("Deleted supplier id=%s", supplier_id)
+    return {"message": "Удалено"}
 
 
 @router.post("/{supplier_id}/merge")

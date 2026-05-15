@@ -256,16 +256,18 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
 
     invoice.number = data.number
     invoice.date = data.date
-    _name = data.supplier_name.strip() if data.supplier_name else None
-    _inn = data.supplier_inn.strip() if data.supplier_inn else None
-    invoice.supplier_name = _name
-    invoice.supplier_inn = _inn
+    _name = (data.supplier_name.strip() or None) if data.supplier_name else None
+    _inn = (data.supplier_inn.strip() or None) if data.supplier_inn else None
     invoice.vat_rate = data.vat_rate
     if _name:
-        supplier = crud.get_or_create_supplier(db, name=_name, inn=_inn or None)
+        supplier = crud.get_or_create_supplier(db, name=_name, inn=_inn)
         invoice.supplier_id = supplier.id
+        invoice.supplier_name = supplier.name
+        invoice.supplier_inn = supplier.inn
     else:
         invoice.supplier_id = None
+        invoice.supplier_name = None
+        invoice.supplier_inn = None
 
     incoming_ids = {item.id for item in data.items if item.id is not None}
     existing = {item.id: item for item in invoice.items}

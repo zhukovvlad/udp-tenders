@@ -181,14 +181,18 @@ def delete_document(db: Session, doc_id: int):
 def create_invoice(db: Session, document_id: int, number: str, invoice_date: date,
                    supplier_name: str, supplier_inn: str, vat_rate: float,
                    confidence: float, items: list[dict]) -> Invoice:
-    # Нормализуем: пустые строки → None
-    _inn = supplier_inn.strip() if supplier_inn else None
-    _name = supplier_name.strip() if supplier_name else None
+    # Нормализуем: пустые строки и whitespace → None
+    _inn = (supplier_inn.strip() or None) if supplier_inn else None
+    _name = (supplier_name.strip() or None) if supplier_name else None
 
+    # Если поставщик уже есть в БД (напр., по Тому же ИНН) — берём каноническое имя из БД,
+    # а не сырой текст из документа.
     supplier_id = None
     if _name:
-        supplier = get_or_create_supplier(db, name=_name, inn=_inn or None)
+        supplier = get_or_create_supplier(db, name=_name, inn=_inn)
         supplier_id = supplier.id
+        _name = supplier.name
+        _inn = supplier.inn
 
     invoice = Invoice(
         document_id=document_id,
@@ -457,6 +461,43 @@ def get_supplier(db: Session, supplier_id: int) -> Supplier | None:
     return db.query(Supplier).filter(Supplier.id == supplier_id).first()
 
 
+def create_supplier(db: Session, name: str, inn: str | None) -> Supplier:
+    """Создать поставщика напрямую. Не дедуплицирует — если ИНН уже занят, бросает IntegrityError."""
+    supplier = Supplier(name=name, inn=inn or None)
+    db.add(supplier)
+    db.commit()
+    db.refresh(supplier)
+    return supplier
+
+
+def update_supplier(db: Session, supplier_id: int, name: str, inn: str | None) -> Supplier | None:
+    """Обновить каноническое имя/ИНН поставщика и синхронизировать все связанные инвойсы."""
+    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    if not supplier:
+        return None
+    supplier.name = name
+    supplier.inn = inn or None
+    # Синхронизируем отображаемые поля в инвойсах
+    db.query(Invoice).filter(Invoice.supplier_id == supplier_id).update(
+        {Invoice.supplier_name: name, Invoice.supplier_inn: supplier.inn},
+        synchronize_session=False,
+    )
+    db.commit()
+    db.refresh(supplier)
+    return supplier
+
+
+def delete_supplier(db: Session, supplier_id: int) -> Supplier | None:
+    """Удалить поставщика. Возвращает None если не найден. Вызывать нельзя если
+    есть связанные инвойсы — роутер должен проверить это ДО вызова."""
+    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    if not supplier:
+        return None
+    db.delete(supplier)
+    db.commit()
+    return supplier
+
+
 def get_supplier_invoices(db: Session, supplier_id: int) -> list[Invoice]:
     return (
         db.query(Invoice)
@@ -467,21 +508,22 @@ def get_supplier_invoices(db: Session, supplier_id: int) -> list[Invoice]:
 
 
 def get_or_create_supplier(db: Session, name: str, inn: str | None) -> Supplier:
-    """Найти или создать поставщика. По ИНН если задан, иначе по имени (без ИНН)."""
+    """Найти или создать поставщика. По ИНН если задан, иначе по имени (без ИНН).
+
+    Не делает commit — использует flush чтобы оставаться в транзакции вызывающего.
+    """
     if inn:
         supplier = db.query(Supplier).filter(Supplier.inn == inn).first()
         if not supplier:
             supplier = Supplier(name=name, inn=inn)
             db.add(supplier)
-            db.commit()
-            db.refresh(supplier)
+            db.flush()
     else:
         supplier = db.query(Supplier).filter(Supplier.inn.is_(None), Supplier.name == name).first()
         if not supplier:
             supplier = Supplier(name=name, inn=None)
             db.add(supplier)
-            db.commit()
-            db.refresh(supplier)
+            db.flush()
     return supplier
 
 
@@ -492,7 +534,12 @@ def merge_suppliers(db: Session, source_id: int, target_id: int) -> Supplier | N
     if not source or not target:
         return None
     db.query(Invoice).filter(Invoice.supplier_id == source_id).update(
-        {Invoice.supplier_id: target_id}, synchronize_session=False
+        {
+            Invoice.supplier_id: target_id,
+            Invoice.supplier_name: target.name,
+            Invoice.supplier_inn: target.inn,
+        },
+        synchronize_session=False,
     )
     db.delete(source)
     db.commit()
