@@ -312,7 +312,7 @@ describe("ProjectPage", () => {
     const anchorClicks: { download: string; href: string }[] = [];
 
     const origCreateObjectURL = URL.createObjectURL;
-    URL.createObjectURL = (blob: Blob) => {
+    URL.createObjectURL = (_blob: Blob) => {
       const url = `blob:fake-${createdObjectUrls.length}`;
       createdObjectUrls.push(url);
       return url;
