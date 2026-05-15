@@ -209,10 +209,13 @@ def get_monthly_summary(project_id: int, db: Session = Depends(get_db)):
     """Помесячная агрегация по проекту: оборот (материалы), объём, количество СФ."""
     from sqlalchemy import distinct, extract
 
+    year_expr = extract("year", Invoice.date)
+    month_expr = extract("month", Invoice.date)
+
     rows = (
         db.query(
-            extract("year", Invoice.date).label("year"),
-            extract("month", Invoice.date).label("month"),
+            year_expr.label("year"),
+            month_expr.label("month"),
             func.sum(InvoiceItem.amount).label("total_amount"),
             func.sum(InvoiceItem.quantity).label("total_qty"),
             func.count(distinct(Invoice.id)).label("invoice_count"),
@@ -223,14 +226,8 @@ def get_monthly_summary(project_id: int, db: Session = Depends(get_db)):
             Document.project_id == project_id,
             InvoiceItem.item_type == "material",
         )
-        .group_by(
-            extract("year", Invoice.date),
-            extract("month", Invoice.date),
-        )
-        .order_by(
-            extract("year", Invoice.date),
-            extract("month", Invoice.date),
-        )
+        .group_by(year_expr, month_expr)
+        .order_by(year_expr, month_expr)
         .all()
     )
 

@@ -358,11 +358,10 @@ function MonthRow({
   }
 
   return (
-    <TableRow className="group">
+    <TableRow className="group cursor-pointer" onClick={onClick}>
       <TableCell className="p-0">
         <button
           type="button"
-          onClick={onClick}
           className="w-full text-left px-2 py-2 text-fg group-hover:text-accent-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
         >
           {label}
