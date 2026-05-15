@@ -13,8 +13,8 @@ export const settingsApi = {
     const { data } = await api.get<AppSettings>("/settings");
     return data;
   },
-  async update(input: Partial<AppSettings>): Promise<AppSettings> {
-    const { data } = await api.put<AppSettings>("/settings", input);
+  async update(input: Partial<AppSettings>): Promise<{ message: string }> {
+    const { data } = await api.put<{ message: string }>("/settings", input);
     return data;
   },
 };

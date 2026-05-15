@@ -198,6 +198,8 @@ export default function Review() {
             <Button
               variant="danger"
               size="sm"
+              disabled={locked}
+              title={locked ? "Сначала снимите подтверждение" : undefined}
               onClick={() => {
                 if (window.confirm("Удалить документ?")) {
                   remove.mutate(docId, {

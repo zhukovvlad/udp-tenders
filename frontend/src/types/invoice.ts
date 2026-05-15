@@ -23,12 +23,12 @@ export interface InvoiceItem {
 
 /** Позиция счёта в сокращённом виде, как возвращает /dashboard/invoices. */
 export interface DashboardInvoiceItem {
-  raw_name: string;
+  raw_name: string | null;
   item_type: "material" | "delivery" | "other";
   /** Имя класса материала или null — бэкенд сериализует как строку. */
   material_class: string | null;
   quantity: number;
-  unit: string;
+  unit: string | null;
   unit_price: number;
   amount: number;
 }

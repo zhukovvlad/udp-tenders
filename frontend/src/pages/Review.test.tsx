@@ -144,6 +144,15 @@ describe("ReviewPage", () => {
     expect(screen.getByRole("button", { name: /Переразобрать/i })).toBeDisabled();
   });
 
+  it("delete button is disabled when invoice is verified", async () => {
+    setHandlerVerified(100, true);
+    renderWithProviders(<Review />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^Удалить$/i })).toBeDisabled();
+    });
+  });
+
   it("shows confidence issue on Проблемы tab when threshold is above ai_confidence", async () => {
     // sampleDocument.invoices[0].ai_confidence = 0.92; setting threshold to 0.95 triggers the issue
     server.use(

@@ -161,6 +161,8 @@ async def reparse_document(doc_id: int, db: Session = Depends(get_db)):
     if not doc.s3_key:
         logger.warning(f"Reparse: документ id={doc_id} без s3_key")
         raise HTTPException(status_code=400, detail="PDF недоступен в хранилище")
+    if any(inv.verified for inv in doc.invoices):
+        raise HTTPException(status_code=409, detail="Документ содержит подтверждённые СФ — снимите подтверждение перед повторным разбором")
 
     # Удаляем ранее распознанные СФ (cascade удалит позиции)
     old_count = len(doc.invoices)
@@ -249,6 +251,8 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="СФ не найдена")
+    if invoice.verified:
+        raise HTTPException(status_code=409, detail="СФ подтверждена — снимите подтверждение перед редактированием")
 
     invoice.number = data.number
     invoice.date = data.date
