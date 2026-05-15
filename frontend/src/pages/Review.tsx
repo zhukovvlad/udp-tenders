@@ -94,7 +94,8 @@ export default function Review() {
       !inv.number?.trim() ||
       inv.items.length === 0 ||
       inv.items.some((it) => !it.raw_name?.trim() || it.quantity <= 0));
-  const locked = doc.invoices.some((invoice) => invoice.verified);
+  const locked = inv.verified;
+  const documentLocked = doc.invoices.some((invoice) => invoice.verified);
 
   const tabs: Array<{ value: TabKey; label: string }> = [
     { value: "header", label: "Шапка" },
@@ -167,8 +168,8 @@ export default function Review() {
             <button
               type="button"
               onClick={() => reparse.mutate(docId)}
-              disabled={reparse.isPending || locked}
-              title={locked ? "Сначала снимите подтверждение" : undefined}
+              disabled={reparse.isPending || documentLocked}
+              title={documentLocked ? "Сначала снимите подтверждение" : undefined}
               className="text-fg-secondary underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
             >
               Переразобрать
@@ -198,8 +199,8 @@ export default function Review() {
             <Button
               variant="danger"
               size="sm"
-              disabled={locked}
-              title={locked ? "Сначала снимите подтверждение" : undefined}
+              disabled={documentLocked}
+              title={documentLocked ? "Сначала снимите подтверждение" : undefined}
               onClick={() => {
                 if (window.confirm("Удалить документ?")) {
                   remove.mutate(docId, {
