@@ -3,7 +3,6 @@ from datetime import UTC, date, datetime
 from sqlalchemy import func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, joinedload, aliased
-from rapidfuzz import fuzz
 
 from models import (
     Document,
@@ -568,27 +567,6 @@ def merge_suppliers(db: Session, source_id: int, target_id: int) -> Supplier | N
     return target
 
 
-def _find_duplicate_pairs(
-    suppliers: list, threshold: float = 85.0
-) -> list[tuple]:
-    """Чистая функция: сравнивает имена поставщиков по fuzzy ratio и возвращает
-    список кортежей (supplier_a, supplier_b, score) для пар с score >= threshold.
-
-    Принимает любые объекты с атрибутами .id и .name — удобно для тестирования
-    без базы данных.
-    """
-    pairs = []
-    for i in range(len(suppliers)):
-        for j in range(i + 1, len(suppliers)):
-            a = suppliers[i]
-            b = suppliers[j]
-            score = fuzz.WRatio(a.name, b.name)
-            if score >= threshold:
-                pairs.append((a, b, float(score)))
-    return pairs
-
-
-
 def get_supplier_duplicates(db: Session, threshold: float = 85.0) -> list[tuple]:
     """Вернуть пары поставщиков без ИНН с похожими названиями.
 
@@ -604,6 +582,7 @@ def get_supplier_duplicates(db: Session, threshold: float = 85.0) -> list[tuple]
         .filter(S1.inn.is_(None), S2.inn.is_(None))
         .filter(score >= threshold / 100.0)
         .order_by(score.desc())
+        .limit(500)
         .all()
     )
     return [(s1, s2, round(float(score) * 100, 1)) for s1, s2, score in rows]

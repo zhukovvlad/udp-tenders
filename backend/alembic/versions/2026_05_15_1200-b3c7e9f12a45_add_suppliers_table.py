@@ -39,9 +39,10 @@ def upgrade() -> None:
         "CREATE UNIQUE INDEX uq_suppliers_name_no_inn ON suppliers (name) WHERE inn IS NULL"
     )
 
-    # 2. Добавляем FK-колонку в invoices
+    # 2. Добавляем FK-колонку в invoices + индекс для JOIN/GROUP BY по supplier_id
     op.add_column("invoices", sa.Column("supplier_id", sa.Integer(), nullable=True))
     op.create_foreign_key("fk_invoices_supplier_id", "invoices", "suppliers", ["supplier_id"], ["id"])
+    op.create_index("ix_invoices_supplier_id", "invoices", ["supplier_id"])
 
     # 3. Миграция данных: создаём записи поставщиков из существующих инвойсов
     #    3a. По ИНН: каноническое имя = самое частое среди инвойсов с этим ИНН
@@ -120,10 +121,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index("ix_invoices_supplier_id", table_name="invoices")
     op.drop_constraint("fk_invoices_supplier_id", "invoices", type_="foreignkey")
     op.drop_column("invoices", "supplier_id")
     op.execute("DROP INDEX IF EXISTS uq_suppliers_name_no_inn")
     op.execute("DROP INDEX IF EXISTS ix_suppliers_name_trgm")
     op.drop_index(op.f("ix_suppliers_id"), table_name="suppliers")
     op.drop_table("suppliers")
-    op.execute("DROP EXTENSION IF EXISTS pg_trgm")
+    # pg_trgm не удаляем: расширение могло существовать до этой миграции
