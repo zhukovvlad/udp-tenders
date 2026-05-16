@@ -570,17 +570,30 @@ def merge_suppliers(db: Session, source_id: int, target_id: int) -> Supplier | N
 def get_supplier_duplicates(db: Session, threshold: float = 85.0) -> list[tuple]:
     """Вернуть пары поставщиков без ИНН с похожими названиями.
 
-    Использует pg_trgm similarity() на стороне БД — работает с GIN-индексом.
+    Использует pg_trgm similarity() на стороне БД. Для отбора кандидатов
+    применяется индексируемый оператор `%` (использует GIN-индекс), а
+    similarity() остаётся для точного score и сортировки.
     threshold задаётся в диапазоне 0–100 (как fuzz.WRatio), similarity() внутри 0.0–1.0.
     """
+    similarity_threshold = threshold / 100.0
+    # SET LOCAL влияет только на оператор % внутри текущей транзакции.
+    # Параметры не поддерживаются в SET — значение вставляется напрямую.
+    # Безопасно: threshold валидируется роутером на диапазон (0, 100].
+    db.execute(text(f"SET LOCAL pg_trgm.similarity_threshold = {similarity_threshold!r}"))
     S1 = aliased(Supplier)
     S2 = aliased(Supplier)
     score = func.similarity(S1.name, S2.name).label("score")
     rows = (
         db.query(S1, S2, score)
-        .filter(S1.id < S2.id)
-        .filter(S1.inn.is_(None), S2.inn.is_(None))
-        .filter(score >= threshold / 100.0)
+        .select_from(S1)
+        .join(
+            S2,
+            (S1.id < S2.id)
+            & S1.inn.is_(None)
+            & S2.inn.is_(None)
+            & S1.name.op("%")(S2.name),
+        )
+        .filter(score >= similarity_threshold)
         .order_by(score.desc())
         .limit(500)
         .all()
