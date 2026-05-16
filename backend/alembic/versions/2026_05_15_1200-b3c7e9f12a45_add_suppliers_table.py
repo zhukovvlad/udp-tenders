@@ -34,6 +34,10 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_suppliers_id"), "suppliers", ["id"], unique=False)
     op.execute("CREATE INDEX ix_suppliers_name_trgm ON suppliers USING GIN (name gin_trgm_ops)")
+    # Частичный уникальный индекс: уникальность имени для поставщиков без ИНН
+    op.execute(
+        "CREATE UNIQUE INDEX uq_suppliers_name_no_inn ON suppliers (name) WHERE inn IS NULL"
+    )
 
     # 2. Добавляем FK-колонку в invoices
     op.add_column("invoices", sa.Column("supplier_id", sa.Integer(), nullable=True))
@@ -84,27 +88,32 @@ def upgrade() -> None:
     )
 
     # 4. Проставляем supplier_id в инвойсах
-    #    4a. Инвойсы с ИНН
+    #    4a. Инвойсы с ИНН: связываем + канонизируем имя/ИНН из БД
     op.execute(
         """
         UPDATE invoices i
-        SET supplier_id = s.id
+        SET supplier_id    = s.id,
+            supplier_name  = s.name,
+            supplier_inn   = s.inn
         FROM suppliers s
         WHERE i.supplier_inn IS NOT NULL AND BTRIM(i.supplier_inn) != ''
           AND s.inn = BTRIM(i.supplier_inn)
         """
     )
 
-    #    4b. Инвойсы без ИНН — связываем по имени независимо от того, есть ли у
-    #    поставщика ИНН (он мог быть создан в шаге 3a по другим инвойсам с ИНН).
+    #    4b. Инвойсы без ИНН: связываем только с поставщиками, у которых inn IS NULL
+    #    (созданными в шаге 3b) — детерминированно.
     #    i.supplier_id IS NULL — не перетираем уже проставленное в шаге 4a.
     op.execute(
         """
         UPDATE invoices i
-        SET supplier_id = s.id
+        SET supplier_id   = s.id,
+            supplier_name = s.name,
+            supplier_inn  = NULL
         FROM suppliers s
         WHERE (i.supplier_inn IS NULL OR BTRIM(i.supplier_inn) = '')
           AND i.supplier_id IS NULL
+          AND s.inn IS NULL
           AND s.name = BTRIM(i.supplier_name)
         """
     )
@@ -113,6 +122,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_constraint("fk_invoices_supplier_id", "invoices", type_="foreignkey")
     op.drop_column("invoices", "supplier_id")
+    op.execute("DROP INDEX IF EXISTS uq_suppliers_name_no_inn")
     op.execute("DROP INDEX IF EXISTS ix_suppliers_name_trgm")
     op.drop_index(op.f("ix_suppliers_id"), table_name="suppliers")
     op.drop_table("suppliers")

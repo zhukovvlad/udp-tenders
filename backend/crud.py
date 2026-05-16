@@ -1,6 +1,6 @@
 from datetime import UTC, date, datetime
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, joinedload, aliased
 from rapidfuzz import fuzz
@@ -533,9 +533,18 @@ def get_or_create_supplier(db: Session, name: str, inn: str | None) -> Supplier:
     else:
         supplier = db.query(Supplier).filter(Supplier.inn.is_(None), Supplier.name == name).first()
         if not supplier:
-            supplier = Supplier(name=name, inn=None)
-            db.add(supplier)
-            db.flush()
+            stmt = (
+                pg_insert(Supplier)
+                .values(name=name, inn=None)
+                .on_conflict_do_nothing(index_elements=["name"], index_where=text("inn IS NULL"))
+                .returning(Supplier.id)
+            )
+            result = db.execute(stmt)
+            row = result.fetchone()
+            if row:
+                db.flush()
+            # Повторный SELECT — либо только что вставленная, либо вставленная конкурентом
+            supplier = db.query(Supplier).filter(Supplier.inn.is_(None), Supplier.name == name).first()
     return supplier
 
 
@@ -588,12 +597,13 @@ def get_supplier_duplicates(db: Session, threshold: float = 85.0) -> list[tuple]
     """
     S1 = aliased(Supplier)
     S2 = aliased(Supplier)
+    score = func.similarity(S1.name, S2.name).label("score")
     rows = (
-        db.query(S1, S2, func.similarity(S1.name, S2.name).label("score"))
+        db.query(S1, S2, score)
         .filter(S1.id < S2.id)
         .filter(S1.inn.is_(None), S2.inn.is_(None))
-        .filter(func.similarity(S1.name, S2.name) >= threshold / 100.0)
-        .order_by(func.similarity(S1.name, S2.name).desc())
+        .filter(score >= threshold / 100.0)
+        .order_by(score.desc())
         .all()
     )
     return [(s1, s2, round(float(score) * 100, 1)) for s1, s2, score in rows]

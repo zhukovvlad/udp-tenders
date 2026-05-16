@@ -45,9 +45,9 @@ def create_supplier(data: SupplierCreate, db: Session = Depends(get_db)):
     supplier = crud.get_or_create_supplier(db, name=name, inn=inn)
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as err:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Не удалось сохранить поставщика")
+        raise HTTPException(status_code=409, detail="Не удалось сохранить поставщика") from err
     db.refresh(supplier)
     logger.info("Created/found supplier id=%s name=%s inn=%s", supplier.id, supplier.name, supplier.inn)
     return {"id": supplier.id, "name": supplier.name, "inn": supplier.inn}
@@ -93,9 +93,9 @@ def update_supplier(supplier_id: int, data: SupplierUpdate, db: Session = Depend
         raise HTTPException(status_code=422, detail="Название поставщика не может быть пустым")
     try:
         supplier = crud.update_supplier(db, supplier_id, name=name, inn=inn)
-    except IntegrityError:
+    except IntegrityError as err:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Поставщик с таким ИНН уже существует")
+        raise HTTPException(status_code=409, detail="Поставщик с таким ИНН уже существует") from err
     if not supplier:
         raise HTTPException(status_code=404, detail="Поставщик не найден")
     logger.info("Updated supplier id=%s name=%s inn=%s", supplier.id, supplier.name, supplier.inn)
@@ -111,7 +111,14 @@ def delete_supplier(supplier_id: int, db: Session = Depends(get_db)):
             status_code=409,
             detail=f"Нельзя удалить: поставщик связан с {linked} инвойсами. Используйте merge.",
         )
-    supplier = crud.delete_supplier(db, supplier_id)
+    try:
+        supplier = crud.delete_supplier(db, supplier_id)
+    except IntegrityError as err:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Нельзя удалить: поставщик связан с инвойсами. Используйте merge.",
+        ) from err
     if not supplier:
         raise HTTPException(status_code=404, detail="Поставщик не найден")
     logger.info("Deleted supplier id=%s", supplier_id)

@@ -7,4 +7,4 @@ respx==0.21.1
 factory-boy==3.3.1
 faker==30.10.0
 freezegun==1.5.1
-ruff==0.7.4
+ruff==0.7.4rapidfuzz==3.9.7
