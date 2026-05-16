@@ -13,18 +13,8 @@ export interface SupplierListItem {
   categories: string[];
 }
 
-/** Детальная шапка поставщика (карточка). */
-export interface SupplierDetail {
-  id: ID;
-  name: string;
-  inn: string | null;
-  created_at: ISODateTime | null;
-  invoice_count: number;
-  turnover: number;
-  project_count: number;
-  first_invoice_date: ISODate | null;
-  categories: string[];
-}
+/** Детальная шапка поставщика (карточка). Поля идентичны SupplierListItem. */
+export type SupplierDetail = SupplierListItem;
 
 /** Строка таблицы «По объектам» в карточке поставщика. */
 export interface SupplierProjectRow {

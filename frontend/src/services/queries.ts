@@ -365,8 +365,10 @@ export function useMergeSupplier() {
   return useMutation({
     mutationFn: ({ targetId, sourceId }: { targetId: ID; sourceId: ID }) =>
       suppliersApi.merge(targetId, sourceId),
-    onSuccess: () => {
+    onSuccess: (_data, { targetId }) => {
       qc.invalidateQueries({ queryKey: qk.suppliers.all });
+      qc.invalidateQueries({ queryKey: qk.suppliers.detail(targetId) });
+      qc.invalidateQueries({ queryKey: qk.suppliers.projects(targetId) });
       toast.success("Поставщики объединены");
     },
   });

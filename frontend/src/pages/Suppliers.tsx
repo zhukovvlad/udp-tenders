@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSuppliers } from "@/services/queries";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatNumber } from "@/lib/format";
 import type { SupplierListItem } from "@/types/supplier";
 
 // Бейдж «Новый» — если первый счёт появился менее 30 дней назад
@@ -32,7 +32,7 @@ function isNew(firstInvoiceDate: string | null): boolean {
   const d = new Date(firstInvoiceDate);
   if (Number.isNaN(d.getTime())) return false;
   const diffMs = Date.now() - d.getTime();
-  return diffMs < NEW_SUPPLIER_DAYS * 86_400_000;
+  return diffMs >= 0 && diffMs < NEW_SUPPLIER_DAYS * 86_400_000;
 }
 
 type SortKey = "turnover" | "invoice_count" | "name";
@@ -195,10 +195,10 @@ export default function Suppliers() {
                       {formatMoney(s.turnover)}
                     </TableCell>
                     <TableCell className="text-right text-fg-secondary tabular-nums">
-                      {s.project_count}
+                      {formatNumber(s.project_count)}
                     </TableCell>
                     <TableCell className="text-right text-fg-secondary tabular-nums">
-                      {s.invoice_count}
+                      {formatNumber(s.invoice_count)}
                     </TableCell>
                     <TableCell className="text-fg-tertiary">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -218,7 +218,7 @@ export default function Suppliers() {
                   </TableCell>
                   <TableCell className="text-right text-fg-tertiary">—</TableCell>
                   <TableCell className="text-right tabular-nums text-fg">
-                    {totalInvoices}
+                    {formatNumber(totalInvoices)}
                   </TableCell>
                   <TableCell />
                 </TableRow>

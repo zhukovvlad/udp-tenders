@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { Download, Lightbulb, Pencil } from "lucide-react";
 import axios from "axios";
@@ -77,6 +77,16 @@ function EditSupplierDialog({
   const [inn, setInn] = useState(initialInn ?? "");
   const [fieldError, setFieldError] = useState<string | null>(null);
 
+  // Сброс стейта при каждом открытии (иначе прошлые черновики остаются)
+  useEffect(() => {
+    if (open) {
+      setName(initialName);
+      setInn(initialInn ?? "");
+      setFieldError(null);
+      setConflict(null);
+    }
+  }, [open, initialName, initialInn]);
+
   // second-step state: merge confirmation
   const [conflict, setConflict] = useState<InnConflict | null>(null);
 
@@ -116,16 +126,23 @@ function EditSupplierDialog({
             ? detail
             : "Поставщик с такими данными уже существует",
         );
+        return;
       }
+      setFieldError("Не удалось сохранить изменения. Попробуйте ещё раз.");
     }
   }
 
   async function handleMerge() {
     if (!conflict) return;
-    // current supplier (supplierId) is the source; conflict.id is the target (has the INN)
-    await mergeMut.mutateAsync({ targetId: conflict.id, sourceId: supplierId });
-    onClose();
-    navigate(`/suppliers/${conflict.id}`);
+    try {
+      // current supplier (supplierId) is the source; conflict.id is the target (has the INN)
+      await mergeMut.mutateAsync({ targetId: conflict.id, sourceId: supplierId });
+      onClose();
+      navigate(`/suppliers/${conflict.id}`);
+    } catch {
+      setFieldError("Не удалось объединить поставщиков. Попробуйте ещё раз.");
+      setConflict(null);
+    }
   }
 
   const isBusy = updateMut.isPending || mergeMut.isPending;
@@ -318,7 +335,7 @@ function ProjectsTab({ supplierId }: { supplierId: ID }) {
                   {formatNumber(Math.round(r.volume_m3))}
                 </TableCell>
                 <TableCell className="text-right text-fg-secondary tabular-nums">
-                  {r.invoice_count}
+                  {formatNumber(r.invoice_count)}
                 </TableCell>
                 <TableCell>
                   {r.deviation_pct !== null && r.deviation_amount !== null ? (
@@ -347,7 +364,7 @@ function ProjectsTab({ supplierId }: { supplierId: ID }) {
                 {formatNumber(Math.round(totalVolume))}
               </TableCell>
               <TableCell className="text-right tabular-nums text-fg">
-                {totalInvoices}
+                {formatNumber(totalInvoices)}
               </TableCell>
               <TableCell className="text-right text-xs italic text-fg-tertiary">
                 не суммируем
@@ -595,11 +612,11 @@ export default function SupplierPage() {
             />
             <KpiCard
               label="Объектов"
-              value={String(supplier?.project_count ?? "—")}
+              value={supplier ? formatNumber(supplier.project_count) : "—"}
             />
             <KpiCard
               label="Счетов"
-              value={String(supplier?.invoice_count ?? "—")}
+              value={supplier ? formatNumber(supplier.invoice_count) : "—"}
             />
           </>
         )}

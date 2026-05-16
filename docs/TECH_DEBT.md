@@ -48,6 +48,23 @@
   **Решение:** заменить на focusable-компонент с `aria-describedby` или отдельный tooltip-компонент,
   либо вынести значения в видимый текст.
 
+- [ ] **Suppliers / SupplierPage: строки таблиц кликабельны только мышью**
+  `TableRow onClick={() => navigate(...)}` в `Suppliers.tsx` и `SupplierPage.tsx` не работает с клавиатурой.
+  Это cross-cutting concern: тот же паттерн используется в `ProjectPage`, `InvoiceTable` и др.
+  **Решение:** добавить `tabIndex={0}` + `onKeyDown` (Enter/Space) или переосмыслить паттерн в пользу
+  `<a>` / `<Link>` внутри ячейки, что даёт доступность бесплатно.
+
+- [ ] **N+1 в `get_supplier_project_stats`**
+  `crud.get_supplier_project_stats` вызывает `_compute_supplier_project_deviation` в Python-цикле.
+  Для поставщика на N объектах — N × ~5 SQL-запросов. При ≥20 объектах становится заметным.
+  **Решение:** перенести логику deviation в один batched-запрос с GROUP BY supplier_id, project_id,
+  переиспользовав агрегаты из основного SELECT и JOIN reference_prices.
+
+- [ ] **Pydantic response_model для роутера `/api/suppliers`**
+  Эндпоинты `GET /suppliers`, `GET /{id}`, `GET /{id}/projects`, `GET /{id}/invoices-list` возвращают
+  raw dict/list без `response_model=`, что нарушает соглашение кодовой базы и не генерирует OpenAPI-схему.
+  **Решение:** определить Pydantic-схемы в `routers/suppliers.py` и добавить `response_model=` к декораторам.
+
 - [ ] **Backend: TOCTOU-гонки на guard-проверках verified**
   Проверки `invoice.verified` перед `UPDATE`, `DELETE` и `reparse` не атомарны — параллельный запрос
   может подтвердить СФ между проверкой и мутацией. Требует `SELECT FOR UPDATE` или условного

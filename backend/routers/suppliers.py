@@ -123,7 +123,7 @@ def update_supplier(supplier_id: int, data: SupplierUpdate, db: Session = Depend
         detail = (
             "Поставщик с таким названием (без ИНН) уже существует"
             if "uq_suppliers_name_no_inn" in err_str
-            else "Поставщик с таким ИНН уже существует"
+            else "Не удалось сохранить изменения: нарушение уникальности"
         )
         raise HTTPException(status_code=409, detail=detail) from err
     if not supplier:
