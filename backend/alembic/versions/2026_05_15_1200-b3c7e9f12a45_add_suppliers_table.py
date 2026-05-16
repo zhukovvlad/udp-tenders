@@ -85,9 +85,10 @@ def upgrade() -> None:
         """
     )
 
-    #    3b. Без ИНН: каждый уникальный supplier_name — отдельный поставщик.
-    #    Исключаем имена, уже добавленные в шаге 3a (один поставщик мог иметь
-    #    инвойсы и с ИНН, и без него).
+    #    3b. Без ИНН: создаём supplier только если имя не встречалось ни в одном
+    #    уже существующем supplier (ни с ИНН, ни без). Если поставщик уже есть
+    #    в шаге 3a (т.е. у него есть ИНН), дубль не создаём — его no-INN инвойсы
+    #    в шаге 4b получат тот же supplier_id.
     op.execute(
         """
         INSERT INTO suppliers (name, inn, created_at)
@@ -95,7 +96,7 @@ def upgrade() -> None:
         FROM invoices
         WHERE (supplier_inn IS NULL OR BTRIM(supplier_inn) = '')
           AND supplier_name IS NOT NULL AND BTRIM(supplier_name) != ''
-          AND BTRIM(supplier_name) NOT IN (SELECT name FROM suppliers WHERE inn IS NULL)
+          AND BTRIM(supplier_name) NOT IN (SELECT name FROM suppliers)
         """
     )
 
@@ -113,19 +114,18 @@ def upgrade() -> None:
         """
     )
 
-    #    4b. Инвойсы без ИНН: связываем только с поставщиками, у которых inn IS NULL
-    #    (созданными в шаге 3b) — детерминированно.
+    #    4b. Инвойсы без ИНН: связываем по точному совпадению имени с любым supplier
+    #    (с ИНН или без — если поставщик уже был в 3a, берём его канонические данные).
     #    i.supplier_id IS NULL — не перетираем уже проставленное в шаге 4a.
     op.execute(
         """
         UPDATE invoices i
         SET supplier_id   = s.id,
             supplier_name = s.name,
-            supplier_inn  = NULL
+            supplier_inn  = s.inn
         FROM suppliers s
         WHERE (i.supplier_inn IS NULL OR BTRIM(i.supplier_inn) = '')
           AND i.supplier_id IS NULL
-          AND s.inn IS NULL
           AND s.name = BTRIM(i.supplier_name)
         """
     )

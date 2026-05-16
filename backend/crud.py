@@ -523,7 +523,7 @@ def get_or_create_supplier(db: Session, name: str, inn: str | None) -> Supplier:
         if not supplier:
             stmt = (
                 pg_insert(Supplier)
-                .values(name=name, inn=inn)
+                .values(name=name, inn=inn, created_at=datetime.now(UTC).replace(tzinfo=None))
                 .on_conflict_do_nothing(index_elements=["inn"])
                 .returning(Supplier.id)
             )
@@ -540,7 +540,7 @@ def get_or_create_supplier(db: Session, name: str, inn: str | None) -> Supplier:
         if not supplier:
             stmt = (
                 pg_insert(Supplier)
-                .values(name=name, inn=None)
+                .values(name=name, inn=None, created_at=datetime.now(UTC).replace(tzinfo=None))
                 .on_conflict_do_nothing(index_elements=["name"], index_where=text("inn IS NULL"))
                 .returning(Supplier.id)
             )
