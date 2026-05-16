@@ -554,7 +554,7 @@ export default function SupplierPage() {
   const { id } = useParams<{ id: string }>();
   const supplierId = (() => {
     const parsed = Number(id);
-    return Number.isFinite(parsed) ? parsed as ID : null;
+    return Number.isInteger(parsed) && parsed > 0 ? parsed as ID : null;
   })();
 
   const [editOpen, setEditOpen] = useState(false);

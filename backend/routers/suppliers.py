@@ -105,7 +105,7 @@ def update_supplier(supplier_id: int, data: SupplierUpdate, db: Session = Depend
     except IntegrityError as err:
         db.rollback()
         err_str = str(err.orig).lower() if err.orig else ""
-        if inn and "uq_suppliers_name_no_inn" not in err_str:
+        if inn and "uq_suppliers_name_no_inn" not in err_str and "inn" in err_str:
             # ИНН уже занят другим поставщиком — ищем кто именно
             existing = db.query(SupplierModel).filter(
                 SupplierModel.inn == inn,

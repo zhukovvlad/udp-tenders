@@ -87,7 +87,7 @@ export default function Suppliers() {
         serif
         title="Поставщики"
         subtitle={
-          suppliersQ.isSuccess
+          suppliersQ.isSuccess && suppliers.length > 0
             ? `${suppliers.length} поставщик${pluralRu(suppliers.length)} · общий оборот ${formatMoney(suppliers.reduce((s, r) => s + r.turnover, 0))}`
             : "Компании, с которыми работает портфель"
         }
