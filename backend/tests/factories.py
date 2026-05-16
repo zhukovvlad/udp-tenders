@@ -15,6 +15,7 @@ from models import (
     MaterialClass,
     Project,
     ReferencePrice,
+    Supplier,
 )
 
 # Глобальный slot — устанавливается фикстурой db_session
@@ -45,6 +46,14 @@ class ProjectFactory(_BaseFactory):
 
     name = factory.Sequence(lambda n: f"Объект {n}")
     contract_number = factory.Sequence(lambda n: f"Д-{n:03d}")
+
+
+class SupplierFactory(_BaseFactory):
+    class Meta:
+        model = Supplier
+
+    name = factory.Sequence(lambda n: f"ООО Поставщик {n}")
+    inn = factory.Sequence(lambda n: f"{n:010d}")
 
 
 class MaterialClassFactory(_BaseFactory):
@@ -87,6 +96,7 @@ class InvoiceFactory(_BaseFactory):
         model = Invoice
 
     document = factory.SubFactory(DocumentFactory)
+    supplier_id = None
     number = factory.Sequence(lambda n: f"СФ-{n}")
     date = date(2026, 3, 15)
     supplier_name = "ООО Поставщик"

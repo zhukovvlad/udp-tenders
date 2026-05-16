@@ -15,7 +15,7 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 from database import engine
-from routers import dashboard, export, invoices, material_classes, projects, reference_prices, settings
+from routers import dashboard, export, invoices, material_classes, projects, reference_prices, settings, suppliers
 from s3 import ensure_bucket
 
 try:
@@ -58,6 +58,7 @@ app.include_router(invoices.router, prefix="/api/invoices", tags=["invoices"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(export.router, prefix="/api/export", tags=["export"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
+app.include_router(suppliers.router, prefix="/api/suppliers", tags=["suppliers"])
 
 
 @app.get("/api/health")

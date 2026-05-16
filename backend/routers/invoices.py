@@ -211,7 +211,7 @@ async def upload_pdf(
     file_bytes = await file.read()
     logger.info(f"Upload: получен файл '{file.filename}' (project={project_id}, размер={len(file_bytes)})")
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     object_name = f"{now.year}/{now.month:02d}/{uuid.uuid4().hex}_{file.filename}"
 
     try:
@@ -256,9 +256,20 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
 
     invoice.number = data.number
     invoice.date = data.date
-    invoice.supplier_name = data.supplier_name
-    invoice.supplier_inn = data.supplier_inn
+    _name = (data.supplier_name.strip() or None) if data.supplier_name else None
+    _inn = (data.supplier_inn.strip() or None) if data.supplier_inn else None
+    if _inn and not _name:
+        raise HTTPException(status_code=422, detail="supplier_name обязателен при указании supplier_inn")
     invoice.vat_rate = data.vat_rate
+    if _name:
+        supplier = crud.get_or_create_supplier(db, name=_name, inn=_inn)
+        invoice.supplier_id = supplier.id
+        invoice.supplier_name = supplier.name
+        invoice.supplier_inn = supplier.inn
+    else:
+        invoice.supplier_id = None
+        invoice.supplier_name = None
+        invoice.supplier_inn = None
 
     incoming_ids = {item.id for item in data.items if item.id is not None}
     existing = {item.id: item for item in invoice.items}

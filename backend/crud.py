@@ -1,7 +1,8 @@
 from datetime import UTC, date, datetime
 
-from sqlalchemy import func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import Session, joinedload, aliased
 
 from models import (
     Document,
@@ -11,6 +12,7 @@ from models import (
     PriceCalculation,
     Project,
     ReferencePrice,
+    Supplier,
 )
 
 # Sentinel: field was not provided in the update payload (differs from explicit None)
@@ -178,14 +180,32 @@ def delete_document(db: Session, doc_id: int):
 # --- Invoices ---
 
 def create_invoice(db: Session, document_id: int, number: str, invoice_date: date,
-                   supplier_name: str, supplier_inn: str, vat_rate: float,
+                   supplier_name: str | None, supplier_inn: str | None, vat_rate: float,
                    confidence: float, items: list[dict]) -> Invoice:
+    # Нормализуем: пустые строки и whitespace → None
+    _inn = (supplier_inn.strip() or None) if supplier_inn else None
+    _name = (supplier_name.strip() or None) if supplier_name else None
+
+    # ИНН без имени — сбрасываем: нет смысла хранить ИНН без привязанного Supplier.
+    if not _name:
+        _inn = None
+
+    # Если поставщик уже есть в БД (напр., по тому же ИНН) — берём каноническое имя из БД,
+    # а не сырой текст из документа.
+    supplier_id = None
+    if _name:
+        supplier = get_or_create_supplier(db, name=_name, inn=_inn)
+        supplier_id = supplier.id
+        _name = supplier.name
+        _inn = supplier.inn
+
     invoice = Invoice(
         document_id=document_id,
+        supplier_id=supplier_id,
         number=number,
         date=invoice_date,
-        supplier_name=supplier_name,
-        supplier_inn=supplier_inn,
+        supplier_name=_name,
+        supplier_inn=_inn,
         vat_rate=vat_rate,
         ai_confidence=confidence,
     )
@@ -426,3 +446,168 @@ def recalculate_prices(db: Session, project_id: int, material_class_id: int,
         db.commit()
         db.refresh(calc)
     return calc
+
+
+# --- Suppliers ---
+
+def get_suppliers(db: Session) -> list[tuple]:
+    """Возвращает список (Supplier, invoice_count)."""
+    results = (
+        db.query(Supplier, func.count(Invoice.id).label("invoice_count"))
+        .outerjoin(Invoice, Invoice.supplier_id == Supplier.id)
+        .group_by(Supplier.id)
+        .order_by(Supplier.name)
+        .all()
+    )
+    return results
+
+
+def get_supplier(db: Session, supplier_id: int) -> Supplier | None:
+    return db.query(Supplier).filter(Supplier.id == supplier_id).first()
+
+
+def create_supplier(db: Session, name: str, inn: str | None) -> Supplier:
+    """Создать поставщика напрямую. Не дедуплицирует — если ИНН уже занят, бросает IntegrityError."""
+    supplier = Supplier(name=name, inn=inn or None)
+    db.add(supplier)
+    db.commit()
+    db.refresh(supplier)
+    return supplier
+
+
+def update_supplier(db: Session, supplier_id: int, name: str, inn: str | None) -> Supplier | None:
+    """Обновить каноническое имя/ИНН поставщика и синхронизировать все связанные инвойсы."""
+    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    if not supplier:
+        return None
+    supplier.name = name
+    supplier.inn = inn or None
+    # Синхронизируем отображаемые поля в инвойсах
+    db.query(Invoice).filter(Invoice.supplier_id == supplier_id).update(
+        {Invoice.supplier_name: name, Invoice.supplier_inn: supplier.inn},
+        synchronize_session=False,
+    )
+    db.commit()
+    db.refresh(supplier)
+    return supplier
+
+
+def delete_supplier(db: Session, supplier_id: int) -> Supplier | None:
+    """Удалить поставщика. Возвращает None если не найден. Вызывать нельзя если
+    есть связанные инвойсы — роутер должен проверить это ДО вызова."""
+    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    if not supplier:
+        return None
+    db.delete(supplier)
+    db.commit()
+    return supplier
+
+
+def get_supplier_invoices(db: Session, supplier_id: int) -> list[Invoice]:
+    return (
+        db.query(Invoice)
+        .filter(Invoice.supplier_id == supplier_id)
+        .order_by(Invoice.date.desc())
+        .all()
+    )
+
+
+def get_or_create_supplier(db: Session, name: str, inn: str | None) -> Supplier:
+    """Найти или создать поставщика. По ИНН если задан, иначе по имени (без ИНН).
+
+    Не делает commit — использует flush чтобы оставаться в транзакции вызывающего.
+    Защищён от race condition на уникальный ИНН через INSERT ... ON CONFLICT DO NOTHING.
+    """
+    if inn:
+        supplier = db.query(Supplier).filter(Supplier.inn == inn).first()
+        if not supplier:
+            stmt = (
+                pg_insert(Supplier)
+                .values(name=name, inn=inn, created_at=datetime.now(UTC).replace(tzinfo=None))
+                .on_conflict_do_nothing(index_elements=["inn"])
+                .returning(Supplier.id)
+            )
+            result = db.execute(stmt)
+            row = result.fetchone()
+            if row:
+                db.flush()
+            # Повторный SELECT — либо только что вставленная, либо вставленная конкурентом
+            supplier = db.query(Supplier).filter(Supplier.inn == inn).first()
+            if supplier is None:
+                raise RuntimeError(f"get_or_create_supplier: не удалось получить поставщика по ИНН={inn!r}")
+    else:
+        supplier = db.query(Supplier).filter(Supplier.inn.is_(None), Supplier.name == name).first()
+        if not supplier:
+            stmt = (
+                pg_insert(Supplier)
+                .values(name=name, inn=None, created_at=datetime.now(UTC).replace(tzinfo=None))
+                .on_conflict_do_nothing(index_elements=["name"], index_where=text("inn IS NULL"))
+                .returning(Supplier.id)
+            )
+            result = db.execute(stmt)
+            row = result.fetchone()
+            if row:
+                db.flush()
+            # Повторный SELECT — либо только что вставленная, либо вставленная конкурентом
+            supplier = db.query(Supplier).filter(Supplier.inn.is_(None), Supplier.name == name).first()
+            if supplier is None:
+                raise RuntimeError(f"get_or_create_supplier: не удалось получить поставщика по имени={name!r}")
+    return supplier
+
+
+def merge_suppliers(db: Session, source_id: int, target_id: int) -> Supplier | None:
+    """Перенести все инвойсы от source к target и удалить source."""
+    if source_id == target_id:
+        return db.query(Supplier).filter(Supplier.id == target_id).first()
+    source = db.query(Supplier).filter(Supplier.id == source_id).first()
+    target = db.query(Supplier).filter(Supplier.id == target_id).first()
+    if not source or not target:
+        return None
+    db.query(Invoice).filter(Invoice.supplier_id == source_id).update(
+        {
+            Invoice.supplier_id: target_id,
+            Invoice.supplier_name: target.name,
+            Invoice.supplier_inn: target.inn,
+        },
+        synchronize_session=False,
+    )
+    db.delete(source)
+    db.commit()
+    db.refresh(target)
+    return target
+
+
+def get_supplier_duplicates(db: Session, threshold: float = 85.0) -> list[tuple]:
+    """Вернуть пары поставщиков без ИНН с похожими названиями.
+
+    Использует pg_trgm similarity() на стороне БД. Для отбора кандидатов
+    применяется индексируемый оператор `%` (использует GIN-индекс), а
+    similarity() остаётся для точного score и сортировки.
+    threshold задаётся в диапазоне 0–100 как pg_trgm similarity * 100.
+    Внутри SQL similarity() работает в диапазоне 0.0–1.0.
+    Возвращаемый score также равен pg_trgm similarity * 100.
+    """
+    similarity_threshold = threshold / 100.0
+    # SET LOCAL влияет только на оператор % внутри текущей транзакции.
+    # Параметры не поддерживаются в SET — значение вставляется напрямую.
+    # Безопасно: threshold валидируется роутером на диапазон (0, 100].
+    db.execute(text(f"SET LOCAL pg_trgm.similarity_threshold = {similarity_threshold!r}"))
+    S1 = aliased(Supplier)
+    S2 = aliased(Supplier)
+    score = func.similarity(S1.name, S2.name).label("score")
+    rows = (
+        db.query(S1, S2, score)
+        .select_from(S1)
+        .join(
+            S2,
+            (S1.id < S2.id)
+            & S1.inn.is_(None)
+            & S2.inn.is_(None)
+            & S1.name.op("%")(S2.name),
+        )
+        .filter(score >= similarity_threshold)
+        .order_by(score.desc())
+        .limit(500)
+        .all()
+    )
+    return [(s1, s2, round(float(score) * 100, 1)) for s1, s2, score in rows]

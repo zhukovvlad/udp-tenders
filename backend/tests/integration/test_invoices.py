@@ -241,3 +241,126 @@ def test_delete_document_with_verified_invoice_returns_409(client, factories):
 
     response = client.delete(f"/api/invoices/documents/{doc.id}")
     assert response.status_code == 409
+
+
+# --- Интеграция с поставщиками ---
+
+def test_upload_creates_supplier_record(client, factories, sample_pdf_bytes, mock_openrouter, db_session):
+    """После парсинга PDF в таблице suppliers должна появиться запись для поставщика из СФ."""
+    from models import Invoice, Supplier
+
+    project = factories.ProjectFactory.create()
+    resp = client.post(
+        "/api/invoices/upload",
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
+        data={"project_id": project.id},
+    )
+    assert resp.status_code == 200
+
+    # Фикстура happy_path содержит supplier_inn="0000000000", supplier_name="ООО Поставщик"
+    supplier = db_session.query(Supplier).filter(Supplier.inn == "0000000000").first()
+    assert supplier is not None
+    assert supplier.name == "ООО Поставщик"
+
+    # Invoice должен быть связан с этим поставщиком
+    inv = db_session.query(Invoice).filter(Invoice.supplier_inn == "0000000000").first()
+    assert inv is not None
+    assert inv.supplier_id == supplier.id
+
+
+def test_upload_reuse_existing_supplier(client, factories, sample_pdf_bytes, mock_openrouter, db_session):
+    """Два инвойса с одним ИНН → один supplier в БД."""
+    from models import Invoice, Supplier
+
+    p1 = factories.ProjectFactory.create()
+    p2 = factories.ProjectFactory.create()
+
+    resp1 = client.post(
+        "/api/invoices/upload",
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
+        data={"project_id": p1.id},
+    )
+    assert resp1.status_code == 200
+    resp2 = client.post(
+        "/api/invoices/upload",
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
+        data={"project_id": p2.id},
+    )
+    assert resp2.status_code == 200
+
+    suppliers = db_session.query(Supplier).filter(Supplier.inn == "0000000000").all()
+    assert len(suppliers) == 1
+
+    invoices = db_session.query(Invoice).filter(Invoice.supplier_inn == "0000000000").all()
+    assert len(invoices) == 2
+    assert all(inv.supplier_id == suppliers[0].id for inv in invoices)
+
+
+def test_update_invoice_links_supplier(client, factories, db_session):
+    """PUT /invoices/{id} с новыми данными поставщика создаёт/находит запись в suppliers."""
+    from models import Invoice, Supplier
+
+    invoice = factories.InvoiceFactory.create(supplier_id=None, supplier_name=None, supplier_inn=None)
+
+    resp = client.put(
+        f"/api/invoices/{invoice.id}",
+        json={
+            "number": "СФ-UPD",
+            "date": "2026-05-01",
+            "supplier_name": "ООО Новый",
+            "supplier_inn": "9876543210",
+            "vat_rate": 20.0,
+            "items": [],
+        },
+    )
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    inv = db_session.query(Invoice).filter(Invoice.id == invoice.id).first()
+    assert inv.supplier_id is not None
+    supplier = db_session.query(Supplier).filter(Supplier.id == inv.supplier_id).first()
+    assert supplier.inn == "9876543210"
+    assert supplier.name == "ООО Новый"
+
+
+def test_update_invoice_clears_supplier_when_name_empty(client, factories, db_session):
+    """PUT /invoices/{id} с пустым supplier_name → supplier_id = None."""
+    from models import Invoice
+
+    supplier = factories.SupplierFactory.create(name="ООО Старый", inn="1231231230")
+    invoice = factories.InvoiceFactory.create(supplier_id=supplier.id, supplier_name="ООО Старый")
+
+    resp = client.put(
+        f"/api/invoices/{invoice.id}",
+        json={
+            "number": invoice.number,
+            "date": str(invoice.date),
+            "supplier_name": "",
+            "supplier_inn": None,
+            "vat_rate": 20.0,
+            "items": [],
+        },
+    )
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    inv = db_session.query(Invoice).filter(Invoice.id == invoice.id).first()
+    assert inv.supplier_id is None
+
+
+def test_update_invoice_inn_without_name_returns_422(client, factories):
+    """PUT /invoices/{id}: supplier_inn без supplier_name → 422."""
+    invoice = factories.InvoiceFactory.create(supplier_id=None, supplier_name=None)
+
+    resp = client.put(
+        f"/api/invoices/{invoice.id}",
+        json={
+            "number": invoice.number,
+            "date": str(invoice.date),
+            "supplier_name": None,
+            "supplier_inn": "7707083893",
+            "vat_rate": 20.0,
+            "items": [],
+        },
+    )
+    assert resp.status_code == 422
