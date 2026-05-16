@@ -186,6 +186,10 @@ def create_invoice(db: Session, document_id: int, number: str, invoice_date: dat
     _inn = (supplier_inn.strip() or None) if supplier_inn else None
     _name = (supplier_name.strip() or None) if supplier_name else None
 
+    # ИНН без имени — сбрасываем: нет смысла хранить ИНН без привязанного Supplier.
+    if not _name:
+        _inn = None
+
     # Если поставщик уже есть в БД (напр., по тому же ИНН) — берём каноническое имя из БД,
     # а не сырой текст из документа.
     supplier_id = None

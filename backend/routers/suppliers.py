@@ -95,7 +95,12 @@ def update_supplier(supplier_id: int, data: SupplierUpdate, db: Session = Depend
         supplier = crud.update_supplier(db, supplier_id, name=name, inn=inn)
     except IntegrityError as err:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Поставщик с таким ИНН уже существует") from err
+        err_str = str(err.orig).lower() if err.orig else ""
+        if "uq_suppliers_name_no_inn" in err_str:
+            detail = "Поставщик с таким названием (без ИНН) уже существует"
+        else:
+            detail = "Поставщик с таким ИНН уже существует"
+        raise HTTPException(status_code=409, detail=detail) from err
     if not supplier:
         raise HTTPException(status_code=404, detail="Поставщик не найден")
     logger.info("Updated supplier id=%s name=%s inn=%s", supplier.id, supplier.name, supplier.inn)

@@ -95,7 +95,7 @@ def upgrade() -> None:
         FROM invoices
         WHERE (supplier_inn IS NULL OR BTRIM(supplier_inn) = '')
           AND supplier_name IS NOT NULL AND BTRIM(supplier_name) != ''
-          AND BTRIM(supplier_name) NOT IN (SELECT name FROM suppliers)
+          AND BTRIM(supplier_name) NOT IN (SELECT name FROM suppliers WHERE inn IS NULL)
         """
     )
 
