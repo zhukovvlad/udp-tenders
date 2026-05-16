@@ -19,8 +19,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # 0. Расширение pg_trgm — нужно для GIN-индекса на name и similarity()
-    op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    # 0. pg_trgm нужен для GIN-индекса на name и similarity().
+    #    Пытаемся создать расширение; если прав недостаточно — падаем с понятным
+    #    сообщением, чтобы администратор установил его вручную перед миграцией.
+    try:
+        op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "permission denied" in msg or "must be superuser" in msg or "insufficient" in msg:
+            raise RuntimeError(
+                "PostgreSQL extension 'pg_trgm' is required by migration b3c7e9f12a45 "
+                "but cannot be created with the current DB role. "
+                "Run: CREATE EXTENSION pg_trgm; as a DB superuser before applying this migration."
+            ) from exc
+        raise
 
     # 1. Создаём таблицу suppliers
     op.create_table(
