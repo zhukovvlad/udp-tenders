@@ -529,6 +529,8 @@ def get_or_create_supplier(db: Session, name: str, inn: str | None) -> Supplier:
                 db.flush()
             # Повторный SELECT — либо только что вставленная, либо вставленная конкурентом
             supplier = db.query(Supplier).filter(Supplier.inn == inn).first()
+            if supplier is None:
+                raise RuntimeError(f"get_or_create_supplier: не удалось получить поставщика по ИНН={inn!r}")
     else:
         supplier = db.query(Supplier).filter(Supplier.inn.is_(None), Supplier.name == name).first()
         if not supplier:
@@ -544,11 +546,15 @@ def get_or_create_supplier(db: Session, name: str, inn: str | None) -> Supplier:
                 db.flush()
             # Повторный SELECT — либо только что вставленная, либо вставленная конкурентом
             supplier = db.query(Supplier).filter(Supplier.inn.is_(None), Supplier.name == name).first()
+            if supplier is None:
+                raise RuntimeError(f"get_or_create_supplier: не удалось получить поставщика по имени={name!r}")
     return supplier
 
 
 def merge_suppliers(db: Session, source_id: int, target_id: int) -> Supplier | None:
     """Перенести все инвойсы от source к target и удалить source."""
+    if source_id == target_id:
+        return db.query(Supplier).filter(Supplier.id == target_id).first()
     source = db.query(Supplier).filter(Supplier.id == source_id).first()
     target = db.query(Supplier).filter(Supplier.id == target_id).first()
     if not source or not target:
@@ -573,7 +579,9 @@ def get_supplier_duplicates(db: Session, threshold: float = 85.0) -> list[tuple]
     Использует pg_trgm similarity() на стороне БД. Для отбора кандидатов
     применяется индексируемый оператор `%` (использует GIN-индекс), а
     similarity() остаётся для точного score и сортировки.
-    threshold задаётся в диапазоне 0–100 (как fuzz.WRatio), similarity() внутри 0.0–1.0.
+    threshold задаётся в диапазоне 0–100 как pg_trgm similarity * 100.
+    Внутри SQL similarity() работает в диапазоне 0.0–1.0.
+    Возвращаемый score также равен pg_trgm similarity * 100.
     """
     similarity_threshold = threshold / 100.0
     # SET LOCAL влияет только на оператор % внутри текущей транзакции.

@@ -1,7 +1,7 @@
 """Unit tests for supplier deduplication logic (без БД)."""
-from types import SimpleNamespace
-
 from rapidfuzz import fuzz
+
+from tests.factories import SupplierFactory
 
 
 def _find_duplicate_pairs(suppliers: list, threshold: float = 85.0) -> list[tuple]:
@@ -17,24 +17,17 @@ def _find_duplicate_pairs(suppliers: list, threshold: float = 85.0) -> list[tupl
     return pairs
 
 
-def _make(id_: int, name: str):
-    s = SimpleNamespace()
-    s.id = id_
-    s.name = name
-    return s
-
-
 def test_find_duplicate_pairs_empty():
     assert _find_duplicate_pairs([]) == []
 
 
 def test_find_duplicate_pairs_single():
-    assert _find_duplicate_pairs([_make(1, "ООО Бетон")]) == []
+    assert _find_duplicate_pairs([SupplierFactory.build(id=1, name="ООО Бетон")]) == []
 
 
 def test_find_duplicate_pairs_identical_names():
-    a = _make(1, "ООО СтройБетон")
-    b = _make(2, "ООО СтройБетон")
+    a = SupplierFactory.build(id=1, name="ООО СтройБетон")
+    b = SupplierFactory.build(id=2, name="ООО СтройБетон")
     pairs = _find_duplicate_pairs([a, b])
     assert len(pairs) == 1
     assert pairs[0][0].id == 1
@@ -43,9 +36,9 @@ def test_find_duplicate_pairs_identical_names():
 
 
 def test_find_duplicate_pairs_finds_similar():
-    a = _make(1, "ООО СтройБетон")
-    b = _make(2, "ООО Строй Бетон")          # токены те же, пробел лишний
-    c = _make(3, "ЗАО Металл Трейд")         # совсем другое
+    a = SupplierFactory.build(id=1, name="ООО СтройБетон")
+    b = SupplierFactory.build(id=2, name="ООО Строй Бетон")          # токены те же, пробел лишний
+    c = SupplierFactory.build(id=3, name="ЗАО Металл Трейд")         # совсем другое
     pairs = _find_duplicate_pairs([a, b, c])
     assert len(pairs) == 1
     pair_ids = {pairs[0][0].id, pairs[0][1].id}
@@ -53,15 +46,15 @@ def test_find_duplicate_pairs_finds_similar():
 
 
 def test_find_duplicate_pairs_below_threshold():
-    a = _make(1, "ООО СтройКомплект")
-    b = _make(2, "ЗАО РосМеталл")
+    a = SupplierFactory.build(id=1, name="ООО СтройКомплект")
+    b = SupplierFactory.build(id=2, name="ЗАО РосМеталл")
     pairs = _find_duplicate_pairs([a, b], threshold=85.0)
     assert pairs == []
 
 
 def test_find_duplicate_pairs_custom_threshold():
-    a = _make(1, "ООО Бетон")
-    b = _make(2, "ООО Бетоны")
+    a = SupplierFactory.build(id=1, name="ООО Бетон")
+    b = SupplierFactory.build(id=2, name="ООО Бетоны")
     # При пороге 50 должны найтись, при 100 — нет
     pairs_50 = _find_duplicate_pairs([a, b], threshold=50.0)
     pairs_100 = _find_duplicate_pairs([a, b], threshold=100.0)
@@ -71,6 +64,6 @@ def test_find_duplicate_pairs_custom_threshold():
 
 def test_find_duplicate_pairs_n_pairs():
     """При 3 схожих строках должно быть 3 пары."""
-    suppliers = [_make(i, f"ООО Бетон {i}") for i in range(3)]
+    suppliers = [SupplierFactory.build(id=i, name=f"ООО Бетон {i}") for i in range(3)]
     pairs = _find_duplicate_pairs(suppliers, threshold=50.0)
     assert len(pairs) == 3

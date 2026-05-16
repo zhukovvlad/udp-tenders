@@ -32,7 +32,6 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("inn"),
     )
-    op.create_index(op.f("ix_suppliers_id"), "suppliers", ["id"], unique=False)
     op.execute("CREATE INDEX ix_suppliers_name_trgm ON suppliers USING GIN (name gin_trgm_ops)")
     # Частичный уникальный индекс: уникальность имени для поставщиков без ИНН
     op.execute(
@@ -126,6 +125,5 @@ def downgrade() -> None:
     op.drop_column("invoices", "supplier_id")
     op.execute("DROP INDEX IF EXISTS uq_suppliers_name_no_inn")
     op.execute("DROP INDEX IF EXISTS ix_suppliers_name_trgm")
-    op.drop_index(op.f("ix_suppliers_id"), table_name="suppliers")
     op.drop_table("suppliers")
     # pg_trgm не удаляем: расширение могло существовать до этой миграции
