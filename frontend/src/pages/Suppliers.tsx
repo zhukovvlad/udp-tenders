@@ -173,8 +173,11 @@ export default function Suppliers() {
                 {filtered.map((s) => (
                   <TableRow
                     key={s.id}
+                    role="button"
+                    tabIndex={0}
                     className="cursor-pointer hover:bg-surface-hover"
                     onClick={() => navigate(`/suppliers/${s.id}`)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(`/suppliers/${s.id}`); } }}
                   >
                     <TableCell>
                       <div className="flex items-baseline gap-2">

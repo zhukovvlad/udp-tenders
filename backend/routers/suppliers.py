@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 import crud
 from database import get_db
+from models import Supplier as SupplierModel
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,6 @@ def update_supplier(supplier_id: int, data: SupplierUpdate, db: Session = Depend
         err_str = str(err.orig).lower() if err.orig else ""
         if inn and "uq_suppliers_name_no_inn" not in err_str:
             # ИНН уже занят другим поставщиком — ищем кто именно
-            from models import Supplier as SupplierModel
             existing = db.query(SupplierModel).filter(
                 SupplierModel.inn == inn,
                 SupplierModel.id != supplier_id,
@@ -123,6 +123,7 @@ def update_supplier(supplier_id: int, data: SupplierUpdate, db: Session = Depend
         detail = (
             "Поставщик с таким названием (без ИНН) уже существует"
             if "uq_suppliers_name_no_inn" in err_str
+            else "Поставщик с таким ИНН уже существует" if inn
             else "Не удалось сохранить изменения: нарушение уникальности"
         )
         raise HTTPException(status_code=409, detail=detail) from err

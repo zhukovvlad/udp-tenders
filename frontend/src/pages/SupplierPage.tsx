@@ -319,8 +319,11 @@ function ProjectsTab({ supplierId }: { supplierId: ID }) {
             {rows.map((r) => (
               <TableRow
                 key={r.project_id}
+                role="button"
+                tabIndex={0}
                 className="cursor-pointer hover:bg-surface-hover"
                 onClick={() => navigate(`/projects/${r.project_id}`)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(`/projects/${r.project_id}`); } }}
               >
                 <TableCell>
                   <div className="font-medium text-fg">{r.project_name}</div>
@@ -437,8 +440,11 @@ function InvoicesTab({ supplierId, projectRows }: { supplierId: ID; projectRows:
               {rows.map((inv) => (
                 <TableRow
                   key={inv.id}
+                  role="button"
+                  tabIndex={0}
                   className="cursor-pointer hover:bg-surface-hover"
                   onClick={() => navigate(`/documents/${inv.document_id}`)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(`/documents/${inv.document_id}`); } }}
                 >
                   <TableCell className="font-medium">{inv.number}</TableCell>
                   <TableCell className="text-fg-secondary tabular-nums">
