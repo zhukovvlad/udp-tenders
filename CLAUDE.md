@@ -105,6 +105,12 @@ Supplier → Invoices (one supplier, many projects)
 - `crud.get_supplier_project_stats` — per-project rows with volume_m3 and deviation_pct/amount
 - `crud._compute_supplier_project_deviation` — deviation scoped to supplier's own invoices (same aggregation logic as `compute_full_deviation`, but uses the most recent reference price per class without period filtering — intentional, see docstring). Do not use when period-accurate comparison with the project page is required.
 
+**Supplier deduplication rules** (enforced in both PDF parsing and manual edit):
+- `crud.get_or_create_supplier(db, name, inn)` — deduplicate by INN if present, else by exact name where `inn IS NULL`. Race-condition safe via `INSERT ... ON CONFLICT DO NOTHING` + re-SELECT. Always sets `created_at` explicitly (ORM default doesn't fire through `pg_insert`).
+- `supplier_inn` without `supplier_name` is invalid: `PUT /api/invoices/{id}` returns 422; `crud.create_invoice()` silently clears `_inn` (no Supplier row without a name).
+- Editing an invoice sets `supplier_name`/`supplier_inn` from the **canonical DB record** (not raw user input) when INN matches an existing supplier.
+- `PUT /suppliers/{id}` returns 409 with different messages for INN conflict (`suppliers.inn` unique) vs name conflict (`uq_suppliers_name_no_inn` partial index for inn IS NULL rows).
+
 ---
 
 ## Testing conventions
@@ -164,7 +170,6 @@ See `docs/TECH_DEBT.md` for the full list. Key items:
 - `auto_calculate` has N+1 queries (dashboard router) — don't make it worse.
 - `Review.tsx` always uses `invoices[0]` — known bug, multi-invoice docs broken.
 - No composite index on `PriceCalculation(project_id, material_class_id, period_start, period_end)`.
-- `datetime.utcnow()` used in a few places — should be `datetime.now(UTC)`.
 
 ---
 
