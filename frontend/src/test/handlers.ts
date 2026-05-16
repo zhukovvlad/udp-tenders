@@ -7,6 +7,9 @@ import {
   sampleDashboardInvoices,
   sampleMonthlySummary,
   sampleReferencePrice,
+  sampleSupplier,
+  sampleSupplierProjectRows,
+  sampleSupplierInvoices,
 } from "./fixtures";
 
 // Mutable state so that verify/unverify mutations are reflected in subsequent GETs.
@@ -100,4 +103,12 @@ export const handlers = [
     })
   ),
   http.put("/api/settings", () => HttpResponse.json({ message: "Настройки сохранены" })),
+
+  // Suppliers
+  http.get("/api/suppliers", () => HttpResponse.json([sampleSupplier])),
+  http.get("/api/suppliers/:id", () => HttpResponse.json(sampleSupplier)),
+  http.put("/api/suppliers/:id", () => HttpResponse.json({ id: 1, name: "ООО «ЭРКОН»", inn: "7723746396" })),
+  http.post("/api/suppliers/:id/merge", () => HttpResponse.json({ id: 1, name: "ООО «ЭРКОН»", inn: "7723746396" })),
+  http.get("/api/suppliers/:id/projects", () => HttpResponse.json(sampleSupplierProjectRows)),
+  http.get("/api/suppliers/:id/invoices-list", () => HttpResponse.json(sampleSupplierInvoices)),
 ];

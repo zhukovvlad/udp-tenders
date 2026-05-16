@@ -8,6 +8,8 @@ import { invoicesApi } from "./api/invoices";
 import { dashboardApi } from "./api/dashboard";
 import { uploadApi } from "./api/upload";
 import { settingsApi } from "./api/settings";
+import { suppliersApi } from "./api/suppliers";
+import type { SupplierUpdateInput } from "./api/suppliers";
 import { qk } from "./queryKeys";
 
 import type { ID } from "@/types/common";
@@ -313,5 +315,64 @@ export function useAllCalculations() {
     queryKey: qk.dashboard.calculationsAll,
     queryFn: () => dashboardApi.calculationsAll(),
     staleTime: 0,
+  });
+}
+
+// ========== Suppliers ==========
+export function useSuppliers() {
+  return useQuery({ queryKey: qk.suppliers.all, queryFn: suppliersApi.list });
+}
+
+export function useSupplierDetail(id: ID | null | undefined) {
+  return useQuery({
+    queryKey: qk.suppliers.detail(id ?? -1),
+    queryFn: () => suppliersApi.get(id as ID),
+    enabled: id !== null && id !== undefined,
+  });
+}
+
+export function useSupplierProjects(id: ID | null | undefined) {
+  return useQuery({
+    queryKey: qk.suppliers.projects(id ?? -1),
+    queryFn: () => suppliersApi.getProjects(id as ID),
+    enabled: id !== null && id !== undefined,
+  });
+}
+
+export function useSupplierInvoices(id: ID | null | undefined, projectId?: ID) {
+  return useQuery({
+    queryKey: qk.suppliers.invoices(id ?? -1, projectId),
+    queryFn: () => suppliersApi.getInvoices(id as ID, projectId),
+    enabled: id !== null && id !== undefined,
+  });
+}
+
+export function useUpdateSupplier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: ID; input: SupplierUpdateInput }) =>
+      suppliersApi.update(id, input),
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: qk.suppliers.all });
+      qc.invalidateQueries({ queryKey: qk.suppliers.detail(id) });
+      toast.success("Поставщик обновлён");
+    },
+  });
+}
+
+export function useMergeSupplier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ targetId, sourceId }: { targetId: ID; sourceId: ID }) =>
+      suppliersApi.merge(targetId, sourceId),
+    onSuccess: (_data, { targetId, sourceId }) => {
+      qc.invalidateQueries({ queryKey: qk.suppliers.all });
+      qc.invalidateQueries({ queryKey: qk.suppliers.detail(targetId) });
+      qc.invalidateQueries({ queryKey: qk.suppliers.projects(targetId) });
+      // source удалён на сервере — убираем его кэш полностью
+      qc.removeQueries({ queryKey: qk.suppliers.detail(sourceId) });
+      qc.removeQueries({ queryKey: qk.suppliers.projects(sourceId) });
+      toast.success("Поставщики объединены");
+    },
   });
 }

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 import crud
 from database import get_db
+from models import Supplier as SupplierModel
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +30,28 @@ class MergeRequest(BaseModel):
 
 @router.get("")
 def list_suppliers(db: Session = Depends(get_db)):
-    results = crud.get_suppliers(db)
-    return [
-        {"id": s.id, "name": s.name, "inn": s.inn, "invoice_count": count}
-        for s, count in results
-    ]
+    results = crud.get_suppliers_with_stats(db)
+    return results
+
+
+@router.get("/{supplier_id}/projects")
+def get_supplier_projects(supplier_id: int, db: Session = Depends(get_db)):
+    supplier = crud.get_supplier(db, supplier_id)
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Поставщик не найден")
+    return crud.get_supplier_project_stats(db, supplier_id)
+
+
+@router.get("/{supplier_id}/invoices-list")
+def get_supplier_invoices(
+    supplier_id: int,
+    project_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    supplier = crud.get_supplier(db, supplier_id)
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Поставщик не найден")
+    return crud.get_supplier_invoices_list(db, supplier_id, project_id=project_id)
 
 
 @router.post("")
@@ -70,19 +88,10 @@ def list_supplier_duplicates(threshold: float = 85.0, db: Session = Depends(get_
 
 @router.get("/{supplier_id}")
 def get_supplier(supplier_id: int, db: Session = Depends(get_db)):
-    supplier = crud.get_supplier(db, supplier_id)
-    if not supplier:
+    detail = crud.get_supplier_detail(db, supplier_id)
+    if not detail:
         raise HTTPException(status_code=404, detail="Поставщик не найден")
-    invoices = crud.get_supplier_invoices(db, supplier_id)
-    return {
-        "id": supplier.id,
-        "name": supplier.name,
-        "inn": supplier.inn,
-        "invoices": [
-            {"id": inv.id, "number": inv.number, "date": str(inv.date)}
-            for inv in invoices
-        ],
-    }
+    return detail
 
 
 @router.put("/{supplier_id}")
@@ -96,10 +105,27 @@ def update_supplier(supplier_id: int, data: SupplierUpdate, db: Session = Depend
     except IntegrityError as err:
         db.rollback()
         err_str = str(err.orig).lower() if err.orig else ""
-        if "uq_suppliers_name_no_inn" in err_str:
-            detail = "Поставщик с таким названием (без ИНН) уже существует"
-        else:
-            detail = "Поставщик с таким ИНН уже существует"
+        if inn and "uq_suppliers_name_no_inn" not in err_str and "inn" in err_str:
+            # ИНН уже занят другим поставщиком — ищем кто именно
+            existing = db.query(SupplierModel).filter(
+                SupplierModel.inn == inn,
+                SupplierModel.id != supplier_id,
+            ).first()
+            if existing:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "inn_conflict",
+                        "message": f"Поставщик с ИНН {inn} уже существует",
+                        "existing": {"id": existing.id, "name": existing.name},
+                    },
+                ) from err
+        detail = (
+            "Поставщик с таким названием (без ИНН) уже существует"
+            if "uq_suppliers_name_no_inn" in err_str
+            else "Поставщик с таким ИНН уже существует" if inn
+            else "Не удалось сохранить изменения: нарушение уникальности"
+        )
         raise HTTPException(status_code=409, detail=detail) from err
     if not supplier:
         raise HTTPException(status_code=404, detail="Поставщик не найден")
