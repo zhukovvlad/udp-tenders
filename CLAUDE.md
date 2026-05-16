@@ -37,7 +37,7 @@ just test-backend         # all pytest (~22s)
 just test-backend-unit    # unit only, no DB, ~1s
 just test-backend-integration  # requires TEST_DATABASE_URL
 
-just test-frontend        # vitest (45 tests, ~7s)
+just test-frontend        # vitest (66 tests, ~7s)
 just lint                 # ruff + eslint
 just typecheck-frontend   # tsc -b --noEmit
 just coverage-backend     # HTML → backend/htmlcov/index.html
@@ -103,7 +103,7 @@ Supplier → Invoices (one supplier, many projects)
 - `crud.get_suppliers_with_stats` — registry list with turnover, project_count, invoice_count, categories
 - `crud.get_supplier_detail` — same aggregates for a single supplier (card header)
 - `crud.get_supplier_project_stats` — per-project rows with volume_m3 and deviation_pct/amount
-- `crud._compute_supplier_project_deviation` — deviation scoped to supplier's own invoices (same methodology as `compute_full_deviation`, but supplier-filtered)
+- `crud._compute_supplier_project_deviation` — deviation scoped to supplier's own invoices (same aggregation logic as `compute_full_deviation`, but uses the most recent reference price per class without period filtering — intentional, see docstring). Do not use when period-accurate comparison with the project page is required.
 
 ---
 
@@ -138,7 +138,7 @@ Supplier → Invoices (one supplier, many projects)
 - Tailwind v4 with custom CSS vars: `--color-fg`, `--color-bg`, `--color-surface`, `--color-accent`, etc. Use semantic vars, not raw colors.
 - TanStack Query: queries in `services/queries.ts`, keys in `services/queryKeys.ts`.
 - Russian UI labels everywhere — this is a Russian-language product.
-- `formatMoney` / `formatNumber` from `@/lib/format` for all number display.
+- `formatMoney` / `formatNumber` / `pluralRu` from `@/lib/format` for all number display.
 - `MONTH_NAMES_RU` from `@/lib/constants` for month labels.
 
 ---
