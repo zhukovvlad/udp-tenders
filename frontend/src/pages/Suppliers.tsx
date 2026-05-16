@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSuppliers } from "@/services/queries";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatMoney, formatNumber, pluralRu } from "@/lib/format";
 import type { SupplierListItem } from "@/types/supplier";
 
 // Бейдж «Новый» — если первый счёт появился менее 30 дней назад
@@ -229,14 +229,6 @@ export default function Suppliers() {
       </div>
     </div>
   );
-}
-
-function pluralRu(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return "";
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "а";
-  return "ов";
 }
 
 function SupplierTableSkeleton() {

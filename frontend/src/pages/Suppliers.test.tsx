@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "@/test/utils";
 import Suppliers from "./Suppliers";
 
@@ -73,9 +74,17 @@ describe("Suppliers", () => {
 
   it("navigates to supplier card on row click", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<Suppliers />);
+    renderWithProviders(
+      <Routes>
+        <Route path="/suppliers" element={<Suppliers />} />
+        <Route path="/suppliers/:id" element={<div data-testid="supplier-card" />} />
+      </Routes>,
+      { initialRoute: "/suppliers" },
+    );
     const row = await screen.findByText("ООО «ЭРКОН»");
-    // click should not throw
     await user.click(row);
+    await waitFor(() => {
+      expect(screen.getByTestId("supplier-card")).toBeInTheDocument();
+    });
   });
 });

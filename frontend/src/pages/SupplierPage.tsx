@@ -46,7 +46,7 @@ import {
   useUpdateSupplier,
   useMergeSupplier,
 } from "@/services/queries";
-import { formatMoney, formatNumber, formatDate } from "@/lib/format";
+import { formatMoney, formatNumber, formatDate, pluralRu } from "@/lib/format";
 import type { SupplierProjectRow } from "@/types/supplier";
 import type { ID } from "@/types/common";
 
@@ -77,6 +77,9 @@ function EditSupplierDialog({
   const [inn, setInn] = useState(initialInn ?? "");
   const [fieldError, setFieldError] = useState<string | null>(null);
 
+  // second-step state: merge confirmation — объявляется до useEffect, который его использует
+  const [conflict, setConflict] = useState<InnConflict | null>(null);
+
   // Сброс стейта при каждом открытии (иначе прошлые черновики остаются)
   useEffect(() => {
     if (open) {
@@ -86,9 +89,6 @@ function EditSupplierDialog({
       setConflict(null);
     }
   }, [open, initialName, initialInn]);
-
-  // second-step state: merge confirmation
-  const [conflict, setConflict] = useState<InnConflict | null>(null);
 
   const updateMut = useUpdateSupplier();
   const mergeMut = useMergeSupplier();
@@ -546,7 +546,10 @@ function TabSkeleton() {
 
 export default function SupplierPage() {
   const { id } = useParams<{ id: string }>();
-  const supplierId = id ? Number(id) as ID : null;
+  const supplierId = (() => {
+    const parsed = Number(id);
+    return Number.isFinite(parsed) ? parsed as ID : null;
+  })();
 
   const [editOpen, setEditOpen] = useState(false);
 
@@ -660,13 +663,5 @@ export default function SupplierPage() {
       )}
     </div>
   );
-}
-
-function pluralRu(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return "";
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "а";
-  return "ов";
 }
 
