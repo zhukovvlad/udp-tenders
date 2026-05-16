@@ -258,6 +258,8 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     invoice.date = data.date
     _name = (data.supplier_name.strip() or None) if data.supplier_name else None
     _inn = (data.supplier_inn.strip() or None) if data.supplier_inn else None
+    if _inn and not _name:
+        raise HTTPException(status_code=422, detail="supplier_name обязателен при указании supplier_inn")
     invoice.vat_rate = data.vat_rate
     if _name:
         supplier = crud.get_or_create_supplier(db, name=_name, inn=_inn)

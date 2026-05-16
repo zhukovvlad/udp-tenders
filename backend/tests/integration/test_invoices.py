@@ -346,3 +346,21 @@ def test_update_invoice_clears_supplier_when_name_empty(client, factories, db_se
     db_session.expire_all()
     inv = db_session.query(Invoice).filter(Invoice.id == invoice.id).first()
     assert inv.supplier_id is None
+
+
+def test_update_invoice_inn_without_name_returns_422(client, factories):
+    """PUT /invoices/{id}: supplier_inn без supplier_name → 422."""
+    invoice = factories.InvoiceFactory.create(supplier_id=None, supplier_name=None)
+
+    resp = client.put(
+        f"/api/invoices/{invoice.id}",
+        json={
+            "number": invoice.number,
+            "date": str(invoice.date),
+            "supplier_name": None,
+            "supplier_inn": "7707083893",
+            "vat_rate": 20.0,
+            "items": [],
+        },
+    )
+    assert resp.status_code == 422
