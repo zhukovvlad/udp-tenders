@@ -1,6 +1,6 @@
 from datetime import UTC, date, datetime
 
-from sqlalchemy import func, text
+from sqlalchemy import case, func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, joinedload, aliased
 
@@ -611,3 +611,290 @@ def get_supplier_duplicates(db: Session, threshold: float = 85.0) -> list[tuple]
         .all()
     )
     return [(s1, s2, round(float(score) * 100, 1)) for s1, s2, score in rows]
+
+
+def get_suppliers_with_stats(db: Session) -> list[dict]:
+    """Список поставщиков с агрегатами: оборот, число объектов, счетов, дата первого счёта.
+
+    Оборот считается как сумма всех позиций счетов поставщика (материалы + доставка).
+    Категории выводятся из классов материалов, которые поставлял данный поставщик.
+    """
+    turnover_label = func.coalesce(func.sum(InvoiceItem.amount), 0).label("turnover")
+    rows = (
+        db.query(
+            Supplier,
+            func.count(Invoice.id.distinct()).label("invoice_count"),
+            turnover_label,
+            func.count(Document.project_id.distinct()).label("project_count"),
+            func.min(Invoice.date).label("first_invoice_date"),
+        )
+        .outerjoin(Invoice, Invoice.supplier_id == Supplier.id)
+        .outerjoin(Document, Invoice.document_id == Document.id)
+        .outerjoin(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
+        .group_by(Supplier.id)
+        .order_by(turnover_label.desc())
+        .all()
+    )
+
+    # Категории (классы материалов) по каждому поставщику — одним запросом
+    cat_rows = (
+        db.query(Invoice.supplier_id, MaterialClass.name)
+        .join(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
+        .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
+        .filter(Invoice.supplier_id.isnot(None))
+        .distinct()
+        .all()
+    )
+    cats_by_supplier: dict[int, list[str]] = {}
+    for sid, class_name in cat_rows:
+        lst = cats_by_supplier.setdefault(sid, [])
+        if class_name not in lst:
+            lst.append(class_name)
+
+    return [
+        {
+            "id": s.id,
+            "name": s.name,
+            "inn": s.inn,
+            "created_at": s.created_at,
+            "invoice_count": invoice_count,
+            "turnover": float(turnover),
+            "project_count": project_count,
+            "first_invoice_date": first_invoice_date,
+            "categories": cats_by_supplier.get(s.id, []),
+        }
+        for s, invoice_count, turnover, project_count, first_invoice_date in rows
+    ]
+
+
+def get_supplier_detail(db: Session, supplier_id: int) -> dict | None:
+    """Детальная шапка поставщика: агрегаты по всем объектам."""
+    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    if not supplier:
+        return None
+
+    agg = (
+        db.query(
+            func.count(Invoice.id.distinct()).label("invoice_count"),
+            func.coalesce(func.sum(InvoiceItem.amount), 0).label("turnover"),
+            func.count(Document.project_id.distinct()).label("project_count"),
+            func.min(Invoice.date).label("first_invoice_date"),
+        )
+        .select_from(Invoice)
+        .outerjoin(Document, Invoice.document_id == Document.id)
+        .outerjoin(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
+        .filter(Invoice.supplier_id == supplier_id)
+        .first()
+    )
+
+    cat_rows = (
+        db.query(MaterialClass.name)
+        .join(InvoiceItem, InvoiceItem.material_class_id == MaterialClass.id)
+        .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+        .filter(Invoice.supplier_id == supplier_id)
+        .distinct()
+        .all()
+    )
+    categories = [r.name for r in cat_rows]
+
+    return {
+        "id": supplier.id,
+        "name": supplier.name,
+        "inn": supplier.inn,
+        "created_at": supplier.created_at,
+        "invoice_count": agg.invoice_count if agg else 0,
+        "turnover": float(agg.turnover) if agg else 0.0,
+        "project_count": agg.project_count if agg else 0,
+        "first_invoice_date": agg.first_invoice_date if agg else None,
+        "categories": categories,
+    }
+
+
+def _compute_supplier_project_deviation(
+    db: Session, supplier_id: int, project_id: int
+) -> tuple[float | None, float | None]:
+    """Вычислить отклонение от плана для пары поставщик×объект.
+
+    Методология идентична compute_full_deviation, но привязана только к счетам
+    данного поставщика. Доставка распределяется пропорционально объёму материалов.
+    """
+    # Подзапрос: ID счетов данного поставщика для данного объекта
+    invoice_ids_q = (
+        db.query(Invoice.id)
+        .join(Document, Invoice.document_id == Document.id)
+        .filter(Invoice.supplier_id == supplier_id, Document.project_id == project_id)
+        .subquery()
+    )
+
+    # Материальные позиции, сгруппированные по классу
+    class_rows = (
+        db.query(
+            InvoiceItem.material_class_id,
+            func.sum(InvoiceItem.amount).label("mat_total"),
+            func.sum(InvoiceItem.quantity).label("qty"),
+        )
+        .filter(
+            InvoiceItem.invoice_id.in_(invoice_ids_q),
+            InvoiceItem.item_type == "material",
+            InvoiceItem.material_class_id.isnot(None),
+        )
+        .group_by(InvoiceItem.material_class_id)
+        .all()
+    )
+    if not class_rows:
+        return None, None
+
+    class_ids = [r.material_class_id for r in class_rows]
+
+    all_material_qty: float = (
+        db.query(func.sum(InvoiceItem.quantity))
+        .filter(
+            InvoiceItem.invoice_id.in_(invoice_ids_q),
+            InvoiceItem.item_type == "material",
+        )
+        .scalar() or 0.0
+    )
+    delivery_total: float = (
+        db.query(func.sum(InvoiceItem.amount))
+        .filter(
+            InvoiceItem.invoice_id.in_(invoice_ids_q),
+            InvoiceItem.item_type == "delivery",
+        )
+        .scalar() or 0.0
+    )
+
+    # Последние плановые цены по объекту×класс (без ограничения периода — берём актуальные)
+    ref_rows = (
+        db.query(ReferencePrice)
+        .filter(
+            ReferencePrice.project_id == project_id,
+            ReferencePrice.material_class_id.in_(class_ids),
+        )
+        .order_by(
+            ReferencePrice.material_class_id,
+            ReferencePrice.period_start.desc(),
+            ReferencePrice.period_end.desc(),
+            ReferencePrice.id.desc(),
+        )
+        .all()
+    )
+    ref_by_class: dict[int, ReferencePrice] = {}
+    for ref in ref_rows:
+        if ref.material_class_id not in ref_by_class:
+            ref_by_class[ref.material_class_id] = ref
+
+    total_deviation: float = 0.0
+    reference_total: float = 0.0
+    any_ref = False
+
+    for r in class_rows:
+        if not r.qty:
+            continue
+        share = r.qty / all_material_qty if all_material_qty > 0 else 0.0
+        delivery_for_class = delivery_total * share
+        avg_price = (r.mat_total + delivery_for_class) / r.qty
+
+        ref = ref_by_class.get(r.material_class_id)
+        if ref and ref.price and ref.price > 0:
+            any_ref = True
+            total_deviation += (avg_price - ref.price) * r.qty
+            reference_total += ref.price * r.qty
+
+    if not any_ref or reference_total == 0.0:
+        return None, None
+
+    deviation_amount = round(total_deviation, 2)
+    deviation_pct = round(total_deviation / reference_total * 100, 2)
+    return deviation_pct, deviation_amount
+
+
+def get_supplier_project_stats(db: Session, supplier_id: int) -> list[dict]:
+    """Статистика по каждому объекту для поставщика: оборот, объём м³, число счетов, наценка."""
+    # Базовый агрегат: оборот + объём м³ + число счетов, группировка по объекту
+    volume_expr = func.coalesce(
+        func.sum(case((InvoiceItem.item_type == "material", InvoiceItem.quantity))),
+        0,
+    ).label("volume_m3")
+    turnover_expr = func.coalesce(func.sum(InvoiceItem.amount), 0).label("turnover")
+
+    rows = (
+        db.query(
+            Document.project_id,
+            Project.name.label("project_name"),
+            Project.contract_number,
+            func.count(Invoice.id.distinct()).label("invoice_count"),
+            turnover_expr,
+            volume_expr,
+        )
+        .select_from(Invoice)
+        .join(Document, Invoice.document_id == Document.id)
+        .join(Project, Project.id == Document.project_id)
+        .outerjoin(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
+        .filter(Invoice.supplier_id == supplier_id)
+        .group_by(Document.project_id, Project.name, Project.contract_number)
+        .order_by(turnover_expr.desc())
+        .all()
+    )
+
+    result = []
+    for project_id, project_name, contract_number, invoice_count, turnover, volume_m3 in rows:
+        deviation_pct, deviation_amount = _compute_supplier_project_deviation(
+            db, supplier_id, project_id
+        )
+        result.append({
+            "project_id": project_id,
+            "project_name": project_name,
+            "contract_number": contract_number,
+            "invoice_count": invoice_count,
+            "turnover": float(turnover),
+            "volume_m3": float(volume_m3),
+            "deviation_pct": deviation_pct,
+            "deviation_amount": deviation_amount,
+        })
+    return result
+
+
+def get_supplier_invoices_list(db: Session, supplier_id: int,
+                               project_id: int | None = None) -> list[dict]:
+    """Список счетов поставщика по всем объектам (для таба «Счета»)."""
+    q = (
+        db.query(
+            Invoice.id,
+            Invoice.document_id,
+            Invoice.number,
+            Invoice.date,
+            Invoice.verified,
+            Invoice.verified_at,
+            Invoice.ai_confidence,
+            Document.project_id,
+            Project.name.label("project_name"),
+            func.coalesce(func.sum(InvoiceItem.amount), 0).label("amount"),
+        )
+        .join(Document, Invoice.document_id == Document.id)
+        .join(Project, Project.id == Document.project_id)
+        .outerjoin(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
+        .filter(Invoice.supplier_id == supplier_id)
+    )
+    if project_id is not None:
+        q = q.filter(Document.project_id == project_id)
+    q = q.group_by(
+        Invoice.id, Invoice.document_id, Invoice.number, Invoice.date, Invoice.verified,
+        Invoice.verified_at, Invoice.ai_confidence, Document.project_id, Project.name,
+    ).order_by(Invoice.date.desc())
+
+    return [
+        {
+            "id": row.id,
+            "document_id": row.document_id,
+            "number": row.number,
+            "date": str(row.date),
+            "verified": row.verified,
+            "verified_at": row.verified_at.isoformat() if row.verified_at else None,
+            "ai_confidence": row.ai_confidence,
+            "project_id": row.project_id,
+            "project_name": row.project_name,
+            "amount": float(row.amount),
+        }
+        for row in q.all()
+    ]
+

@@ -33,18 +33,20 @@ just dev-backend          # uvicorn on :8000, hot reload
 just dev-frontend         # vite on :5173
 
 just test                 # backend + frontend (no E2E)
-just test-backend         # all pytest (56 tests, ~22s)
+just test-backend         # all pytest (~22s)
 just test-backend-unit    # unit only, no DB, ~1s
 just test-backend-integration  # requires TEST_DATABASE_URL
 
-just test-frontend        # vitest (18 tests, ~4s)
+just test-frontend        # vitest (45 tests, ~7s)
 just lint                 # ruff + eslint
 just typecheck-frontend   # tsc -b --noEmit
 just coverage-backend     # HTML → backend/htmlcov/index.html
 just db-migrate           # alembic upgrade head
 ```
 
-Shell on Windows: `bash -cu` (git bash). All scripts use Unix syntax.
+Shell on Windows: Git bash at `C:\Program Files\Git\bin\bash.exe`. Invoke as:
+`& "C:\Program Files\Git\bin\bash.exe" -c "cd /c/Users/zhukov_v/Projects/UDP && just <command> 2>&1"`
+All scripts use Unix syntax.
 
 ---
 
@@ -54,18 +56,18 @@ Shell on Windows: `bash -cu` (git bash). All scripts use Unix syntax.
 UDP/
 ├── backend/
 │   ├── main.py           — FastAPI app, CORS, routers, middleware
-│   ├── models.py         — ORM models (Project, Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice, PriceCalculation)
-│   ├── crud.py           — DB operations, recalculate_prices
+│   ├── models.py         — ORM models (Project, Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice, PriceCalculation, Supplier)
+│   ├── crud.py           — DB operations, recalculate_prices, supplier aggregates
 │   ├── pdf_parser.py     — OpenRouter API parsing
 │   ├── s3.py             — MinIO helpers
-│   ├── routers/          — projects, invoices, dashboard, export, material_classes, reference_prices, settings
+│   ├── routers/          — projects, invoices, dashboard, export, material_classes, reference_prices, settings, suppliers
 │   ├── alembic/          — migrations
 │   └── tests/            — unit/ + integration/ + fixtures/
 ├── frontend/src/
-│   ├── pages/            — Dashboard, Projects, ProjectPage, Suppliers, Materials, Reports, Review, Settings
+│   ├── pages/            — Dashboard, Projects, ProjectPage, Suppliers, SupplierPage, Materials, Reports, Review, Settings
 │   ├── components/       — ui/, ui-domain/, layout/, dashboard/, projects/, invoices/, review/
 │   ├── services/         — api/ (axios), queries.ts (TanStack Query), queryKeys.ts
-│   └── types/            — TypeScript types per domain
+│   └── types/            — TypeScript types per domain (common, project, invoice, materialClass, referencePrice, supplier)
 ├── docs/
 │   ├── TECH_DEBT.md      — tracked debt items (check before touching related code)
 │   ├── testing.md        — testing architecture, coverage status, how to add tests
@@ -92,9 +94,16 @@ UDP/
 Project → Documents → Invoices → InvoiceItems → MaterialClass
 Project → ReferencePrices (project ↔ material_class ↔ period)
 Project → PriceCalculations (aggregated monthly stats)
+Supplier → Invoices (one supplier, many projects)
 ```
 
 `PriceCalculation` is a pre-computed cache — always recalculate after invoice changes via `crud.recalculate_prices`.
+
+**Supplier aggregation** is computed on-the-fly (not cached). Key functions:
+- `crud.get_suppliers_with_stats` — registry list with turnover, project_count, invoice_count, categories
+- `crud.get_supplier_detail` — same aggregates for a single supplier (card header)
+- `crud.get_supplier_project_stats` — per-project rows with volume_m3 and deviation_pct/amount
+- `crud._compute_supplier_project_deviation` — deviation scoped to supplier's own invoices (same methodology as `compute_full_deviation`, but supplier-filtered)
 
 ---
 
@@ -159,9 +168,24 @@ See `docs/TECH_DEBT.md` for the full list. Key items:
 
 ---
 
+## Suppliers section — key design rules (MUST NOT violate)
+
+The `/suppliers` and `/suppliers/:id` sections implement MVP analytics. The following are **intentional constraints**, not gaps:
+
+- **No cross-project average markup** (`средняя наценка поставщика`). Planned prices are per-project/contract. Averaging deviations across different planned bases is methodologically wrong. Deviation lives only in per-project rows of the «По объектам» tab.
+- **No market comparison** («дешевле/дороже рынка»). Deferred to backlog — requires fixed basket, enough suppliers per class, logistics correction.
+- **No «Сравнение» tab**. Deliberately excluded from MVP.
+- **Totals row**: turnover/volume/invoices sum; project_count → `—`; deviation → «не суммируем» italic grey.
+- **«Новый» badge** threshold: 30 days from `first_invoice_date`.
+- **Merge on INN conflict**: `PUT /suppliers/{id}` returns `409` with `{ code: "inn_conflict", existing: { id, name } }` when the edited INN belongs to another supplier. Frontend shows a merge confirmation dialog, then `POST /suppliers/{target_id}/merge { source_id }` redirects to the surviving supplier's card.
+
+---
+
 ## What's NOT in the codebase yet (planned)
 
 - E2E tests (Playwright) — spec written, not implemented.
 - GitHub Actions CI — not configured yet.
 - Auth / multi-user — settings router exists, no real auth yet.
 - Production deployment — planned, not live.
+- Suppliers: «Сравнение» tab (market benchmark) — backlog, needs ≥3 suppliers per material class.
+- Suppliers: Excel/PDF export — button is a stub.

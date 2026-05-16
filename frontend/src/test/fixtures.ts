@@ -137,3 +137,54 @@ export const sampleDashboardInvoices = [
     items: [_baseItem],
   },
 ];
+
+export const sampleSupplier = {
+  id: 1,
+  name: "ООО «ЭРКОН»",
+  inn: "7723746396",
+  created_at: "2025-01-01T00:00:00",
+  invoice_count: 48,
+  turnover: 18200000,
+  project_count: 4,
+  first_invoice_date: "2025-01-10",
+  categories: ["В25", "В40"],
+};
+
+export const sampleSupplierProjectRows = [
+  {
+    project_id: 1,
+    project_name: "ЖК Радуга",
+    contract_number: "Д-001",
+    invoice_count: 28,
+    turnover: 11400000,
+    volume_m3: 1842,
+    deviation_pct: 2.8,
+    deviation_amount: 318200,
+  },
+  {
+    project_id: 2,
+    project_name: "Бизнес-центр «Меридиан»",
+    contract_number: "Д-002",
+    invoice_count: 11,
+    turnover: 4100000,
+    volume_m3: 672,
+    deviation_pct: 1.2,
+    deviation_amount: 49700,
+  },
+];
+
+export const sampleSupplierInvoices = [
+  {
+    id: 301,
+    document_id: 10,
+    number: "А-001",
+    date: "2026-04-01",
+    verified: false,
+    verified_at: null,
+    ai_confidence: 0.92,
+    project_id: 1,
+    project_name: "ЖК Радуга",
+    amount: 450000,
+  },
+];
+
