@@ -15,7 +15,7 @@ router = APIRouter()
 
 
 @router.get("/excel")
-def export_excel(project_id: int, period_start: date, period_end: date,
+def export_excel(project_id: int, period_start: date | None = None, period_end: date | None = None,
                  material_class_id: int | None = None, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -24,13 +24,21 @@ def export_excel(project_id: int, period_start: date, period_end: date,
     calcs = crud.compute_calculations(db, project_id, period_start, period_end, material_class_id)
     calcs.sort(key=lambda r: (r["period_start"], r["material_class_name"]))
 
+    # Derive the displayed period from actual data if bounds were not provided
+    if calcs:
+        display_start = period_start or min(c["period_start"] for c in calcs)
+        display_end = period_end or max(c["period_end"] for c in calcs)
+    else:
+        display_start = period_start or date.today().replace(day=1)
+        display_end = period_end or date.today()
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Отчёт по удорожанию"
 
     ws.append(["Объект:", project.name])
     ws.append(["Договор:", project.contract_number or ""])
-    ws.append(["Период:", f"{period_start} — {period_end}"])
+    ws.append(["Период:", f"{display_start} — {display_end}"])
     ws.append([])
 
     headers = ["Материал", "Период", "Ср. цена (₽)", "Эталон (₽)", "Отклонение (%)", "Отклонение (₽)", "Объём (м3)", "Кол-во СФ"]
@@ -56,7 +64,7 @@ def export_excel(project_id: int, period_start: date, period_end: date,
     wb.save(output)
     output.seek(0)
 
-    filename = f"report_{project.name}_{period_start}_{period_end}.xlsx"
+    filename = f"report_{project.name}_{display_start}_{display_end}.xlsx"
     encoded = quote(filename)
 
     return StreamingResponse(
