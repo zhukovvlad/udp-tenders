@@ -1,4 +1,4 @@
-import type { ID, ISODate } from "./common";
+import type { ISODate } from "./common";
 import type { DashboardInvoiceRow } from "./invoice";
 
 export interface DashboardSummary {
@@ -23,18 +23,6 @@ export interface DashboardCalculation {
   delivery_total: number | null;
   total_qty: number;
   invoice_count: number;
-}
-
-export interface AutoCalculateResponse {
-  period_start: ISODate | null;
-  period_end: ISODate | null;
-}
-
-export interface CalculateInput {
-  project_id: ID;
-  material_class_id?: ID;
-  period_start: ISODate;
-  period_end: ISODate;
 }
 
 export type DashboardInvoices = DashboardInvoiceRow[];

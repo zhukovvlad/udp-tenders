@@ -48,13 +48,13 @@ import {
   useDashboardSummary,
   useDashboardInvoices,
   useDashboardCalculations,
-  useCalculate,
   useReferencePrices,
   useCreateReferencePrice,
   useUpdateReferencePrice,
   useDeleteReferencePrice,
   useMaterialClasses,
 } from "@/services/queries";
+import { useDebounce } from "@/lib/useDebounce";
 
 import { formatDate, formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { MONTH_NAMES_RU } from "@/lib/constants";
@@ -82,9 +82,11 @@ export default function ProjectPage() {
   // ── upload sheet ──
   const [uploadOpen, setUploadOpen] = useState(false);
 
-  // ── calculation period controls ──
+  // ── calculation period filters ──
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
+  const debouncedPeriodStart = useDebounce(periodStart, 400);
+  const debouncedPeriodEnd = useDebounce(periodEnd, 400);
 
   // ── active tab ──
   const [activeTab, setActiveTab] = useState("overview");
@@ -124,7 +126,11 @@ export default function ProjectPage() {
 
   const summaryQ = useDashboardSummary(projectId);
   const invoicesQ = useDashboardInvoices(projectId);
-  const calculationsQ = useDashboardCalculations(projectId);
+  const calculationsQ = useDashboardCalculations(
+    projectId,
+    debouncedPeriodStart || undefined,
+    debouncedPeriodEnd || undefined,
+  );
   const hasValidProjectId = projectId !== null;
   const referencePricesQ = useReferencePrices(
     hasValidProjectId ? projectId : undefined,
@@ -133,7 +139,6 @@ export default function ProjectPage() {
   const materialClassesQ = useMaterialClasses();
 
   // ── mutations ──
-  const calculateMut = useCalculate();
   const createRefPrice = useCreateReferencePrice();
   const updateRefPrice = useUpdateReferencePrice();
   const deleteRefPrice = useDeleteReferencePrice();
@@ -203,15 +208,6 @@ export default function ProjectPage() {
   }
 
   // ── handlers ──
-  function handleCalculate() {
-    if (!projectId || !periodStart || !periodEnd) return;
-    calculateMut.mutate({
-      project_id: projectId,
-      period_start: periodStart,
-      period_end: periodEnd,
-    });
-  }
-
   function handleAddReferencePrice() {
     if (!projectId || !rpClassId || !rpPrice || !rpStart || !rpEnd) return;
     createRefPrice.mutate(
@@ -423,18 +419,8 @@ export default function ProjectPage() {
               );
             })()}
 
-            {/* Calculation controls */}
+            {/* Period filters */}
             <div className="rounded-lg border border-border-subtle bg-surface p-4 space-y-3">
-              {hasCalculations && (() => {
-                const latestCalc = calculations.reduce((a, b) =>
-                  a.period_end >= b.period_end ? a : b
-                );
-                return (
-                  <div className="text-xs text-fg-tertiary">
-                    Последний расчёт: {formatDate(latestCalc.period_start)} — {formatDate(latestCalc.period_end)}
-                  </div>
-                );
-              })()}
               <div className="flex flex-wrap items-end gap-3">
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-fg-secondary">
@@ -459,11 +445,11 @@ export default function ProjectPage() {
                 />
               </div>
               <Button
-                onClick={handleCalculate}
-                loading={calculateMut.isPending}
-                disabled={!periodStart || !periodEnd}
+                variant="secondary"
+                onClick={() => { setPeriodStart(""); setPeriodEnd(""); }}
+                disabled={!periodStart && !periodEnd}
               >
-                Рассчитать
+                Сбросить
               </Button>
               </div>
             </div>

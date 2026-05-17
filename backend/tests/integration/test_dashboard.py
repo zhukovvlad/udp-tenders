@@ -53,7 +53,8 @@ def test_summary_with_reference_price_computes_deviation(client, factories):
     assert body["full_deviation_amount"] == 10000.0
 
 
-def test_calculate_endpoint_creates_calculation(client, factories):
+def test_calculations_endpoint_returns_live_data(client, factories):
+    """GET /calculations возвращает live-данные без предварительного POST."""
     project = factories.ProjectFactory.create()
     mc = factories.MaterialClassFactory.create()
     doc = factories.DocumentFactory.create(project=project)
@@ -63,19 +64,40 @@ def test_calculate_endpoint_creates_calculation(client, factories):
         quantity=10, unit_price=8000, amount=80000,
     )
 
-    response = client.post(
-        f"/api/dashboard/calculate?project_id={project.id}"
-        f"&period_start=2026-01-01&period_end=2026-12-31"
+    response = client.get(f"/api/dashboard/calculations?project_id={project.id}")
+    assert response.status_code == 200
+    rows = response.json()
+    assert len(rows) == 1
+    assert rows[0]["total_qty"] == 10.0
+    assert rows[0]["avg_price"] == 8000.0
+    assert rows[0]["period_start"] == "2026-03-01"
+
+
+def test_calculations_endpoint_period_filter(client, factories):
+    """GET /calculations с period_start/period_end возвращает только нужные месяцы."""
+    project = factories.ProjectFactory.create()
+    mc = factories.MaterialClassFactory.create()
+    doc = factories.DocumentFactory.create(project=project)
+
+    inv_jan = factories.InvoiceFactory.create(document=doc, date=date(2026, 1, 15))
+    factories.InvoiceItemFactory.create(
+        invoice=inv_jan, material_class=mc, item_type="material",
+        quantity=5, unit_price=9000, amount=45000,
+    )
+    inv_mar = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 15))
+    factories.InvoiceItemFactory.create(
+        invoice=inv_mar, material_class=mc, item_type="material",
+        quantity=10, unit_price=8000, amount=80000,
+    )
+
+    response = client.get(
+        f"/api/dashboard/calculations?project_id={project.id}"
+        f"&period_start=2026-03-01&period_end=2026-03-31"
     )
     assert response.status_code == 200
-    assert len(response.json()["results"]) == 1
-
-
-def test_auto_calculate_no_invoices(client, factories):
-    project = factories.ProjectFactory.create()
-    response = client.post(f"/api/dashboard/auto-calculate?project_id={project.id}")
-    assert response.status_code == 200
-    assert response.json()["period_start"] is None
+    rows = response.json()
+    assert len(rows) == 1
+    assert rows[0]["total_qty"] == 10.0
 
 
 def test_dashboard_invoices_includes_verified_fields(client, factories):
