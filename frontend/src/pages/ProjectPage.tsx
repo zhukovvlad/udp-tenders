@@ -48,13 +48,13 @@ import {
   useDashboardSummary,
   useDashboardInvoices,
   useDashboardCalculations,
-  useCalculate,
   useReferencePrices,
   useCreateReferencePrice,
   useUpdateReferencePrice,
   useDeleteReferencePrice,
   useMaterialClasses,
 } from "@/services/queries";
+import { useDebounce } from "@/lib/useDebounce";
 
 import { formatDate, formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { MONTH_NAMES_RU } from "@/lib/constants";
@@ -82,9 +82,11 @@ export default function ProjectPage() {
   // ── upload sheet ──
   const [uploadOpen, setUploadOpen] = useState(false);
 
-  // ── calculation period controls ──
+  // ── calculation period filters ──
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
+  const debouncedPeriodStart = useDebounce(periodStart, 400);
+  const debouncedPeriodEnd = useDebounce(periodEnd, 400);
 
   // ── active tab ──
   const [activeTab, setActiveTab] = useState("overview");
@@ -96,6 +98,8 @@ export default function ProjectPage() {
   useEffect(() => {
     setInvoiceMonthFilter(null);
     setActiveTab("overview");
+    setPeriodStart("");
+    setPeriodEnd("");
   }, [projectId]);
 
   // ── reference price dialog ──
@@ -124,7 +128,11 @@ export default function ProjectPage() {
 
   const summaryQ = useDashboardSummary(projectId);
   const invoicesQ = useDashboardInvoices(projectId);
-  const calculationsQ = useDashboardCalculations(projectId);
+  const calculationsQ = useDashboardCalculations(
+    projectId,
+    debouncedPeriodStart || undefined,
+    debouncedPeriodEnd || undefined,
+  );
   const hasValidProjectId = projectId !== null;
   const referencePricesQ = useReferencePrices(
     hasValidProjectId ? projectId : undefined,
@@ -133,7 +141,6 @@ export default function ProjectPage() {
   const materialClassesQ = useMaterialClasses();
 
   // ── mutations ──
-  const calculateMut = useCalculate();
   const createRefPrice = useCreateReferencePrice();
   const updateRefPrice = useUpdateReferencePrice();
   const deleteRefPrice = useDeleteReferencePrice();
@@ -145,6 +152,23 @@ export default function ProjectPage() {
   const materialClasses = materialClassesQ.data ?? [];
 
   const hasCalculations = calculations.length > 0;
+
+  // Effective period: user's filter OR auto-detected from returned data (cosmetic display only,
+  // not sent to the API — API auto-detects when periodStart/periodEnd are empty).
+  const dataStart = useMemo(
+    () => calculations.length > 0
+      ? calculations.reduce((m, c) => (c.period_start < m ? c.period_start : m), calculations[0].period_start)
+      : "",
+    [calculations],
+  );
+  const dataEnd = useMemo(
+    () => calculations.length > 0
+      ? calculations.reduce((m, c) => (c.period_end > m ? c.period_end : m), calculations[0].period_end)
+      : "",
+    [calculations],
+  );
+  const displayStart = periodStart || dataStart;
+  const displayEnd   = periodEnd   || dataEnd;
 
   const filteredInvoices = useMemo(() => {
     if (!invoiceMonthFilter) return invoices;
@@ -203,15 +227,6 @@ export default function ProjectPage() {
   }
 
   // ── handlers ──
-  function handleCalculate() {
-    if (!projectId || !periodStart || !periodEnd) return;
-    calculateMut.mutate({
-      project_id: projectId,
-      period_start: periodStart,
-      period_end: periodEnd,
-    });
-  }
-
   function handleAddReferencePrice() {
     if (!projectId || !rpClassId || !rpPrice || !rpStart || !rpEnd) return;
     createRefPrice.mutate(
@@ -346,28 +361,21 @@ export default function ProjectPage() {
 
           {/* ────────── TAB: Обзор ────────── */}
           <TabsContent value="overview" className="mt-6 space-y-6">
-            {/* Latest period verdict banner */}
+            {/* Period verdict banner — always sums the full returned period */}
             {hasCalculations && (() => {
-              const latestPeriodEnd = calculations.reduce((max, c) =>
-                c.period_end > max ? c.period_end : max, calculations[0].period_end
-              );
-              const latestCalcs = calculations.filter(c => c.period_end === latestPeriodEnd);
-              const latestStart = latestCalcs.reduce((min, c) =>
-                c.period_start < min ? c.period_start : min, latestCalcs[0].period_start
-              );
-              const latestDev = totalDeviationAmount(latestCalcs);
+              const bannerDev = totalDeviationAmount(calculations);
               return (
-                <div className={latestDev > 0
+                <div className={bannerDev > 0
                   ? "rounded-lg bg-danger-soft border border-danger-border px-4 py-3 text-sm font-medium text-danger-text flex items-center justify-between gap-4"
                   : "rounded-lg bg-accent-soft border border-accent-border px-4 py-3 text-sm font-medium text-accent-text flex items-center justify-between gap-4"
                 }>
                   <span>
-                    {latestDev > 0
-                      ? `За последний расчёт — Переплата: +${formatMoney(latestDev)}`
-                      : `За последний расчёт — Экономия: ${formatMoney(Math.abs(latestDev))}`}
+                    {bannerDev > 0
+                      ? `За период — Переплата: +${formatMoney(bannerDev)}`
+                      : `За период — Экономия: ${formatMoney(Math.abs(bannerDev))}`}
                   </span>
                   <span className="text-xs font-normal opacity-60">
-                    {formatDate(latestStart)} — {formatDate(latestPeriodEnd)}
+                    {formatDate(displayStart)} — {formatDate(displayEnd)}
                   </span>
                 </div>
               );
@@ -423,18 +431,8 @@ export default function ProjectPage() {
               );
             })()}
 
-            {/* Calculation controls */}
+            {/* Period filters */}
             <div className="rounded-lg border border-border-subtle bg-surface p-4 space-y-3">
-              {hasCalculations && (() => {
-                const latestCalc = calculations.reduce((a, b) =>
-                  a.period_end >= b.period_end ? a : b
-                );
-                return (
-                  <div className="text-xs text-fg-tertiary">
-                    Последний расчёт: {formatDate(latestCalc.period_start)} — {formatDate(latestCalc.period_end)}
-                  </div>
-                );
-              })()}
               <div className="flex flex-wrap items-end gap-3">
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-fg-secondary">
@@ -443,8 +441,10 @@ export default function ProjectPage() {
                 <Input
                   type="date"
                   value={periodStart}
+                  placeholder={dataStart}
                   onChange={(e) => setPeriodStart(e.target.value)}
                   className="w-40"
+                  data-testid="period-start-input"
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -454,16 +454,19 @@ export default function ProjectPage() {
                 <Input
                   type="date"
                   value={periodEnd}
+                  placeholder={dataEnd}
                   onChange={(e) => setPeriodEnd(e.target.value)}
                   className="w-40"
+                  data-testid="period-end-input"
                 />
               </div>
               <Button
-                onClick={handleCalculate}
-                loading={calculateMut.isPending}
-                disabled={!periodStart || !periodEnd}
+                variant="secondary"
+                onClick={() => { setPeriodStart(""); setPeriodEnd(""); }}
+                disabled={!periodStart && !periodEnd}
+                data-testid="period-reset-button"
               >
-                Рассчитать
+                Сбросить
               </Button>
               </div>
             </div>
@@ -472,6 +475,7 @@ export default function ProjectPage() {
             {hasCalculations && (
               <DeviationChart
                 calculations={calculations}
+                periodFilterActive={true} // always aggregate all returned months by class
                 onConfigurePrice={() => setActiveTab("prices")}
               />
             )}

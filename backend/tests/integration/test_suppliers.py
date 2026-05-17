@@ -43,7 +43,7 @@ def test_get_supplier_returns_data(client, factories):
     body = response.json()
     assert body["name"] == "ООО Гамма"
     assert body["inn"] == "4444444444"
-    assert len(body["invoices"]) == 1
+    assert body["invoice_count"] == 1
 
 
 def test_get_supplier_404(client):

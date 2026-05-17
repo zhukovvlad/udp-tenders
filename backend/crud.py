@@ -1,15 +1,15 @@
+from calendar import monthrange
 from datetime import UTC, date, datetime
 
 from sqlalchemy import case, func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import Session, joinedload, aliased
+from sqlalchemy.orm import Session, aliased, joinedload
 
 from models import (
     Document,
     Invoice,
     InvoiceItem,
     MaterialClass,
-    PriceCalculation,
     Project,
     ReferencePrice,
     Supplier,
@@ -85,7 +85,6 @@ def delete_material_class(db: Session, class_id: int):
         db.query(InvoiceItem).filter(InvoiceItem.material_class_id == class_id).update(
             {InvoiceItem.material_class_id: None}, synchronize_session=False
         )
-        db.query(PriceCalculation).filter(PriceCalculation.material_class_id == class_id).delete()
         db.query(ReferencePrice).filter(ReferencePrice.material_class_id == class_id).delete()
         db.delete(mc)
         db.commit()
@@ -233,219 +232,190 @@ def create_invoice(db: Session, document_id: int, number: str, invoice_date: dat
 
 # --- Price Calculations ---
 
+def _months_in_range(start: date, end: date) -> list[tuple[date, date]]:
+    """Split [start, end] into calendar month intervals clamped to the requested bounds."""
+    months = []
+    cur = date(start.year, start.month, 1)
+    while cur <= end:
+        last_day = monthrange(cur.year, cur.month)[1]
+        month_end = date(cur.year, cur.month, last_day)
+        months.append((max(cur, start), min(month_end, end)))
+        if cur.month == 12:
+            cur = date(cur.year + 1, 1, 1)
+        else:
+            cur = date(cur.year, cur.month + 1, 1)
+    return months
+
+
+def compute_calculations(
+    db: Session,
+    project_id: int,
+    period_start: date | None = None,
+    period_end: date | None = None,
+    material_class_id: int | None = None,
+) -> list[dict]:
+    """Live-вычисление расчётов по проекту помесячно без записи в БД.
+
+    Если period_start/period_end не заданы — определяет диапазон по MIN/MAX дат инвойсов.
+    Возвращает [] если нет инвойсов или нет материальных позиций с классом.
+    Строки с total_qty == 0 пропускаются.
+    """
+    if period_start is None or period_end is None:
+        bounds = (
+            db.query(func.min(Invoice.date), func.max(Invoice.date))
+            .join(Document, Invoice.document_id == Document.id)
+            .filter(Document.project_id == project_id)
+            .first()
+        )
+        if not bounds or not bounds[0]:
+            return []
+        min_date, max_date = bounds
+        if period_start is None:
+            period_start = min_date.replace(day=1)
+        if period_end is None:
+            period_end = max_date.replace(day=monthrange(max_date.year, max_date.month)[1])
+
+    months = _months_in_range(period_start, period_end)
+    if not months:
+        return []
+
+    # Preload material class names once
+    class_name_map: dict[int, str] = {
+        mc.id: mc.name for mc in db.query(MaterialClass).all()
+    }
+
+    results: list[dict] = []
+
+    for month_start, month_end in months:
+        # Material items grouped by class for this month
+        class_q = (
+            db.query(
+                InvoiceItem.material_class_id,
+                func.sum(InvoiceItem.amount).label("mat_total"),
+                func.coalesce(func.sum(InvoiceItem.vat_amount), 0).label("mat_vat"),
+                func.sum(InvoiceItem.quantity).label("qty"),
+                func.count(Invoice.id.distinct()).label("invoice_count"),
+            )
+            .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+            .join(Document, Invoice.document_id == Document.id)
+            .filter(
+                Document.project_id == project_id,
+                Invoice.date >= month_start,
+                Invoice.date <= month_end,
+                InvoiceItem.item_type == "material",
+                InvoiceItem.material_class_id.isnot(None),
+            )
+        )
+        if material_class_id is not None:
+            class_q = class_q.filter(InvoiceItem.material_class_id == material_class_id)
+        class_rows = class_q.group_by(InvoiceItem.material_class_id).all()
+
+        if not class_rows:
+            continue
+
+        class_ids = [r.material_class_id for r in class_rows]
+
+        # All material qty (denominator for delivery proration)
+        all_material_qty: float = (
+            db.query(func.sum(InvoiceItem.quantity))
+            .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+            .join(Document, Invoice.document_id == Document.id)
+            .filter(
+                Document.project_id == project_id,
+                Invoice.date >= month_start,
+                Invoice.date <= month_end,
+                InvoiceItem.item_type == "material",
+            )
+            .scalar() or 0.0
+        )
+
+        # Total delivery amount and VAT for this month
+        delivery_agg = (
+            db.query(
+                func.coalesce(func.sum(InvoiceItem.amount), 0).label("total"),
+                func.coalesce(func.sum(InvoiceItem.vat_amount), 0).label("vat"),
+            )
+            .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+            .join(Document, Invoice.document_id == Document.id)
+            .filter(
+                Document.project_id == project_id,
+                Invoice.date >= month_start,
+                Invoice.date <= month_end,
+                InvoiceItem.item_type == "delivery",
+            )
+            .first()
+        )
+        delivery_total_period: float = float(delivery_agg.total) if delivery_agg else 0.0
+        delivery_vat_period: float = float(delivery_agg.vat) if delivery_agg else 0.0
+
+        # Reference prices overlapping this month, latest per class
+        ref_rows = (
+            db.query(ReferencePrice)
+            .filter(
+                ReferencePrice.project_id == project_id,
+                ReferencePrice.material_class_id.in_(class_ids),
+                ReferencePrice.period_start <= month_end,
+                ReferencePrice.period_end >= month_start,
+            )
+            .order_by(
+                ReferencePrice.material_class_id,
+                ReferencePrice.period_start.desc(),
+                ReferencePrice.period_end.desc(),
+                ReferencePrice.id.desc(),
+            )
+            .all()
+        )
+        ref_by_class: dict[int, ReferencePrice] = {}
+        for ref in ref_rows:
+            if ref.material_class_id not in ref_by_class:
+                ref_by_class[ref.material_class_id] = ref
+
+        for r in class_rows:
+            if not r.qty:
+                continue
+            share = r.qty / all_material_qty if all_material_qty > 0 else 0.0
+            delivery_for_class = delivery_total_period * share
+            delivery_vat_for_class = delivery_vat_period * share
+            avg_price = (float(r.mat_total) + delivery_for_class) / float(r.qty)
+
+            ref = ref_by_class.get(r.material_class_id)
+            ref_price = ref.price if ref else None
+            deviation_pct = None
+            deviation_amount = None
+            if ref_price and ref_price > 0:
+                deviation_pct = round((avg_price - ref_price) / ref_price * 100, 2)
+                deviation_amount = round((avg_price - ref_price) * float(r.qty), 2)
+
+            results.append({
+                "project_id": project_id,
+                "material_class_id": r.material_class_id,
+                "material_class_name": class_name_map.get(r.material_class_id, "?"),
+                "period_start": month_start,
+                "period_end": month_end,
+                "material_total": round(float(r.mat_total), 2),
+                "material_vat": round(float(r.mat_vat), 2),
+                "delivery_total": round(delivery_for_class, 2),
+                "delivery_vat": round(delivery_vat_for_class, 2),
+                "total_qty": round(float(r.qty), 3),
+                "avg_price": round(avg_price, 2),
+                "invoice_count": r.invoice_count,
+                "reference_price": ref_price,
+                "deviation_pct": deviation_pct,
+                "deviation_amount": deviation_amount,
+            })
+
+    return results
+
+
 def compute_full_deviation(
     db: Session, project_id: int, period_start: date, period_end: date
 ) -> float | None:
-    """Compute total deviation_amount for a project over [period_start, period_end]
-    without writing anything to the database.
-    Returns None if no reference prices are available for any class."""
-
-    # Single grouped query: mat_total + qty per class
-    class_rows = (
-        db.query(
-            InvoiceItem.material_class_id,
-            func.sum(InvoiceItem.amount).label("mat_total"),
-            func.sum(InvoiceItem.quantity).label("qty"),
-        )
-        .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
-        .join(Document, Invoice.document_id == Document.id)
-        .filter(
-            Document.project_id == project_id,
-            Invoice.date >= period_start,
-            Invoice.date <= period_end,
-            InvoiceItem.item_type == "material",
-            InvoiceItem.material_class_id.isnot(None),
-        )
-        .group_by(InvoiceItem.material_class_id)
-        .all()
-    )
-    if not class_rows:
-        return None
-
-    class_ids = [r.material_class_id for r in class_rows]
-
-    # Use ALL material qty (including unclassified) as denominator for delivery allocation,
-    # matching the logic in recalculate_prices.
-    all_material_qty: float = (
-        db.query(func.sum(InvoiceItem.quantity))
-        .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
-        .join(Document, Invoice.document_id == Document.id)
-        .filter(
-            Document.project_id == project_id,
-            Invoice.date >= period_start,
-            Invoice.date <= period_end,
-            InvoiceItem.item_type == "material",
-        )
-        .scalar() or 0.0
-    )
-    delivery_total_period: float = (
-        db.query(func.sum(InvoiceItem.amount))
-        .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
-        .join(Document, Invoice.document_id == Document.id)
-        .filter(
-            Document.project_id == project_id,
-            Invoice.date >= period_start,
-            Invoice.date <= period_end,
-            InvoiceItem.item_type == "delivery",
-        )
-        .scalar() or 0.0
-    )
-
-    # Fetch all relevant reference prices in one query, keep latest by period_start/period_end/id
-    ref_rows = (
-        db.query(ReferencePrice)
-        .filter(
-            ReferencePrice.project_id == project_id,
-            ReferencePrice.material_class_id.in_(class_ids),
-            ReferencePrice.period_start <= period_end,
-            ReferencePrice.period_end >= period_start,
-        )
-        .order_by(
-            ReferencePrice.material_class_id,
-            ReferencePrice.period_start.desc(),
-            ReferencePrice.period_end.desc(),
-            ReferencePrice.id.desc(),
-        )
-        .all()
-    )
-    # Keep only the first (most recent) ref price per class
-    ref_by_class: dict[int, ReferencePrice] = {}
-    for ref in ref_rows:
-        if ref.material_class_id not in ref_by_class:
-            ref_by_class[ref.material_class_id] = ref
-
-    total_deviation: float = 0.0
-    any_ref = False
-
-    for r in class_rows:
-        if not r.qty:
-            continue
-        share = r.qty / all_material_qty if all_material_qty > 0 else 0.0
-        delivery_for_class = delivery_total_period * share
-        avg_price = (r.mat_total + delivery_for_class) / r.qty
-
-        ref = ref_by_class.get(r.material_class_id)
-        if ref and ref.price and ref.price > 0:
-            any_ref = True
-            total_deviation += (avg_price - ref.price) * r.qty  # accumulate unrounded
-
-    return round(total_deviation, 2) if any_ref else None
-
-
-def recalculate_prices(db: Session, project_id: int, material_class_id: int,
-                       period_start: date, period_end: date, commit: bool = True,
-                       skip_delete: bool = False):
-    """Recalculate average price for a project + material class + period."""
-    if not skip_delete:
-        db.query(PriceCalculation).filter(
-            PriceCalculation.project_id == project_id,
-            PriceCalculation.material_class_id == material_class_id,
-            PriceCalculation.period_start == period_start,
-            PriceCalculation.period_end == period_end,
-        ).delete()
-
-    items_query = (
-        db.query(InvoiceItem)
-        .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
-        .join(Document, Invoice.document_id == Document.id)
-        .filter(
-            Document.project_id == project_id,
-            Invoice.date >= period_start,
-            Invoice.date <= period_end,
-        )
-    )
-
-    material_items = items_query.filter(
-        InvoiceItem.item_type == "material",
-        InvoiceItem.material_class_id == material_class_id,
-    ).all()
-
-    # ВСЕ материалы за период — для распределения доставки пропорционально объёмам
-    all_material_items = items_query.filter(InvoiceItem.item_type == "material").all()
-
-    delivery_items = items_query.filter(
-        InvoiceItem.item_type == "delivery",
-    ).all()
-
-    material_total = sum(i.amount for i in material_items)
-    material_vat = sum(i.vat_amount or 0 for i in material_items)
-    delivery_total_period = sum(i.amount for i in delivery_items)
-    delivery_vat_period = sum(i.vat_amount or 0 for i in delivery_items)
-    total_qty = sum(i.quantity for i in material_items)
-    all_materials_qty = sum(i.quantity for i in all_material_items)
-
-    if total_qty == 0:
-        return None
-
-    # Доставка распределяется пропорционально объёму этого класса в общем объёме материалов
-    # delivery_per_m3 = delivery_total_period / all_materials_qty
-    # delivery_for_class = delivery_per_m3 * total_qty
-    if all_materials_qty > 0:
-        share = total_qty / all_materials_qty
-    else:
-        share = 0
-    delivery_total = delivery_total_period * share
-    delivery_vat = delivery_vat_period * share
-
-    avg_price = (material_total + delivery_total) / total_qty
-
-    ref = (
-        db.query(ReferencePrice)
-        .filter(
-            ReferencePrice.project_id == project_id,
-            ReferencePrice.material_class_id == material_class_id,
-            ReferencePrice.period_start <= period_end,
-            ReferencePrice.period_end >= period_start,
-        )
-        .order_by(
-            ReferencePrice.period_start.desc(),
-            ReferencePrice.period_end.desc(),
-            ReferencePrice.id.desc(),
-        )
-        .first()
-    )
-
-    reference_price = ref.price if ref else None
-    deviation_pct = None
-    deviation_amount = None
-    if reference_price and reference_price > 0:
-        deviation_pct = round((avg_price - reference_price) / reference_price * 100, 2)
-        deviation_amount = round((avg_price - reference_price) * total_qty, 2)
-
-    invoice_count = (
-        db.query(func.count(Invoice.id.distinct()))
-        .join(Document, Invoice.document_id == Document.id)
-        .join(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
-        .filter(
-            Document.project_id == project_id,
-            Invoice.date >= period_start,
-            Invoice.date <= period_end,
-            InvoiceItem.material_class_id == material_class_id,
-        ).scalar()
-    )
-
-    calc = PriceCalculation(
-        project_id=project_id,
-        material_class_id=material_class_id,
-        period_start=period_start,
-        period_end=period_end,
-        material_total=round(material_total, 2),
-        material_vat=round(material_vat, 2),
-        delivery_total=round(delivery_total, 2),
-        delivery_vat=round(delivery_vat, 2),
-        total_qty=round(total_qty, 3),
-        avg_price=round(avg_price, 2),
-        invoice_count=invoice_count,
-        reference_price=reference_price,
-        deviation_pct=deviation_pct,
-        deviation_amount=deviation_amount,
-        calculated_at=datetime.now(UTC).replace(tzinfo=None),
-    )
-    db.add(calc)
-    if commit:
-        db.commit()
-        db.refresh(calc)
-    return calc
+    """Compute total deviation_amount for a project over [period_start, period_end].
+    Delegates to compute_calculations() — единый источник истины.
+    Returns None if no reference prices are available for any class (not 0.0)."""
+    rows = compute_calculations(db, project_id, period_start, period_end)
+    amounts = [r["deviation_amount"] for r in rows if r["deviation_amount"] is not None]
+    return round(sum(amounts), 2) if amounts else None
 
 
 # --- Suppliers ---

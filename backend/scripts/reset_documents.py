@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
 
 from database import SessionLocal  # noqa: E402
-from models import Document, Invoice, InvoiceItem, PriceCalculation  # noqa: E402
+from models import Document, Invoice, InvoiceItem  # noqa: E402
 from s3 import S3_BUCKET, get_s3_client  # noqa: E402
 
 
@@ -38,11 +38,8 @@ def reset_db() -> None:
         item_count = db.query(InvoiceItem).count()
         inv_count = db.query(Invoice).count()
         doc_count = db.query(Document).count()
-        calc_count = db.query(PriceCalculation).count()
 
         # Cascade: документы → инвойсы → позиции (определено в models.py)
-        # PriceCalculation cascade'ится от project, удаляем явно.
-        db.query(PriceCalculation).delete(synchronize_session=False)
         db.query(InvoiceItem).delete(synchronize_session=False)
         db.query(Invoice).delete(synchronize_session=False)
         db.query(Document).delete(synchronize_session=False)
@@ -50,7 +47,7 @@ def reset_db() -> None:
 
         print(
             f"[db] удалено: documents={doc_count}, invoices={inv_count}, "
-            f"invoice_items={item_count}, price_calculations={calc_count}"
+            f"invoice_items={item_count}"
         )
     except Exception:
         db.rollback()

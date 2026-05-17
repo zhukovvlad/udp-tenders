@@ -16,7 +16,6 @@ class Project(Base):
 
     documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
     reference_prices = relationship("ReferencePrice", back_populates="project", cascade="all, delete-orphan")
-    price_calculations = relationship("PriceCalculation", back_populates="project", cascade="all, delete-orphan")
 
 
 class MaterialClass(Base):
@@ -29,7 +28,6 @@ class MaterialClass(Base):
 
     reference_prices = relationship("ReferencePrice", back_populates="material_class")
     invoice_items = relationship("InvoiceItem", back_populates="material_class")
-    price_calculations = relationship("PriceCalculation", back_populates="material_class")
 
 
 class ReferencePrice(Base):
@@ -110,27 +108,3 @@ class InvoiceItem(Base):
 
     invoice = relationship("Invoice", back_populates="items")
     material_class = relationship("MaterialClass", back_populates="invoice_items")
-
-
-class PriceCalculation(Base):
-    __tablename__ = "price_calculations"
-
-    id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
-    material_class_id = Column(Integer, ForeignKey("material_classes.id"), nullable=False)
-    period_start = Column(Date, nullable=False)
-    period_end = Column(Date, nullable=False)
-    material_total = Column(Float, default=0)
-    material_vat = Column(Float, default=0)
-    delivery_total = Column(Float, default=0)
-    delivery_vat = Column(Float, default=0)
-    total_qty = Column(Float, default=0)
-    avg_price = Column(Float, default=0)
-    invoice_count = Column(Integer, default=0)
-    reference_price = Column(Float)
-    deviation_pct = Column(Float)
-    deviation_amount = Column(Float)
-    calculated_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
-
-    project = relationship("Project", back_populates="price_calculations")
-    material_class = relationship("MaterialClass", back_populates="price_calculations")

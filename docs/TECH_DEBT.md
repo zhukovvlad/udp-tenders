@@ -6,16 +6,12 @@
 
 ## Backend
 
-- [ ] **auto_calculate: заменить вложенные циклы на bulk-агрегацию**
-  `routers/dashboard.py` — `auto_calculate` вызывает `crud.recalculate_prices` в двойном цикле
-  `(месяцы × классы)`. Каждая итерация выполняет несколько SQL-запросов и `.all()`.
-  При большом проекте (12 месяцев × 50 классов = 600 итераций) это становится заметным.
-  **Решение:** заменить на один `GROUP BY month, material_class_id` с агрегатными функциями
-  и один `bulk INSERT` результатов.
-
-- [ ] **recalculate_prices: нет индекса по `(project_id, material_class_id, period_start, period_end)`**
-  `PriceCalculation` не имеет составного индекса по этим четырём полям,
-  по которым идёт DELETE + SELECT в каждом вызове `recalculate_prices`.
+- [ ] **`GET /dashboard/calculations` без `project_id`: N запросов к БД**
+  При вызове без `project_id` (глобальный Dashboard) функция выполняет `compute_calculations()`
+  по одному разу на каждый проект. При N проектах = N × ~4 SQL-запросов на месяц × M месяцев.
+  Для MVP с единицами проектов приемлемо.
+  **Решение:** объединить в один SQL с `GROUP BY project_id, material_class_id, month` и
+  переиспользовать delivery-аллокацию через window-функцию.
 
 - [ ] **SQLAlchemy: синхронный движок вместо async**
   `database.py` использует `create_engine` + синхронный `Session`. FastAPI запускает синхронные

@@ -1,33 +1,36 @@
 from datetime import date
 from io import BytesIO
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from sqlalchemy.orm import Session
 
+import crud
 from database import get_db
-from models import Document, Invoice, InvoiceItem, MaterialClass, PriceCalculation, Project
+from models import Project
 
 router = APIRouter()
 
 
 @router.get("/excel")
-def export_excel(project_id: int, period_start: date, period_end: date,
+def export_excel(project_id: int, period_start: date | None = None, period_end: date | None = None,
                  material_class_id: int | None = None, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return {"error": "Проект не найден"}
 
-    q = db.query(PriceCalculation).filter(
-        PriceCalculation.project_id == project_id,
-        PriceCalculation.period_start >= period_start,
-        PriceCalculation.period_end <= period_end,
-    )
-    if material_class_id:
-        q = q.filter(PriceCalculation.material_class_id == material_class_id)
+    calcs = crud.compute_calculations(db, project_id, period_start, period_end, material_class_id)
+    calcs.sort(key=lambda r: (r["period_start"], r["material_class_name"]))
 
-    calcs = q.order_by(PriceCalculation.period_start).all()
+    # Derive the displayed period from actual data if bounds were not provided
+    if calcs:
+        display_start = period_start or min(c["period_start"] for c in calcs)
+        display_end = period_end or max(c["period_end"] for c in calcs)
+    else:
+        display_start = period_start or date.today().replace(day=1)
+        display_end = period_end or date.today()
 
     wb = Workbook()
     ws = wb.active
@@ -35,23 +38,22 @@ def export_excel(project_id: int, period_start: date, period_end: date,
 
     ws.append(["Объект:", project.name])
     ws.append(["Договор:", project.contract_number or ""])
-    ws.append(["Период:", f"{period_start} — {period_end}"])
+    ws.append(["Период:", f"{display_start} — {display_end}"])
     ws.append([])
 
     headers = ["Материал", "Период", "Ср. цена (₽)", "Эталон (₽)", "Отклонение (%)", "Отклонение (₽)", "Объём (м3)", "Кол-во СФ"]
     ws.append(headers)
 
     for c in calcs:
-        mc_name = c.material_class.name if c.material_class else "?"
         ws.append([
-            mc_name,
-            f"{c.period_start} — {c.period_end}",
-            c.avg_price,
-            c.reference_price,
-            c.deviation_pct,
-            c.deviation_amount,
-            c.total_qty,
-            c.invoice_count,
+            c["material_class_name"],
+            f"{c['period_start']} — {c['period_end']}",
+            c["avg_price"],
+            c["reference_price"],
+            c["deviation_pct"],
+            c["deviation_amount"],
+            c["total_qty"],
+            c["invoice_count"],
         ])
 
     for col in ws.columns:
@@ -62,8 +64,7 @@ def export_excel(project_id: int, period_start: date, period_end: date,
     wb.save(output)
     output.seek(0)
 
-    from urllib.parse import quote
-    filename = f"report_{project.name}_{period_start}_{period_end}.xlsx"
+    filename = f"report_{project.name}_{display_start}_{display_end}.xlsx"
     encoded = quote(filename)
 
     return StreamingResponse(

@@ -17,7 +17,6 @@ import type { ProjectCreateInput, ProjectUpdateInput } from "@/types/project";
 import type { MaterialClassCreateInput } from "@/types/materialClass";
 import type { ReferencePriceCreateInput, ReferencePriceUpdateInput } from "@/types/referencePrice";
 import type { InvoiceUpdateInput } from "@/types/invoice";
-import type { CalculateInput } from "@/types/dashboard";
 import type { AppSettings } from "./api/settings";
 
 // ========== Projects ==========
@@ -110,6 +109,7 @@ export function useCreateReferencePrice() {
       referencePricesApi.create(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
       toast.success("Плановая цена сохранена");
     },
   });
@@ -122,6 +122,7 @@ export function useUpdateReferencePrice() {
       referencePricesApi.update(id, input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
       toast.success("Плановая цена обновлена");
     },
   });
@@ -133,6 +134,7 @@ export function useDeleteReferencePrice() {
     mutationFn: (id: ID) => referencePricesApi.remove(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
       toast.success("Плановая цена удалена");
     },
   });
@@ -224,12 +226,16 @@ export function useDashboardInvoices(projectId: ID | null) {
   });
 }
 
-export function useDashboardCalculations(projectId: ID | null) {
+export function useDashboardCalculations(
+  projectId: ID | null,
+  periodStart?: string,
+  periodEnd?: string,
+) {
   return useQuery({
     queryKey: projectId
-      ? qk.dashboard.calculations(projectId)
+      ? qk.dashboard.calculations(projectId, periodStart, periodEnd)
       : ["dashboard", "calculations", "none"],
-    queryFn: () => dashboardApi.calculations(projectId as ID),
+    queryFn: () => dashboardApi.calculations(projectId as ID, periodStart, periodEnd),
     enabled: projectId !== null,
   });
 }
@@ -239,29 +245,6 @@ export function useDashboardMonthlySummary(projectId: ID | null) {
     queryKey: projectId ? qk.dashboard.monthly(projectId) : ["dashboard", "monthly", "none"],
     queryFn: () => dashboardApi.monthlySummary(projectId as ID),
     enabled: projectId !== null,
-  });
-}
-
-export function useAutoCalculate() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (projectId: ID) => dashboardApi.autoCalculate(projectId),
-    onSuccess: (_data, projectId) => {
-      qc.invalidateQueries({ queryKey: qk.dashboard.calculations(projectId) });
-      qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
-    },
-  });
-}
-
-export function useCalculate() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: CalculateInput) => dashboardApi.calculate(input),
-    onSuccess: (_d, input) => {
-      qc.invalidateQueries({ queryKey: qk.dashboard.calculations(input.project_id) });
-      qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
-      toast.success("Расчёт выполнен");
-    },
   });
 }
 

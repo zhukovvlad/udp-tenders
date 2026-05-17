@@ -18,8 +18,8 @@ export const qk = {
   dashboard: {
     summary: (projectId: ID) => ["dashboard", "summary", projectId] as const,
     invoices: (projectId: ID) => ["dashboard", "invoices", projectId] as const,
-    calculations: (projectId: ID) =>
-      ["dashboard", "calculations", projectId] as const,
+    calculations: (projectId: ID, periodStart?: string, periodEnd?: string) =>
+      ["dashboard", "calculations", projectId, periodStart, periodEnd] as const,
     calculationsAll: ["dashboard", "calculations", "all"] as const,
     monthly: (projectId: ID) => ["dashboard", "monthly", projectId] as const,
   },

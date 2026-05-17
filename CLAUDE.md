@@ -56,8 +56,8 @@ All scripts use Unix syntax.
 UDP/
 ├── backend/
 │   ├── main.py           — FastAPI app, CORS, routers, middleware
-│   ├── models.py         — ORM models (Project, Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice, PriceCalculation, Supplier)
-│   ├── crud.py           — DB operations, recalculate_prices, supplier aggregates
+│   ├── models.py         — ORM models (Project, Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice, Supplier)
+│   ├── crud.py           — DB operations, compute_calculations, supplier aggregates
 │   ├── pdf_parser.py     — OpenRouter API parsing
 │   ├── s3.py             — MinIO helpers
 │   ├── routers/          — projects, invoices, dashboard, export, material_classes, reference_prices, settings, suppliers
@@ -93,11 +93,10 @@ UDP/
 ```
 Project → Documents → Invoices → InvoiceItems → MaterialClass
 Project → ReferencePrices (project ↔ material_class ↔ period)
-Project → PriceCalculations (aggregated monthly stats)
 Supplier → Invoices (one supplier, many projects)
 ```
 
-`PriceCalculation` is a pre-computed cache — always recalculate after invoice changes via `crud.recalculate_prices`.
+`GET /dashboard/calculations` вычисляет данные на лету (нет кеша) через `crud.compute_calculations()` — единый источник истины для аналитики цен. `compute_full_deviation()` делегирует в неё же.
 
 **Supplier aggregation** is computed on-the-fly (not cached). Key functions:
 - `crud.get_suppliers_with_stats` — registry list with turnover, project_count, invoice_count, categories
@@ -167,9 +166,8 @@ Frontend URL: `http://localhost:5173`
 ## Known tech debt
 
 See `docs/TECH_DEBT.md` for the full list. Key items:
-- `auto_calculate` has N+1 queries (dashboard router) — don't make it worse.
+- `GET /dashboard/calculations` without `project_id` has N+1 queries (dashboard router) — don't make it worse.
 - `Review.tsx` always uses `invoices[0]` — known bug, multi-invoice docs broken.
-- No composite index on `PriceCalculation(project_id, material_class_id, period_start, period_end)`.
 
 ---
 
