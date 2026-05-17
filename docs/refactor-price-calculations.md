@@ -102,7 +102,7 @@ KPI-карточка и таблица расчётов на одной стра
 - Добавить query params: `period_start?: date`, `period_end?: date`
 - Если `project_id` задан → `crud.compute_calculations(db, project_id, ...)`
 - Если нет → итерировать все проекты, собрать результаты (для Dashboard)
-- Формат ответа идентичен текущему
+- Формат ответа: общая структура сохранена, но поле `id` удалено — live-ответ не опирается на строки таблицы. Стабильный ключ записи: `project_id + material_class_id + period_start`
 
 > **Производительность:** при вызове без `project_id` выполняется N запросов `compute_calculations()` — по одному на проект. Для MVP приемлемо; добавить пункт в `TECH_DEBT.md` для будущей оптимизации (единый SQL с `GROUP BY project_id`).
 
