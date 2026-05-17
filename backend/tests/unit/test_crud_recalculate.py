@@ -1,6 +1,6 @@
 """Тесты бизнес-логики crud.compute_calculations.
 
-Переименован из test_crud_recalculate.py — recalculate_prices() удалён,
+Обновлены после удаления recalculate_prices():
 compute_calculations() является единственным источником расчётов.
 """
 from datetime import date

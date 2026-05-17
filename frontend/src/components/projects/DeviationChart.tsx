@@ -75,8 +75,8 @@ export function DeviationChart({ calculations, periodFilterActive = false, onCon
             ? null
             : rows.reduce((s, r) => s + (r.deviation_amount ?? 0), 0);
           // Derive % from totals to avoid double-counting when reference prices vary across months.
-          // Null when any included row lacks a reference price.
-          const refQtyTotal = rows.every((r) => r.reference_price !== null)
+          // Null when any included row lacks a usable reference price (null or <= 0).
+          const refQtyTotal = rows.every((r) => r.reference_price !== null && r.reference_price > 0)
             ? rows.reduce((s, r) => s + (r.reference_price! * (r.total_qty ?? 0)), 0)
             : null;
           const deviationPct =
