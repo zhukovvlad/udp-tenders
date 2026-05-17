@@ -153,6 +153,23 @@ export default function ProjectPage() {
 
   const hasCalculations = calculations.length > 0;
 
+  // Effective period: user's filter OR auto-detected from returned data (cosmetic display only,
+  // not sent to the API — API auto-detects when periodStart/periodEnd are empty).
+  const dataStart = useMemo(
+    () => calculations.length > 0
+      ? calculations.reduce((m, c) => (c.period_start < m ? c.period_start : m), calculations[0].period_start)
+      : "",
+    [calculations],
+  );
+  const dataEnd = useMemo(
+    () => calculations.length > 0
+      ? calculations.reduce((m, c) => (c.period_end > m ? c.period_end : m), calculations[0].period_end)
+      : "",
+    [calculations],
+  );
+  const displayStart = periodStart || dataStart;
+  const displayEnd   = periodEnd   || dataEnd;
+
   const filteredInvoices = useMemo(() => {
     if (!invoiceMonthFilter) return invoices;
     return invoices.filter((inv) => {
@@ -344,29 +361,9 @@ export default function ProjectPage() {
 
           {/* ────────── TAB: Обзор ────────── */}
           <TabsContent value="overview" className="mt-6 space-y-6">
-            {/* Latest period verdict banner */}
+            {/* Period verdict banner — always sums the full returned period */}
             {hasCalculations && (() => {
-              const periodFilterActive = !!(debouncedPeriodStart || debouncedPeriodEnd);
-
-              // When a period filter is active — aggregate the full selected range.
-              // Otherwise — show only the last calendar month in the data.
-              const bannerCalcs = periodFilterActive
-                ? calculations
-                : (() => {
-                    const latestEnd = calculations.reduce((max, c) =>
-                      c.period_end > max ? c.period_end : max, calculations[0].period_end
-                    );
-                    return calculations.filter(c => c.period_end === latestEnd);
-                  })();
-
-              const bannerStart = bannerCalcs.reduce((min, c) =>
-                c.period_start < min ? c.period_start : min, bannerCalcs[0].period_start
-              );
-              const bannerEnd = bannerCalcs.reduce((max, c) =>
-                c.period_end > max ? c.period_end : max, bannerCalcs[0].period_end
-              );
-              const bannerDev = totalDeviationAmount(bannerCalcs);
-              const label = periodFilterActive ? "За выбранный период" : "За последний месяц";
+              const bannerDev = totalDeviationAmount(calculations);
               return (
                 <div className={bannerDev > 0
                   ? "rounded-lg bg-danger-soft border border-danger-border px-4 py-3 text-sm font-medium text-danger-text flex items-center justify-between gap-4"
@@ -374,11 +371,11 @@ export default function ProjectPage() {
                 }>
                   <span>
                     {bannerDev > 0
-                      ? `${label} — Переплата: +${formatMoney(bannerDev)}`
-                      : `${label} — Экономия: ${formatMoney(Math.abs(bannerDev))}`}
+                      ? `За период — Переплата: +${formatMoney(bannerDev)}`
+                      : `За период — Экономия: ${formatMoney(Math.abs(bannerDev))}`}
                   </span>
                   <span className="text-xs font-normal opacity-60">
-                    {formatDate(bannerStart)} — {formatDate(bannerEnd)}
+                    {formatDate(displayStart)} — {formatDate(displayEnd)}
                   </span>
                 </div>
               );
@@ -443,7 +440,7 @@ export default function ProjectPage() {
                 </label>
                 <Input
                   type="date"
-                  value={periodStart}
+                  value={displayStart}
                   onChange={(e) => setPeriodStart(e.target.value)}
                   className="w-40"
                   data-testid="period-start-input"
@@ -455,7 +452,7 @@ export default function ProjectPage() {
                 </label>
                 <Input
                   type="date"
-                  value={periodEnd}
+                  value={displayEnd}
                   onChange={(e) => setPeriodEnd(e.target.value)}
                   className="w-40"
                   data-testid="period-end-input"
@@ -476,7 +473,7 @@ export default function ProjectPage() {
             {hasCalculations && (
               <DeviationChart
                 calculations={calculations}
-                periodFilterActive={!!(debouncedPeriodStart || debouncedPeriodEnd)}
+                periodFilterActive={true}
                 onConfigurePrice={() => setActiveTab("prices")}
               />
             )}

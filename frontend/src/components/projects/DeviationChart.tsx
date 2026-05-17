@@ -83,11 +83,22 @@ export function DeviationChart({ calculations, periodFilterActive = false, onCon
             deviationAmount !== null && refQtyTotal !== null && refQtyTotal > 0
               ? (deviationAmount / refQtyTotal) * 100
               : null;
+          const totalMaterial = rows.reduce((s, r) => s + (r.material_total ?? 0), 0);
+          const totalDelivery = rows.reduce((s, r) => s + (r.delivery_total ?? 0), 0);
+          const avgPrice = totalQty > 0 ? (totalMaterial + totalDelivery) / totalQty : 0;
+          // reference_price: weighted average when all months have a usable price, else null.
+          const referencePrice = rows.every((r) => r.reference_price !== null && r.reference_price > 0)
+            ? refQtyTotal! / totalQty
+            : null;
           return {
             ...rows[0],
             period_start: rows.reduce((m, r) => (r.period_start < m ? r.period_start : m), rows[0].period_start),
             period_end: rows.reduce((m, r) => (r.period_end > m ? r.period_end : m), rows[0].period_end),
             total_qty: totalQty,
+            material_total: totalMaterial,
+            delivery_total: totalDelivery,
+            avg_price: avgPrice,
+            reference_price: referencePrice,
             deviation_amount: deviationAmount,
             deviation_pct: deviationPct,
           };
