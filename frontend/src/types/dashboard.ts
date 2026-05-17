@@ -12,6 +12,7 @@ export interface DashboardSummary {
 }
 
 export interface DashboardCalculation {
+  material_class_id: number;
   material_class_name: string;
   period_start: ISODate;
   period_end: ISODate;

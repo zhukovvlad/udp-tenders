@@ -109,7 +109,7 @@ export function useCreateReferencePrice() {
       referencePricesApi.create(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
-      qc.invalidateQueries({ queryKey: ["dashboard", "calculations"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
       toast.success("Плановая цена сохранена");
     },
   });
@@ -122,7 +122,7 @@ export function useUpdateReferencePrice() {
       referencePricesApi.update(id, input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
-      qc.invalidateQueries({ queryKey: ["dashboard", "calculations"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
       toast.success("Плановая цена обновлена");
     },
   });
@@ -134,7 +134,7 @@ export function useDeleteReferencePrice() {
     mutationFn: (id: ID) => referencePricesApi.remove(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
-      qc.invalidateQueries({ queryKey: ["dashboard", "calculations"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
       toast.success("Плановая цена удалена");
     },
   });

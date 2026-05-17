@@ -64,20 +64,24 @@ export function DeviationChart({ calculations, periodFilterActive = false, onCon
   // Otherwise — show only the latest calendar month in the data.
   const displayCalcs: DashboardCalculation[] = periodFilterActive
     ? (() => {
-        const byClass = new Map<string, DashboardCalculation[]>();
+        const byClass = new Map<number, DashboardCalculation[]>();
         for (const c of calculations) {
-          if (!byClass.has(c.material_class_name)) byClass.set(c.material_class_name, []);
-          byClass.get(c.material_class_name)!.push(c);
+          if (!byClass.has(c.material_class_id)) byClass.set(c.material_class_id, []);
+          byClass.get(c.material_class_id)!.push(c);
         }
         return Array.from(byClass.values()).map((rows) => {
           const totalQty = rows.reduce((s, r) => s + (r.total_qty ?? 0), 0);
           const deviationAmount = rows.every((r) => r.deviation_amount === null)
             ? null
             : rows.reduce((s, r) => s + (r.deviation_amount ?? 0), 0);
-          const deviationPct = rows.every((r) => r.deviation_pct === null || r.total_qty === null)
-            ? null
-            : totalQty > 0
-              ? rows.reduce((s, r) => s + (r.deviation_pct ?? 0) * (r.total_qty ?? 0), 0) / totalQty
+          // Derive % from totals to avoid double-counting when reference prices vary across months.
+          // Null when any included row lacks a reference price.
+          const refQtyTotal = rows.every((r) => r.reference_price !== null)
+            ? rows.reduce((s, r) => s + (r.reference_price! * (r.total_qty ?? 0)), 0)
+            : null;
+          const deviationPct =
+            deviationAmount !== null && refQtyTotal !== null && refQtyTotal > 0
+              ? (deviationAmount / refQtyTotal) * 100
               : null;
           return {
             ...rows[0],
