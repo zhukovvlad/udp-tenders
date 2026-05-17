@@ -446,6 +446,7 @@ export default function ProjectPage() {
                   value={periodStart}
                   onChange={(e) => setPeriodStart(e.target.value)}
                   className="w-40"
+                  data-testid="period-start-input"
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -457,12 +458,14 @@ export default function ProjectPage() {
                   value={periodEnd}
                   onChange={(e) => setPeriodEnd(e.target.value)}
                   className="w-40"
+                  data-testid="period-end-input"
                 />
               </div>
               <Button
                 variant="secondary"
                 onClick={() => { setPeriodStart(""); setPeriodEnd(""); }}
                 disabled={!periodStart && !periodEnd}
+                data-testid="period-reset-button"
               >
                 Сбросить
               </Button>

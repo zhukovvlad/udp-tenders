@@ -365,4 +365,71 @@ describe("ProjectPage", () => {
       vi.restoreAllMocks();
     }
   });
+
+  // ── Period filter ───────────────────────────────────────────────────────
+
+  it("period filter inputs send period_start/period_end to calculations API", async () => {
+    const receivedParams: URLSearchParams[] = [];
+    server.use(
+      http.get("/api/dashboard/calculations", ({ request }) => {
+        receivedParams.push(new URL(request.url).searchParams);
+        return HttpResponse.json([]);
+      })
+    );
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const startInput = await screen.findByTestId("period-start-input");
+    const endInput = screen.getByTestId("period-end-input");
+
+    await user.type(startInput, "2025-01-01");
+    await user.type(endInput, "2025-03-31");
+
+    // Wait for debounce to fire and a request with both params to arrive
+    await waitFor(() => {
+      const withBoth = receivedParams.find(
+        (p) => p.get("period_start") === "2025-01-01" && p.get("period_end") === "2025-03-31"
+      );
+      expect(withBoth).toBeDefined();
+    }, { timeout: 2000 });
+  });
+
+  it("period reset button clears inputs and removes period params from calculations API", async () => {
+    const receivedParams: URLSearchParams[] = [];
+    server.use(
+      http.get("/api/dashboard/calculations", ({ request }) => {
+        receivedParams.push(new URL(request.url).searchParams);
+        return HttpResponse.json([]);
+      })
+    );
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const startInput = await screen.findByTestId("period-start-input");
+    const endInput = screen.getByTestId("period-end-input");
+
+    await user.type(startInput, "2025-01-01");
+    await user.type(endInput, "2025-03-31");
+
+    await waitFor(() => {
+      expect(receivedParams.some((p) => p.get("period_start") === "2025-01-01")).toBe(true);
+    }, { timeout: 2000 });
+
+    receivedParams.length = 0;
+
+    const resetBtn = screen.getByTestId("period-reset-button");
+    await user.click(resetBtn);
+
+    await waitFor(() => {
+      const withoutPeriod = receivedParams.find(
+        (p) => !p.get("period_start") && !p.get("period_end")
+      );
+      expect(withoutPeriod).toBeDefined();
+    }, { timeout: 2000 });
+
+    expect((startInput as HTMLInputElement).value).toBe("");
+    expect((endInput as HTMLInputElement).value).toBe("");
+  });
 });

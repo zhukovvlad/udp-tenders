@@ -88,12 +88,6 @@ export const handlers = [
   ),
   http.get("/api/dashboard/calculations", () => HttpResponse.json([])),
   http.get("/api/dashboard/monthly-summary", () => HttpResponse.json(sampleMonthlySummary)),
-  http.post("/api/dashboard/calculate", () =>
-    HttpResponse.json({ message: "Рассчитано классов: 1", results: [] })
-  ),
-  http.post("/api/dashboard/auto-calculate", () =>
-    HttpResponse.json({ message: "OK", period_start: null, period_end: null, results: [] })
-  ),
 
   http.get("/api/settings", () =>
     HttpResponse.json({
