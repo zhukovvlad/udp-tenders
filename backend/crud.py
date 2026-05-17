@@ -233,13 +233,13 @@ def create_invoice(db: Session, document_id: int, number: str, invoice_date: dat
 # --- Price Calculations ---
 
 def _months_in_range(start: date, end: date) -> list[tuple[date, date]]:
-    """Split [start, end] into calendar month intervals (first day — last day of month)."""
+    """Split [start, end] into calendar month intervals clamped to the requested bounds."""
     months = []
     cur = date(start.year, start.month, 1)
     while cur <= end:
         last_day = monthrange(cur.year, cur.month)[1]
         month_end = date(cur.year, cur.month, last_day)
-        months.append((cur, month_end))
+        months.append((max(cur, start), min(month_end, end)))
         if cur.month == 12:
             cur = date(cur.year + 1, 1, 1)
         else:

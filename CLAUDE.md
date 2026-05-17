@@ -57,7 +57,7 @@ UDP/
 ├── backend/
 │   ├── main.py           — FastAPI app, CORS, routers, middleware
 │   ├── models.py         — ORM models (Project, Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice, Supplier)
-│   ├── crud.py           — DB operations, recalculate_prices, supplier aggregates
+│   ├── crud.py           — DB operations, compute_calculations, supplier aggregates
 │   ├── pdf_parser.py     — OpenRouter API parsing
 │   ├── s3.py             — MinIO helpers
 │   ├── routers/          — projects, invoices, dashboard, export, material_classes, reference_prices, settings, suppliers

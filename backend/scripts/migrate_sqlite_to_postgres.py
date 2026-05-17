@@ -31,7 +31,6 @@ from models import (  # noqa: E402
     Invoice,
     InvoiceItem,
     MaterialClass,
-    PriceCalculation,
     Project,
     ReferencePrice,
 )
@@ -44,7 +43,6 @@ TABLES = [
     Document,
     Invoice,
     InvoiceItem,
-    PriceCalculation,
 ]
 
 

@@ -121,7 +121,7 @@ def list_calculations(
         projects = db.query(Project).all()
         rows: list[dict] = []
         for p in projects:
-            rows.extend(crud.compute_calculations(db, p.id))
+            rows.extend(crud.compute_calculations(db, p.id, period_start, period_end, material_class_id))
     else:
         rows = crud.compute_calculations(db, project_id, period_start, period_end, material_class_id)
 

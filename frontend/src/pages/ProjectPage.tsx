@@ -98,6 +98,8 @@ export default function ProjectPage() {
   useEffect(() => {
     setInvoiceMonthFilter(null);
     setActiveTab("overview");
+    setPeriodStart("");
+    setPeriodEnd("");
   }, [projectId]);
 
   // ── reference price dialog ──
