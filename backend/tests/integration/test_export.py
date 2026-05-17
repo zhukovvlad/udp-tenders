@@ -26,3 +26,72 @@ def test_export_unknown_project_returns_error(client):
     )
     assert response.status_code == 200
     assert response.json() == {"error": "Проект не найден"}
+
+
+def test_export_excel_includes_calculation_rows(client, factories):
+    """Экспорт содержит строку данных когда есть инвойс с позицией и плановой ценой."""
+    from datetime import date
+
+    project = factories.ProjectFactory.create(name="Экспорт-Объект")
+    mc = factories.MaterialClassFactory.create(name="В25", material_type="concrete")
+    factories.ReferencePriceFactory.create(
+        project=project, material_class=mc, price=6000.0,
+        period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
+    )
+    doc = factories.DocumentFactory.create(project=project)
+    inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10))
+    factories.InvoiceItemFactory.create(
+        invoice=inv, material_class=mc,
+        quantity=100.0, unit_price=6600.0, amount=660000.0,
+    )
+
+    response = client.get(
+        f"/api/export/excel?project_id={project.id}"
+        f"&period_start=2026-03-01&period_end=2026-03-31"
+    )
+    assert response.status_code == 200
+    wb = load_workbook(BytesIO(response.content))
+    ws = wb.active
+
+    # Collect all non-empty cell values from the sheet
+    values = [ws.cell(row=r, column=c).value
+              for r in range(1, ws.max_row + 1)
+              for c in range(1, ws.max_column + 1)]
+
+    assert "В25" in values
+    # avg_price = 660 000 / 100 = 6 600; reference_price = 6 000; deviation > 0
+    assert 6600.0 in values
+    assert 6000.0 in values
+
+
+def test_export_excel_material_class_filter(client, factories):
+    """Фильтр material_class_id оставляет только строки нужного класса."""
+    from datetime import date
+
+    project = factories.ProjectFactory.create()
+    mc1 = factories.MaterialClassFactory.create(name="В25", material_type="concrete")
+    mc2 = factories.MaterialClassFactory.create(name="В30", material_type="concrete")
+    doc = factories.DocumentFactory.create(project=project)
+    inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10))
+    factories.InvoiceItemFactory.create(
+        invoice=inv, material_class=mc1, quantity=10.0, unit_price=6000.0, amount=60000.0,
+    )
+    factories.InvoiceItemFactory.create(
+        invoice=inv, material_class=mc2, quantity=5.0, unit_price=9000.0, amount=45000.0,
+    )
+
+    response = client.get(
+        f"/api/export/excel?project_id={project.id}"
+        f"&period_start=2026-03-01&period_end=2026-03-31"
+        f"&material_class_id={mc1.id}"
+    )
+    assert response.status_code == 200
+    wb = load_workbook(BytesIO(response.content))
+    ws = wb.active
+
+    values = [ws.cell(row=r, column=c).value
+              for r in range(1, ws.max_row + 1)
+              for c in range(1, ws.max_column + 1)]
+
+    assert "В25" in values
+    assert "В30" not in values
