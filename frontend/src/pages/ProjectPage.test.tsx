@@ -396,11 +396,25 @@ describe("ProjectPage", () => {
   });
 
   it("period reset button clears inputs and removes period params from calculations API", async () => {
+    const sampleCalc = {
+      material_class_id: 1,
+      material_class_name: "В%25",
+      period_start: "2025-01-01",
+      period_end: "2025-01-31",
+      total_qty: 10,
+      material_total: 80000,
+      delivery_total: 0,
+      avg_price: 8000,
+      invoice_count: 1,
+      reference_price: null,
+      deviation_pct: null,
+      deviation_amount: null,
+    };
     const receivedParams: URLSearchParams[] = [];
     server.use(
       http.get("/api/dashboard/calculations", ({ request }) => {
         receivedParams.push(new URL(request.url).searchParams);
-        return HttpResponse.json([]);
+        return HttpResponse.json([sampleCalc]);
       })
     );
 

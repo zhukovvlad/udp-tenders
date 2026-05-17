@@ -440,7 +440,8 @@ export default function ProjectPage() {
                 </label>
                 <Input
                   type="date"
-                  value={displayStart}
+                  value={periodStart}
+                  placeholder={dataStart}
                   onChange={(e) => setPeriodStart(e.target.value)}
                   className="w-40"
                   data-testid="period-start-input"
@@ -452,7 +453,8 @@ export default function ProjectPage() {
                 </label>
                 <Input
                   type="date"
-                  value={displayEnd}
+                  value={periodEnd}
+                  placeholder={dataEnd}
                   onChange={(e) => setPeriodEnd(e.target.value)}
                   className="w-40"
                   data-testid="period-end-input"
@@ -473,7 +475,7 @@ export default function ProjectPage() {
             {hasCalculations && (
               <DeviationChart
                 calculations={calculations}
-                periodFilterActive={true}
+                periodFilterActive={true} // always aggregate all returned months by class
                 onConfigurePrice={() => setActiveTab("prices")}
               />
             )}
