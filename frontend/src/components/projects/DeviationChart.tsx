@@ -11,6 +11,7 @@ import { formatDate, formatMoney } from "@/lib/format";
 
 interface Props {
   calculations: DashboardCalculation[];
+  periodFilterActive?: boolean;
   onConfigurePrice?: () => void;
 }
 
@@ -56,29 +57,57 @@ function PctLabel(props: LabelProps) {
   );
 }
 
-export function DeviationChart({ calculations, onConfigurePrice }: Props) {
+export function DeviationChart({ calculations, periodFilterActive = false, onConfigurePrice }: Props) {
   if (!calculations.length) return null;
 
-  // When auto-calculate runs it creates monthly rows; show only the latest period.
-  const latestPeriodEnd = calculations.reduce(
-    (max, c) => (c.period_end > max ? c.period_end : max),
-    calculations[0].period_end,
-  );
-  const latestPeriodCalcs = calculations.filter(
-    (c) => c.period_end === latestPeriodEnd,
-  );
+  // When a period filter is active — aggregate all months by material class.
+  // Otherwise — show only the latest calendar month in the data.
+  const displayCalcs: DashboardCalculation[] = periodFilterActive
+    ? (() => {
+        const byClass = new Map<string, DashboardCalculation[]>();
+        for (const c of calculations) {
+          if (!byClass.has(c.material_class_name)) byClass.set(c.material_class_name, []);
+          byClass.get(c.material_class_name)!.push(c);
+        }
+        return Array.from(byClass.values()).map((rows) => {
+          const totalQty = rows.reduce((s, r) => s + (r.total_qty ?? 0), 0);
+          const deviationAmount = rows.every((r) => r.deviation_amount === null)
+            ? null
+            : rows.reduce((s, r) => s + (r.deviation_amount ?? 0), 0);
+          const deviationPct = rows.every((r) => r.deviation_pct === null || r.total_qty === null)
+            ? null
+            : totalQty > 0
+              ? rows.reduce((s, r) => s + (r.deviation_pct ?? 0) * (r.total_qty ?? 0), 0) / totalQty
+              : null;
+          return {
+            ...rows[0],
+            period_start: rows.reduce((m, r) => (r.period_start < m ? r.period_start : m), rows[0].period_start),
+            period_end: rows.reduce((m, r) => (r.period_end > m ? r.period_end : m), rows[0].period_end),
+            total_qty: totalQty,
+            deviation_amount: deviationAmount,
+            deviation_pct: deviationPct,
+          };
+        });
+      })()
+    : (() => {
+        const latestPeriodEnd = calculations.reduce(
+          (max, c) => (c.period_end > max ? c.period_end : max),
+          calculations[0].period_end,
+        );
+        return calculations.filter((c) => c.period_end === latestPeriodEnd);
+      })();
 
-  // deviation_pct is null when reference_price is null or <= 0 (see crud.recalculate_prices)
-  const withPrice = latestPeriodCalcs.filter((c) => c.deviation_pct !== null);
-  const withoutPrice = latestPeriodCalcs.filter((c) => c.deviation_pct === null);
+  // deviation_pct is null when reference_price is null or <= 0
+  const withPrice = displayCalcs.filter((c) => c.deviation_pct !== null);
+  const withoutPrice = displayCalcs.filter((c) => c.deviation_pct === null);
 
-  const latestPeriodStart = latestPeriodCalcs.reduce(
+  const latestPeriodStart = displayCalcs.reduce(
     (min, c) => (c.period_start < min ? c.period_start : min),
-    latestPeriodCalcs[0].period_start,
+    displayCalcs[0].period_start,
   );
-  const latestPeriodLabelEnd = latestPeriodCalcs.reduce(
+  const latestPeriodLabelEnd = displayCalcs.reduce(
     (max, c) => (c.period_end > max ? c.period_end : max),
-    latestPeriodCalcs[0].period_end,
+    displayCalcs[0].period_end,
   );
   const periodLabel =
     latestPeriodStart && latestPeriodLabelEnd

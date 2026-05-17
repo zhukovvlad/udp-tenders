@@ -166,7 +166,7 @@ Frontend URL: `http://localhost:5173`
 ## Known tech debt
 
 See `docs/TECH_DEBT.md` for the full list. Key items:
-- `auto_calculate` has N+1 queries (dashboard router) — don't make it worse.
+- `GET /dashboard/calculations` without `project_id` has N+1 queries (dashboard router) — don't make it worse.
 - `Review.tsx` always uses `invoices[0]` — known bug, multi-invoice docs broken.
 
 ---

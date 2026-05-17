@@ -346,26 +346,39 @@ export default function ProjectPage() {
           <TabsContent value="overview" className="mt-6 space-y-6">
             {/* Latest period verdict banner */}
             {hasCalculations && (() => {
-              const latestPeriodEnd = calculations.reduce((max, c) =>
-                c.period_end > max ? c.period_end : max, calculations[0].period_end
+              const periodFilterActive = !!(debouncedPeriodStart || debouncedPeriodEnd);
+
+              // When a period filter is active — aggregate the full selected range.
+              // Otherwise — show only the last calendar month in the data.
+              const bannerCalcs = periodFilterActive
+                ? calculations
+                : (() => {
+                    const latestEnd = calculations.reduce((max, c) =>
+                      c.period_end > max ? c.period_end : max, calculations[0].period_end
+                    );
+                    return calculations.filter(c => c.period_end === latestEnd);
+                  })();
+
+              const bannerStart = bannerCalcs.reduce((min, c) =>
+                c.period_start < min ? c.period_start : min, bannerCalcs[0].period_start
               );
-              const latestCalcs = calculations.filter(c => c.period_end === latestPeriodEnd);
-              const latestStart = latestCalcs.reduce((min, c) =>
-                c.period_start < min ? c.period_start : min, latestCalcs[0].period_start
+              const bannerEnd = bannerCalcs.reduce((max, c) =>
+                c.period_end > max ? c.period_end : max, bannerCalcs[0].period_end
               );
-              const latestDev = totalDeviationAmount(latestCalcs);
+              const bannerDev = totalDeviationAmount(bannerCalcs);
+              const label = periodFilterActive ? "За выбранный период" : "За последний месяц";
               return (
-                <div className={latestDev > 0
+                <div className={bannerDev > 0
                   ? "rounded-lg bg-danger-soft border border-danger-border px-4 py-3 text-sm font-medium text-danger-text flex items-center justify-between gap-4"
                   : "rounded-lg bg-accent-soft border border-accent-border px-4 py-3 text-sm font-medium text-accent-text flex items-center justify-between gap-4"
                 }>
                   <span>
-                    {latestDev > 0
-                      ? `За последний расчёт — Переплата: +${formatMoney(latestDev)}`
-                      : `За последний расчёт — Экономия: ${formatMoney(Math.abs(latestDev))}`}
+                    {bannerDev > 0
+                      ? `${label} — Переплата: +${formatMoney(bannerDev)}`
+                      : `${label} — Экономия: ${formatMoney(Math.abs(bannerDev))}`}
                   </span>
                   <span className="text-xs font-normal opacity-60">
-                    {formatDate(latestStart)} — {formatDate(latestPeriodEnd)}
+                    {formatDate(bannerStart)} — {formatDate(bannerEnd)}
                   </span>
                 </div>
               );
@@ -460,6 +473,7 @@ export default function ProjectPage() {
             {hasCalculations && (
               <DeviationChart
                 calculations={calculations}
+                periodFilterActive={!!(debouncedPeriodStart || debouncedPeriodEnd)}
                 onConfigurePrice={() => setActiveTab("prices")}
               />
             )}

@@ -39,9 +39,9 @@ def test_compute_calculations_simple_avg(factories, db_session):
     assert row["invoice_count"] == 1
     assert row["reference_price"] is None
     assert row["deviation_amount"] is None
-    # Auto-detected range = single invoice date; clamped to (2026-03-15, 2026-03-15)
-    assert row["period_start"] == date(2026, 3, 15)
-    assert row["period_end"] == date(2026, 3, 15)
+    # Auto-detected range is normalized to full month boundaries
+    assert row["period_start"] == date(2026, 3, 1)
+    assert row["period_end"] == date(2026, 3, 31)
 
 
 def test_compute_calculations_with_deviation(factories, db_session):

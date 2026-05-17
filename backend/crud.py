@@ -271,9 +271,9 @@ def compute_calculations(
             return []
         min_date, max_date = bounds
         if period_start is None:
-            period_start = min_date
+            period_start = min_date.replace(day=1)
         if period_end is None:
-            period_end = max_date
+            period_end = max_date.replace(day=monthrange(max_date.year, max_date.month)[1])
 
     months = _months_in_range(period_start, period_end)
     if not months:
