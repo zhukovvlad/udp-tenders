@@ -292,7 +292,7 @@ def compute_calculations(
             db.query(
                 InvoiceItem.material_class_id,
                 func.sum(InvoiceItem.amount).label("mat_total"),
-                func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * 0.2)).label("mat_vat"),
+                func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)).label("mat_vat"),
                 func.sum(InvoiceItem.quantity).label("qty"),
                 func.count(Invoice.id.distinct()).label("invoice_count"),
             )
@@ -333,7 +333,7 @@ def compute_calculations(
         delivery_agg = (
             db.query(
                 func.coalesce(func.sum(InvoiceItem.amount), 0).label("total"),
-                func.coalesce(func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * 0.2)), 0).label("vat"),
+                func.coalesce(func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)), 0).label("vat"),
             )
             .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
             .join(Document, Invoice.document_id == Document.id)
@@ -711,9 +711,10 @@ def _compute_supplier_project_deviation(
         db.query(
             InvoiceItem.material_class_id,
             func.sum(InvoiceItem.amount).label("mat_total"),
-            func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * 0.2)).label("mat_vat"),
+            func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)).label("mat_vat"),
             func.sum(InvoiceItem.quantity).label("qty"),
         )
+        .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .filter(
             InvoiceItem.invoice_id.in_(invoice_ids_q),
             InvoiceItem.item_type == "material",
@@ -744,7 +745,8 @@ def _compute_supplier_project_deviation(
         .scalar() or 0.0
     )
     delivery_vat_total: float = (
-        db.query(func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * 0.2)))
+        db.query(func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)))
+        .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .filter(
             InvoiceItem.invoice_id.in_(invoice_ids_q),
             InvoiceItem.item_type == "delivery",
