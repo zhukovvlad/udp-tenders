@@ -24,8 +24,8 @@ def test_summary_aggregates_materials(client, factories):
 
     response = client.get(f"/api/dashboard/summary?project_id={project.id}")
     body = response.json()
-    # Только material попадает в total_amount/total_qty
-    assert body["total_amount"] == 40000.0
+    # total_amount = all item types with VAT (material: 40000+8000=48000, delivery: 2000+400=2400)
+    assert body["total_amount"] == 50400.0
     assert body["total_qty"] == 5.0
     assert body["invoice_count"] == 1
 
@@ -39,7 +39,7 @@ def test_summary_with_reference_price_computes_deviation(client, factories):
         invoice=inv, material_class=mc, item_type="material",
         quantity=10, unit_price=9000, amount=90000,
     )
-    # Reference price: 8000 → avg_price 9000 → deviation = (9000-8000)*10 = 10000
+    # avg_price includes VAT: (90000+18000)/10=10800; ref=8000; deviation=(10800-8000)*10=28000
     factories.ReferencePriceFactory.create(
         project=project, material_class=mc,
         price=8000.0,
@@ -50,7 +50,7 @@ def test_summary_with_reference_price_computes_deviation(client, factories):
     body = response.json()
     assert body["first_invoice_date"] == "2026-03-15"
     assert body["last_invoice_date"] == "2026-03-15"
-    assert body["full_deviation_amount"] == 10000.0
+    assert body["full_deviation_amount"] == 28000.0
 
 
 def test_calculations_endpoint_returns_live_data(client, factories):
@@ -69,7 +69,7 @@ def test_calculations_endpoint_returns_live_data(client, factories):
     rows = response.json()
     assert len(rows) == 1
     assert rows[0]["total_qty"] == 10.0
-    assert rows[0]["avg_price"] == 8000.0
+    assert rows[0]["avg_price"] == 9600.0  # (80000 + 16000 vat) / 10
     assert rows[0]["period_start"] == "2026-03-01"
 
 
@@ -189,12 +189,12 @@ def test_monthly_summary_aggregates_by_month(client, factories):
     assert set(rows.keys()) == {(2026, 1), (2026, 3)}
 
     jan = rows[(2026, 1)]
-    assert jan["total_amount"] == 40000.0
+    assert jan["total_amount"] == 48000.0  # 40000 + 20% VAT
     assert jan["total_qty"] == 5.0
     assert jan["invoice_count"] == 1
 
     mar = rows[(2026, 3)]
-    assert mar["total_amount"] == 80000.0
+    assert mar["total_amount"] == 96000.0  # 80000 + 20% VAT
     assert mar["total_qty"] == 10.0
     assert mar["invoice_count"] == 1
 
@@ -212,7 +212,7 @@ def test_monthly_summary_counts_invoices_not_items(client, factories):
     row = response.json()[0]
     assert row["invoice_count"] == 1
     assert row["total_qty"] == 5.0
-    assert row["total_amount"] == 40000.0
+    assert row["total_amount"] == 48000.0  # (24000+16000) + 20% VAT
 
 
 def test_monthly_summary_ordered_chronologically(client, factories):

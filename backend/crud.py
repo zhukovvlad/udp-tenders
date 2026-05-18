@@ -292,7 +292,7 @@ def compute_calculations(
             db.query(
                 InvoiceItem.material_class_id,
                 func.sum(InvoiceItem.amount).label("mat_total"),
-                func.coalesce(func.sum(InvoiceItem.vat_amount), 0).label("mat_vat"),
+                func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)).label("mat_vat"),
                 func.sum(InvoiceItem.quantity).label("qty"),
                 func.count(Invoice.id.distinct()).label("invoice_count"),
             )
@@ -333,7 +333,7 @@ def compute_calculations(
         delivery_agg = (
             db.query(
                 func.coalesce(func.sum(InvoiceItem.amount), 0).label("total"),
-                func.coalesce(func.sum(InvoiceItem.vat_amount), 0).label("vat"),
+                func.coalesce(func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)), 0).label("vat"),
             )
             .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
             .join(Document, Invoice.document_id == Document.id)
@@ -376,7 +376,8 @@ def compute_calculations(
             share = r.qty / all_material_qty if all_material_qty > 0 else 0.0
             delivery_for_class = delivery_total_period * share
             delivery_vat_for_class = delivery_vat_period * share
-            avg_price = (float(r.mat_total) + delivery_for_class) / float(r.qty)
+            # avg_price includes VAT — consistent with reference prices entered with VAT by users
+            avg_price = (float(r.mat_total) + float(r.mat_vat) + delivery_for_class + delivery_vat_for_class) / float(r.qty)
 
             ref = ref_by_class.get(r.material_class_id)
             ref_price = ref.price if ref else None
@@ -392,10 +393,9 @@ def compute_calculations(
                 "material_class_name": class_name_map.get(r.material_class_id, "?"),
                 "period_start": month_start,
                 "period_end": month_end,
-                "material_total": round(float(r.mat_total), 2),
-                "material_vat": round(float(r.mat_vat), 2),
-                "delivery_total": round(delivery_for_class, 2),
-                "delivery_vat": round(delivery_vat_for_class, 2),
+                # material_total / delivery_total are VAT-inclusive (consistent with avg_price)
+                "material_total": round(float(r.mat_total) + float(r.mat_vat), 2),
+                "delivery_total": round(delivery_for_class + delivery_vat_for_class, 2),
                 "total_qty": round(float(r.qty), 3),
                 "avg_price": round(avg_price, 2),
                 "invoice_count": r.invoice_count,
@@ -589,7 +589,10 @@ def get_suppliers_with_stats(db: Session) -> list[dict]:
     Оборот считается как сумма всех позиций счетов поставщика (материалы + доставка).
     Категории выводятся из классов материалов, которые поставлял данный поставщик.
     """
-    turnover_label = func.coalesce(func.sum(InvoiceItem.amount), 0).label("turnover")
+    turnover_label = func.coalesce(
+        func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)),
+        0,
+    ).label("turnover")
     rows = (
         db.query(
             Supplier,
@@ -646,7 +649,7 @@ def get_supplier_detail(db: Session, supplier_id: int) -> dict | None:
     agg = (
         db.query(
             func.count(Invoice.id.distinct()).label("invoice_count"),
-            func.coalesce(func.sum(InvoiceItem.amount), 0).label("turnover"),
+            func.coalesce(func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)), 0).label("turnover"),
             func.count(Document.project_id.distinct()).label("project_count"),
             func.min(Invoice.date).label("first_invoice_date"),
         )
@@ -707,8 +710,10 @@ def _compute_supplier_project_deviation(
         db.query(
             InvoiceItem.material_class_id,
             func.sum(InvoiceItem.amount).label("mat_total"),
+            func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)).label("mat_vat"),
             func.sum(InvoiceItem.quantity).label("qty"),
         )
+        .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .filter(
             InvoiceItem.invoice_id.in_(invoice_ids_q),
             InvoiceItem.item_type == "material",
@@ -732,6 +737,15 @@ def _compute_supplier_project_deviation(
     )
     delivery_total: float = (
         db.query(func.sum(InvoiceItem.amount))
+        .filter(
+            InvoiceItem.invoice_id.in_(invoice_ids_q),
+            InvoiceItem.item_type == "delivery",
+        )
+        .scalar() or 0.0
+    )
+    delivery_vat_total: float = (
+        db.query(func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)))
+        .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .filter(
             InvoiceItem.invoice_id.in_(invoice_ids_q),
             InvoiceItem.item_type == "delivery",
@@ -767,8 +781,8 @@ def _compute_supplier_project_deviation(
         if not r.qty:
             continue
         share = r.qty / all_material_qty if all_material_qty > 0 else 0.0
-        delivery_for_class = delivery_total * share
-        avg_price = (r.mat_total + delivery_for_class) / r.qty
+        delivery_for_class = (delivery_total + delivery_vat_total) * share
+        avg_price = (r.mat_total + r.mat_vat + delivery_for_class) / r.qty
 
         ref = ref_by_class.get(r.material_class_id)
         if ref and ref.price and ref.price > 0:
@@ -791,7 +805,10 @@ def get_supplier_project_stats(db: Session, supplier_id: int) -> list[dict]:
         func.sum(case((InvoiceItem.item_type == "material", InvoiceItem.quantity))),
         0,
     ).label("volume_m3")
-    turnover_expr = func.coalesce(func.sum(InvoiceItem.amount), 0).label("turnover")
+    turnover_expr = func.coalesce(
+        func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)),
+        0,
+    ).label("turnover")
 
     rows = (
         db.query(

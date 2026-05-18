@@ -56,20 +56,10 @@ import {
 } from "@/services/queries";
 import { useDebounce } from "@/lib/useDebounce";
 
-import { formatDate, formatMoney, formatNumber, formatPercent } from "@/lib/format";
+import { formatDate, formatMoney, formatNumber, formatPercent, pluralRu } from "@/lib/format";
 import { MONTH_NAMES_RU } from "@/lib/constants";
 import type { ID } from "@/types/common";
 import type { ReferencePrice } from "@/types/referencePrice";
-import type { DashboardCalculation } from "@/types/dashboard";
-
-// ─────────────────────────────────────────────
-// Helper: total deviation across all calculations
-// ─────────────────────────────────────────────
-function totalDeviationAmount(
-  calculations: DashboardCalculation[]
-): number {
-  return calculations.reduce((sum, c) => sum + (c.deviation_amount ?? 0), 0);
-}
 
 // ─────────────────────────────────────────────
 // Main page
@@ -361,122 +351,100 @@ export default function ProjectPage() {
 
           {/* ────────── TAB: Обзор ────────── */}
           <TabsContent value="overview" className="mt-6 space-y-6">
-            {/* Period verdict banner — always sums the full returned period */}
-            {hasCalculations && (() => {
-              const bannerDev = totalDeviationAmount(calculations);
-              return (
-                <div className={bannerDev > 0
-                  ? "rounded-lg bg-danger-soft border border-danger-border px-4 py-3 text-sm font-medium text-danger-text flex items-center justify-between gap-4"
-                  : "rounded-lg bg-accent-soft border border-accent-border px-4 py-3 text-sm font-medium text-accent-text flex items-center justify-between gap-4"
-                }>
-                  <span>
-                    {bannerDev > 0
-                      ? `За период — Переплата: +${formatMoney(bannerDev)}`
-                      : `За период — Экономия: ${formatMoney(Math.abs(bannerDev))}`}
-                  </span>
-                  <span className="text-xs font-normal opacity-60">
-                    {formatDate(displayStart)} — {formatDate(displayEnd)}
-                  </span>
-                </div>
-              );
-            })()}
-
             {/* KPI row */}
             {summaryQ.data && (() => {
               const { first_invoice_date, last_invoice_date, full_deviation_amount } = summaryQ.data;
 
-              const devLabel = full_deviation_amount !== null && full_deviation_amount !== undefined
-                ? full_deviation_amount > 0
-                  ? `Переплата: +${formatMoney(full_deviation_amount)}`
-                  : `Экономия: ${formatMoney(Math.abs(full_deviation_amount))}`
-                : "—";
-              const devClass = full_deviation_amount !== null && full_deviation_amount !== undefined
-                ? full_deviation_amount > 0
-                  ? "bg-danger-soft border-danger-border"
-                  : "bg-accent-soft border-accent-border"
-                : "";
+              const devLabel =
+                full_deviation_amount != null
+                  ? full_deviation_amount > 0
+                    ? `+${formatMoney(full_deviation_amount)}`
+                    : formatMoney(Math.abs(full_deviation_amount))
+                  : "—";
+              const devKpiLabel =
+                full_deviation_amount != null
+                  ? full_deviation_amount > 0
+                    ? "Переплата за весь период"
+                    : "Экономия за весь период"
+                  : "Отклонение (весь период)";
+              const devClass =
+                full_deviation_amount != null
+                  ? full_deviation_amount > 0
+                    ? "bg-danger-soft border-danger-border"
+                    : "bg-accent-soft border-accent-border"
+                  : "";
+              const devValueClass =
+                full_deviation_amount != null
+                  ? full_deviation_amount > 0
+                    ? "text-danger-text"
+                    : "text-accent-text"
+                  : "";
 
               return (
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  <KpiCard
-                    label="Оборот"
-                    value={formatMoney(summaryQ.data.total_amount)}
-                  />
-                  <KpiCard
-                    label="Объём м³"
-                    value={formatNumber(summaryQ.data.total_qty)}
-                  />
-                  <KpiCard
-                    label="Счетов"
-                    value={formatNumber(summaryQ.data.invoice_count)}
-                  />
-                  <KpiCard
-                    label="Документов"
-                    value={formatNumber(summaryQ.data.doc_count)}
-                  />
-                  <KpiCard
-                    label="Первый счёт"
-                    value={first_invoice_date ? formatDate(first_invoice_date) : "—"}
-                  />
-                  <KpiCard
-                    label="Последний счёт"
-                    value={last_invoice_date ? formatDate(last_invoice_date) : "—"}
-                  />
-                  <KpiCard
-                    label="Отклонение (весь период)"
-                    value={devLabel}
-                    className={devClass}
-                  />
-                </div>
+                <>
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <KpiCard
+                      label="Оборот, ₽ с НДС"
+                      value={formatMoney(summaryQ.data.total_amount)}
+                      breakdown={[
+                        { label: "Материалы", value: formatMoney(summaryQ.data.material_amount) },
+                        ...(summaryQ.data.delivery_amount > 0 ? [{ label: "Доставка", value: formatMoney(summaryQ.data.delivery_amount) }] : []),
+                        ...(summaryQ.data.other_amount > 0 ? [{ label: "Прочее", value: formatMoney(summaryQ.data.other_amount) }] : []),
+                      ]}
+                    />
+                    <KpiCard
+                      label="Объём м³"
+                      value={formatNumber(summaryQ.data.total_qty)}
+                    />
+                    <KpiCard
+                      label="Счетов"
+                      value={formatNumber(summaryQ.data.invoice_count)}
+                      suffix={`· ${formatNumber(summaryQ.data.doc_count)} докум.`}
+                    />
+                    <KpiCard
+                      label={devKpiLabel}
+                      value={devLabel}
+                      className={devClass}
+                      valueClassName={devValueClass}
+                    />
+                  </div>
+                  <p className="text-xs text-fg-tertiary -mt-2 px-1">
+                    Первый счёт{" "}
+                    <span className="text-fg-secondary font-medium">
+                      {first_invoice_date ? formatDate(first_invoice_date) : "—"}
+                    </span>
+                    {" · "}
+                    Последний счёт{" "}
+                    <span className="text-fg-secondary font-medium">
+                      {last_invoice_date ? formatDate(last_invoice_date) : "—"}
+                    </span>
+                    {suppliers.length > 0 && (
+                      <>
+                        {" · "}
+                        <span className="text-fg-secondary font-medium">{formatNumber(suppliers.length)}</span>
+                        {` поставщик${pluralRu(suppliers.length)}`}
+                      </>
+                    )}
+                  </p>
+                </>
               );
             })()}
 
-            {/* Period filters */}
-            <div className="rounded-lg border border-border-subtle bg-surface p-4 space-y-3">
-              <div className="flex flex-wrap items-end gap-3">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-fg-secondary">
-                  Период с
-                </label>
-                <Input
-                  type="date"
-                  value={periodStart}
-                  placeholder={dataStart}
-                  onChange={(e) => setPeriodStart(e.target.value)}
-                  className="w-40"
-                  data-testid="period-start-input"
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-fg-secondary">
-                  Период по
-                </label>
-                <Input
-                  type="date"
-                  value={periodEnd}
-                  placeholder={dataEnd}
-                  onChange={(e) => setPeriodEnd(e.target.value)}
-                  className="w-40"
-                  data-testid="period-end-input"
-                />
-              </div>
-              <Button
-                variant="secondary"
-                onClick={() => { setPeriodStart(""); setPeriodEnd(""); }}
-                disabled={!periodStart && !periodEnd}
-                data-testid="period-reset-button"
-              >
-                Сбросить
-              </Button>
-              </div>
-            </div>
-
-            {/* Deviation chart */}
-            {hasCalculations && (
+            {/* Deviation chart (includes period filter in header) */}
+            {summaryQ.data && (
               <DeviationChart
                 calculations={calculations}
-                periodFilterActive={true} // always aggregate all returned months by class
+                periodFilterActive={true}
                 onConfigurePrice={() => setActiveTab("prices")}
+                periodStart={periodStart}
+                periodEnd={periodEnd}
+                dataStart={dataStart}
+                dataEnd={dataEnd}
+                displayStart={displayStart}
+                displayEnd={displayEnd}
+                onPeriodStartChange={setPeriodStart}
+                onPeriodEndChange={setPeriodEnd}
+                onPeriodReset={() => { setPeriodStart(""); setPeriodEnd(""); }}
               />
             )}
 
@@ -488,22 +456,39 @@ export default function ProjectPage() {
                     <TableRow className="text-xs text-fg-tertiary hover:bg-transparent">
                       <TableHead className="font-medium">Класс</TableHead>
                       <TableHead className="font-medium">Период</TableHead>
-                      <TableHead className="font-medium text-right">Ср.цена</TableHead>
-                      <TableHead className="font-medium text-right">Плановая цена</TableHead>
+                      <TableHead className="font-medium text-right">
+                        <div>Ср.цена</div>
+                        <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
+                      </TableHead>
+                      <TableHead className="font-medium text-right">
+                        <div>Плановая цена</div>
+                        <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
+                      </TableHead>
                       <TableHead className="font-medium text-right">Откл.%</TableHead>
                       <TableHead className="font-medium text-right">Откл.₽</TableHead>
                       <TableHead className="font-medium text-right">Объём</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {calculations.map((c) => (
+                    {[...calculations]
+                      .sort((a, b) => {
+                        const pCmp = a.period_start.localeCompare(b.period_start);
+                        if (pCmp !== 0) return pCmp;
+                        // Sort by numeric concrete strength (B7.5 < B10 < B15 < B30 ...)
+                        const num = (name: string | null | undefined) => {
+                          const m = (name ?? "").match(/[\d.]+/);
+                          return m ? parseFloat(m[0]) : 0;
+                        };
+                        return num(a.material_class_name) - num(b.material_class_name);
+                      })
+                      .map((c) => (
                       <TableRow
                         key={`${c.material_class_name ?? ""}-${c.period_start}-${c.period_end}`}
                       >
                         <TableCell className="text-fg">
                           {c.material_class_name}
                         </TableCell>
-                        <TableCell className="text-fg-secondary whitespace-nowrap">
+                        <TableCell className="text-fg-secondary whitespace-nowrap font-mono text-sm">
                           {formatDate(c.period_start)} — {formatDate(c.period_end)}
                         </TableCell>
                         <TableCell className="text-right font-mono text-fg">
@@ -615,7 +600,10 @@ export default function ProjectPage() {
                   <thead>
                     <tr className="border-b border-border-subtle text-left text-xs text-fg-tertiary">
                       <th className="px-4 py-2 font-medium">Класс</th>
-                      <th className="px-4 py-2 font-medium text-right">Цена</th>
+                      <th className="px-4 py-2 font-medium text-right">
+                        <div>Цена</div>
+                        <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
+                      </th>
                       <th className="px-4 py-2 font-medium">Период</th>
                       <th className="px-4 py-2 font-medium">Источник</th>
                       <th className="px-4 py-2 w-20"></th>

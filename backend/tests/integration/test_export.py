@@ -59,8 +59,8 @@ def test_export_excel_includes_calculation_rows(client, factories):
               for c in range(1, ws.max_column + 1)]
 
     assert "В25" in values
-    # avg_price = 660 000 / 100 = 6 600; reference_price = 6 000; deviation > 0
-    assert 6600.0 in values
+    # avg_price includes VAT: (660000 + 132000) / 100 = 7920.0; reference_price = 6000; deviation > 0
+    assert 7920.0 in values
     assert 6000.0 in values
 
 

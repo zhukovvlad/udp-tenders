@@ -6,6 +6,14 @@
 
 ## Backend
 
+- [ ] **`Invoice.vat_rate` допускает NULL в БД**
+  Колонка объявлена без `nullable=False` и без `NOT NULL` в миграции. ORM-дефолт `20.0`
+  применяется только при создании через ORM-объект, старые/мигрированные строки могут иметь `NULL`.
+  В SQL-выражениях добавлен защитный `COALESCE(Invoice.vat_rate, 20.0)`, но правильнее закрыть
+  проблему на уровне схемы.
+  **Решение:** добавить `nullable=False` в `models.py` и сгенерировать миграцию
+  `ALTER TABLE invoices ALTER COLUMN vat_rate SET NOT NULL`.
+
 - [ ] **`GET /dashboard/calculations` без `project_id`: N запросов к БД**
   При вызове без `project_id` (глобальный Dashboard) функция выполняет `compute_calculations()`
   по одному разу на каждый проект. При N проектах = N × ~4 SQL-запросов на месяц × M месяцев.
