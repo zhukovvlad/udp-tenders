@@ -1,4 +1,4 @@
-import { Bar, BarChart, Cell, LabelList, ReferenceLine, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, Cell, ReferenceLine, XAxis, YAxis } from "recharts";
 import type { LabelProps } from "recharts";
 import {
   ChartContainer,
@@ -6,13 +6,25 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui-domain/Button";
 import type { DashboardCalculation } from "@/types/dashboard";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatMoney, pluralRu } from "@/lib/format";
 
 interface Props {
   calculations: DashboardCalculation[];
   periodFilterActive?: boolean;
   onConfigurePrice?: () => void;
+  /** Period filter state — if provided, filter inputs are rendered in the chart header */
+  periodStart?: string;
+  periodEnd?: string;
+  dataStart?: string;
+  dataEnd?: string;
+  displayStart?: string;
+  displayEnd?: string;
+  onPeriodStartChange?: (v: string) => void;
+  onPeriodEndChange?: (v: string) => void;
+  onPeriodReset?: () => void;
 }
 
 function fillFor(pct: number): string {
@@ -25,22 +37,29 @@ const chartConfig = {
   value: { label: "Отклонение" },
 } satisfies ChartConfig;
 
-// Custom label: renders coloured % text after each bar
-function PctLabel(props: LabelProps) {
+// Custom label: renders "+4.0% · +112 000 ₽" after each bar in a single <text>
+interface BarLabelProps extends LabelProps {
+  amount?: number | null;
+}
+function BarLabel(props: BarLabelProps) {
   const x = Number(props.x ?? 0);
   const y = Number(props.y ?? 0);
   const width = Number(props.width ?? 0);
   const height = Number(props.height ?? 0);
-  const value = Number(props.value ?? 0);
+  const pct = Number(props.value ?? 0);
+  const amount = props.amount ?? null;
 
-  const color = value > 2 ? "#F0B0A0" : value > 0 ? "#EFB75C" : "#9CC79A";
-  const label = `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
+  const color = pct > 2 ? "#F0B0A0" : pct > 0 ? "#EFB75C" : "#9CC79A";
+  const pctStr = `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`;
+  const amtStr = amount != null
+    ? `  ·  ${amount > 0 ? "+" : ""}${Math.round(amount).toLocaleString("ru-RU")} ₽`
+    : "";
+
   // recharts passes negative width for negative bars: x = zero-axis, x+width = bar tip (left)
-  // Use min/max to find real bar edges regardless of sign.
   const barLeft = Math.min(x, x + width);
   const barRight = Math.max(x, x + width);
-  const labelX = value >= 0 ? barRight + 6 : barLeft - 6;
-  const anchor = value >= 0 ? "start" : "end";
+  const labelX = pct >= 0 ? barRight + 6 : barLeft - 6;
+  const anchor = pct >= 0 ? "start" : "end";
 
   return (
     <text
@@ -49,16 +68,76 @@ function PctLabel(props: LabelProps) {
       textAnchor={anchor}
       dominantBaseline="central"
       fontSize={12}
-      fontWeight={500}
-      fill={color}
     >
-      {label}
+      <tspan fontWeight={500} fill={color}>{pctStr}</tspan>
+      {amtStr && (
+        <tspan fill="rgba(180,176,168,0.7)">{amtStr}</tspan>
+      )}
     </text>
   );
 }
 
-export function DeviationChart({ calculations, periodFilterActive = false, onConfigurePrice }: Props) {
-  if (!calculations.length) return null;
+export function DeviationChart({
+  calculations,
+  periodFilterActive = false,
+  onConfigurePrice,
+  periodStart = "",
+  periodEnd = "",
+  dataStart,
+  dataEnd,
+  displayStart,
+  displayEnd,
+  onPeriodStartChange,
+  onPeriodEndChange,
+  onPeriodReset,
+}: Props) {
+  const hasFilterProps = typeof onPeriodStartChange === "function";
+
+  if (!calculations.length) {
+    // Still render the card shell with filter inputs when the parent controls the filter
+    if (!hasFilterProps) return null;
+    return (
+      <div className="rounded-xl border border-border-subtle bg-surface overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border-subtle">
+          <div>
+            <div className="text-sm font-medium">Отклонения по классам бетона</div>
+            <div className="text-xs text-fg-tertiary mt-0.5">относительно плановой цены</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              type="date"
+              value={periodStart}
+              placeholder={dataStart}
+              onChange={(e) => onPeriodStartChange(e.target.value)}
+              className="w-36 text-xs"
+              data-testid="period-start-input"
+            />
+            <span className="text-xs text-fg-tertiary">—</span>
+            <Input
+              type="date"
+              value={periodEnd}
+              placeholder={dataEnd}
+              onChange={(e) => onPeriodEndChange!(e.target.value)}
+              className="w-36 text-xs"
+              data-testid="period-end-input"
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onPeriodReset}
+              disabled={!periodStart && !periodEnd}
+              data-testid="period-reset-button"
+            >
+              Сбросить
+            </Button>
+          </div>
+        </div>
+        <div className="px-5 py-10 text-center text-sm text-fg-tertiary">
+          Нет данных за выбранный период
+        </div>
+      </div>
+    );
+  }
 
   // When a period filter is active — aggregate all months by material class.
   // Otherwise — show only the latest calendar month in the data.
@@ -116,18 +195,10 @@ export function DeviationChart({ calculations, periodFilterActive = false, onCon
   const withPrice = displayCalcs.filter((c) => c.deviation_pct !== null);
   const withoutPrice = displayCalcs.filter((c) => c.deviation_pct === null);
 
-  const latestPeriodStart = displayCalcs.reduce(
-    (min, c) => (c.period_start < min ? c.period_start : min),
-    displayCalcs[0].period_start,
-  );
-  const latestPeriodLabelEnd = displayCalcs.reduce(
-    (max, c) => (c.period_end > max ? c.period_end : max),
-    displayCalcs[0].period_end,
-  );
-  const periodLabel =
-    latestPeriodStart && latestPeriodLabelEnd
-      ? `${formatDate(latestPeriodStart)} — ${formatDate(latestPeriodLabelEnd)}`
-      : null;
+  const anyHasDeviation = displayCalcs.some((c) => c.deviation_amount !== null);
+  const totalBannerDev = anyHasDeviation
+    ? displayCalcs.reduce((s, c) => s + (c.deviation_amount ?? 0), 0)
+    : null;
 
   const maxAbsPct = withPrice.length
     ? Math.max(...withPrice.map((c) => Math.abs(c.deviation_pct!)), 0.5)
@@ -144,92 +215,153 @@ export function DeviationChart({ calculations, periodFilterActive = false, onCon
   const chartHeight = withPrice.length * 36 + 8;
 
   return (
-    <div className="rounded-xl border border-border-subtle bg-surface p-5 space-y-4">
-      <div className="flex items-baseline justify-between gap-4">
-        <div className="flex items-baseline gap-3">
-          <h2 className="text-sm font-medium">Отклонения по классам бетона</h2>
-          {periodLabel && (
-            <span className="text-xs text-fg-tertiary">{periodLabel}</span>
-          )}
+    <div className="rounded-xl border border-border-subtle bg-surface overflow-hidden">
+      {/* ── Header: title + period filter ── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border-subtle">
+        <div>
+          <div className="text-sm font-medium">Отклонения по классам бетона</div>
+          <div className="text-xs text-fg-tertiary mt-0.5">относительно плановой цены</div>
         </div>
-        <span className="shrink-0 text-xs text-fg-tertiary">относительно плановой цены</span>
+        {onPeriodStartChange && (
+          <div className="flex items-center gap-2">
+            <Input
+              type="date"
+              value={periodStart}
+              placeholder={dataStart}
+              onChange={(e) => onPeriodStartChange(e.target.value)}
+              className="w-36 text-xs"
+              data-testid="period-start-input"
+            />
+            <span className="text-xs text-fg-tertiary">—</span>
+            <Input
+              type="date"
+              value={periodEnd}
+              placeholder={dataEnd}
+              onChange={(e) => onPeriodEndChange!(e.target.value)}
+              className="w-36 text-xs"
+              data-testid="period-end-input"
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onPeriodReset}
+              disabled={!periodStart && !periodEnd}
+              data-testid="period-reset-button"
+            >
+              Сбросить
+            </Button>
+          </div>
+        )}
       </div>
 
-      {withPrice.length > 0 && (
-        <ChartContainer
-          config={chartConfig}
-          className="w-full"
-          style={{ height: chartHeight }}
+      {/* ── Period summary banner ── */}
+      {totalBannerDev !== null && (
+        <div
+          className={
+            totalBannerDev > 0
+              ? "flex items-center justify-between px-5 py-3 bg-danger-soft border-b border-danger-border"
+              : "flex items-center justify-between px-5 py-3 bg-accent-soft border-b border-accent-border"
+          }
         >
-          <BarChart
-            layout="vertical"
-            data={data}
-            margin={{ top: 0, right: 56, left: 40, bottom: 0 }}
-            barSize={8}
-            barCategoryGap="40%"
+          <span className="text-xs text-fg-secondary">
+            За выбранный период
+            {displayStart && displayEnd
+              ? ` (${formatDate(displayStart)} — ${formatDate(displayEnd)})`
+              : ""}
+          </span>
+          <span
+            className={
+              "text-sm font-medium " +
+              (totalBannerDev > 0 ? "text-danger-text" : "text-accent-text")
+            }
           >
-            <YAxis
-              dataKey="name"
-              type="category"
-              tickLine={false}
-              axisLine={false}
-              width={48}
-              tick={{ fontSize: 13, fontWeight: 500, fill: "currentColor" }}
-            />
-            <XAxis
-              type="number"
-              domain={[-domainBound, domainBound]}
-              hide
-            />
-            <ReferenceLine x={0} stroke="rgba(255,255,255,0.15)" strokeWidth={1} />
-            <ChartTooltip
-              cursor={false}
-              content={
-                <ChartTooltipContent
-                  formatter={(value, _name, item) => {
-                    const v = Number(value);
-                    const pctStr = `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
-                    const amtStr =
-                      item.payload?.amount != null
-                        ? `  (${formatMoney(item.payload.amount)})`
-                        : "";
-                    return pctStr + amtStr;
-                  }}
-                  hideLabel
-                />
-              }
-            />
-            <Bar dataKey="value" radius={4}>
-              {data.map((entry, idx) => (
-                <Cell key={`${entry.name}-${idx}`} fill={entry.fill} />
-              ))}
-              <LabelList dataKey="value" content={PctLabel} />
-            </Bar>
-          </BarChart>
-        </ChartContainer>
+            {totalBannerDev > 0
+              ? `Переплата: +${formatMoney(totalBannerDev)}`
+              : `Экономия: ${formatMoney(Math.abs(totalBannerDev))}`}
+          </span>
+        </div>
       )}
 
-      {withoutPrice.map((c, idx) => (
-        <div key={`${c.material_class_name}-${idx}`} className="flex items-center gap-3.5">
-          <div className="w-12 shrink-0 text-sm font-medium text-fg-tertiary">
-            {c.material_class_name}
-          </div>
-          <div className="h-2 flex-1 rounded-full bg-surface-hover" />
-          {typeof onConfigurePrice === "function" ? (
+      {/* ── Chart bars ── */}
+      {withPrice.length > 0 && (
+        <div className="p-5">
+          <ChartContainer
+            config={chartConfig}
+            className="w-full"
+            style={{ height: chartHeight }}
+          >
+            <BarChart
+              layout="vertical"
+              data={data}
+              margin={{ top: 0, right: 140, left: 40, bottom: 0 }}
+              barSize={16}
+              barCategoryGap="40%"
+            >
+              <YAxis
+                dataKey="name"
+                type="category"
+                tickLine={false}
+                axisLine={false}
+                width={48}
+                tick={{ fontSize: 13, fontWeight: 500, fill: "currentColor" }}
+              />
+              <XAxis
+                type="number"
+                domain={[-domainBound, domainBound]}
+                hide
+              />
+              <ReferenceLine x={0} stroke="rgba(255,255,255,0.15)" strokeWidth={1} />
+              <ChartTooltip
+                cursor={false}
+                content={
+                  <ChartTooltipContent
+                    formatter={(value, _name, item) => {
+                      const v = Number(value);
+                      const pctStr = `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
+                      const amtStr =
+                        item.payload?.amount != null
+                          ? `  (${formatMoney(item.payload.amount)})`
+                          : "";
+                      return pctStr + amtStr;
+                    }}
+                    hideLabel
+                  />
+                }
+              />
+              <Bar
+                dataKey="value"
+                radius={4}
+                label={(lp: LabelProps & { index?: number }) => (
+                  <BarLabel {...lp} amount={data[lp.index ?? 0]?.amount ?? null} />
+                )}
+              >
+                {data.map((entry, idx) => (
+                  <Cell key={`${entry.name}-${idx}`} fill={entry.fill} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ChartContainer>
+        </div>
+      )}
+
+      {/* ── Footer: classes without planned price ── */}
+      {withoutPrice.length > 0 && (
+        <div className="flex items-center justify-between gap-4 px-5 py-3 border-t border-border-subtle bg-surface-sunken">
+          <span className="text-xs text-fg-tertiary">
+            {withoutPrice.length} класс{pluralRu(withoutPrice.length)}{" "}
+            ({withoutPrice.map((c) => c.material_class_name).join(", ")}) без плановой цены — не учтены в расчёте
+          </span>
+          {typeof onConfigurePrice === "function" && (
             <button
               type="button"
               onClick={onConfigurePrice}
-              className="shrink-0 text-right text-xs italic text-accent-text hover:underline"
+              className="shrink-0 text-xs text-accent-text hover:underline"
             >
-              Нет плановой цены · настроить →
+              Настроить плановые цены →
             </button>
-          ) : (
-            <span className="shrink-0 text-right text-xs italic text-fg-tertiary">
-              Нет плановой цены
-            </span>
           )}
         </div>
-      ))}
+      )}
     </div>
   );
 }
