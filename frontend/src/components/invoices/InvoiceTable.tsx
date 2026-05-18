@@ -75,7 +75,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
         <TableBody>
           {invoices.map((inv) => {
             const total = inv.items.reduce(
-              (s, it) => s + it.amount + (it.vat_amount ?? it.amount * 0.2),
+              (s, it) => s + it.amount + (it.vat_amount ?? it.amount * (inv.vat_rate / 100)),
               0,
             );
             const stage = getStage(inv, threshold);

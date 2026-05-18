@@ -590,7 +590,10 @@ def get_suppliers_with_stats(db: Session) -> list[dict]:
     Оборот считается как сумма всех позиций счетов поставщика (материалы + доставка).
     Категории выводятся из классов материалов, которые поставлял данный поставщик.
     """
-    turnover_label = func.coalesce(func.sum(InvoiceItem.amount), 0).label("turnover")
+    turnover_label = func.coalesce(
+        func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)),
+        0,
+    ).label("turnover")
     rows = (
         db.query(
             Supplier,
@@ -647,7 +650,7 @@ def get_supplier_detail(db: Session, supplier_id: int) -> dict | None:
     agg = (
         db.query(
             func.count(Invoice.id.distinct()).label("invoice_count"),
-            func.coalesce(func.sum(InvoiceItem.amount), 0).label("turnover"),
+            func.coalesce(func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)), 0).label("turnover"),
             func.count(Document.project_id.distinct()).label("project_count"),
             func.min(Invoice.date).label("first_invoice_date"),
         )
@@ -801,7 +804,10 @@ def get_supplier_project_stats(db: Session, supplier_id: int) -> list[dict]:
         func.sum(case((InvoiceItem.item_type == "material", InvoiceItem.quantity))),
         0,
     ).label("volume_m3")
-    turnover_expr = func.coalesce(func.sum(InvoiceItem.amount), 0).label("turnover")
+    turnover_expr = func.coalesce(
+        func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)),
+        0,
+    ).label("turnover")
 
     rows = (
         db.query(

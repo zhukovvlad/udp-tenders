@@ -47,7 +47,7 @@ describe("ProjectPage", () => {
   it("shows KPI cards after summary loads", async () => {
     renderProject();
     await waitFor(() => {
-      expect(screen.getByText("Оборот")).toBeInTheDocument();
+      expect(screen.getByText("Оборот, ₽ с НДС")).toBeInTheDocument();
       expect(screen.getByText("Счетов")).toBeInTheDocument();
     });
   });

@@ -98,6 +98,30 @@ Supplier → Invoices (one supplier, many projects)
 
 `GET /dashboard/calculations` вычисляет данные на лету (нет кеша) через `crud.compute_calculations()` — единый источник истины для аналитики цен. `compute_full_deviation()` делегирует в неё же.
 
+### Методология расчёта avg_price
+
+Средняя цена (`avg_price`) вычисляется **с НДС** — чтобы сравнение с плановыми ценами было корректным (плановые цены вводятся пользователем тоже с НДС).
+
+```
+avg_price = (mat_total + mat_vat + delivery_for_class + delivery_vat_for_class) / qty
+```
+
+- `mat_total` = `SUM(InvoiceItem.amount)` — сумма без НДС из позиции
+- `mat_vat` = `SUM(COALESCE(vat_amount, amount * COALESCE(vat_rate, 20.0) / 100))` — НДС; если поле `vat_amount` не заполнено (парсер не извлёк), берётся расчётный НДС по ставке счёта
+- Доставка (`item_type = "delivery"`) распределяется пропорционально объёму м³ (`qty`) каждого класса материала относительно общего объёма за месяц
+- Расчёт ведётся помесячно; каждый месяц — отдельная строка в `compute_calculations()`
+
+**Отклонение:**
+```
+deviation_pct    = (avg_price − ref_price) / ref_price × 100
+deviation_amount = (avg_price − ref_price) × qty
+```
+
+**Оборот в supplier-агрегатах** считается аналогично:
+`SUM(amount + COALESCE(vat_amount, amount * COALESCE(vat_rate, 20.0) / 100))`
+
+**VAT guard:** `Invoice.vat_rate` не имеет `NOT NULL` в БД (см. TECH_DEBT.md), поэтому во всех SQL-выражениях используется `COALESCE(vat_rate, 20.0)` как fallback.
+
 **Supplier aggregation** is computed on-the-fly (not cached). Key functions:
 - `crud.get_suppliers_with_stats` — registry list with turnover, project_count, invoice_count, categories
 - `crud.get_supplier_detail` — same aggregates for a single supplier (card header)

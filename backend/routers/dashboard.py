@@ -25,7 +25,7 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db)):
     totals_by_type = (
         db.query(
             InvoiceItem.item_type,
-            func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * 0.2)).label("amount"),
+            func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)).label("amount"),
         )
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .join(Document, Invoice.document_id == Document.id)

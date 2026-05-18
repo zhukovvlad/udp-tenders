@@ -52,7 +52,7 @@ function BarLabel(props: BarLabelProps) {
   const color = pct > 2 ? "#F0B0A0" : pct > 0 ? "#EFB75C" : "#9CC79A";
   const pctStr = `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`;
   const amtStr = amount != null
-    ? `  ·  ${amount > 0 ? "+" : ""}${Math.round(amount).toLocaleString("ru-RU")} ₽`
+    ? `  ·  ${amount > 0 ? "+" : ""}${formatMoney(Math.abs(amount))}`
     : "";
 
   // recharts passes negative width for negative bars: x = zero-axis, x+width = bar tip (left)
@@ -148,7 +148,7 @@ export function DeviationChart({
   onPeriodEndChange,
   onPeriodReset,
 }: Props) {
-  const hasFilterProps = typeof onPeriodStartChange === "function";
+  const hasFilterProps = typeof onPeriodStartChange === "function" && typeof onPeriodEndChange === "function";
 
   if (!calculations.length) {
     // Still render the card shell with filter inputs when the parent controls the filter
@@ -346,7 +346,7 @@ export function DeviationChart({
                 dataKey="value"
                 radius={4}
                 label={(lp: LabelProps & { index?: number }) => (
-                  <BarLabel {...lp} amount={data[lp.index ?? 0]?.amount ?? null} />
+                  <BarLabel {...lp} amount={lp.index != null ? (data[lp.index]?.amount ?? null) : null} />
                 )}
               >
                 {data.map((entry, idx) => (
