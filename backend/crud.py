@@ -393,10 +393,9 @@ def compute_calculations(
                 "material_class_name": class_name_map.get(r.material_class_id, "?"),
                 "period_start": month_start,
                 "period_end": month_end,
+                # material_total / delivery_total are VAT-inclusive (consistent with avg_price)
                 "material_total": round(float(r.mat_total) + float(r.mat_vat), 2),
-                "material_vat": round(float(r.mat_vat), 2),
                 "delivery_total": round(delivery_for_class + delivery_vat_for_class, 2),
-                "delivery_vat": round(delivery_vat_for_class, 2),
                 "total_qty": round(float(r.qty), 3),
                 "avg_price": round(avg_price, 2),
                 "invoice_count": r.invoice_count,
