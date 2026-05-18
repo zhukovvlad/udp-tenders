@@ -35,7 +35,7 @@ def test_compute_calculations_simple_avg(factories, db_session):
     assert len(result) == 1
     row = result[0]
     assert row["total_qty"] == 10.0
-    assert row["avg_price"] == 8000.0
+    assert row["avg_price"] == 9600.0
     assert row["invoice_count"] == 1
     assert row["reference_price"] is None
     assert row["deviation_amount"] is None
@@ -62,8 +62,8 @@ def test_compute_calculations_with_deviation(factories, db_session):
     assert len(result) == 1
     row = result[0]
     assert row["reference_price"] == 10000.0
-    assert row["deviation_pct"] == 10.0
-    assert row["deviation_amount"] == 10000.0
+    assert row["deviation_pct"] == 32.0
+    assert row["deviation_amount"] == 32000.0
 
 
 def test_compute_calculations_delivery_allocation(factories, db_session):
@@ -95,15 +95,15 @@ def test_compute_calculations_delivery_allocation(factories, db_session):
     r1 = by_class[mc1.id]
     r2 = by_class[mc2.id]
 
-    # mc1 доля = 10/40 = 0.25 → доставка 10 000
-    # avg_price = (80 000 + 10 000) / 10 = 9 000
-    assert r1["delivery_total"] == 10000.0
-    assert r1["avg_price"] == 9000.0
+    # mc1 доля = 10/40 = 0.25 → доставка (40000+8000)*0.25 = 12000 (с НДС)
+    # avg_price = (80000 + 16000 + 12000) / 10 = 10800
+    assert r1["delivery_total"] == 12000.0
+    assert r1["avg_price"] == 10800.0
 
-    # mc2 доля = 30/40 = 0.75 → доставка 30 000
-    # avg_price = (180 000 + 30 000) / 30 = 7 000
-    assert r2["delivery_total"] == 30000.0
-    assert r2["avg_price"] == 7000.0
+    # mc2 доля = 30/40 = 0.75 → доставка (40000+8000)*0.75 = 36000 (с НДС)
+    # avg_price = (180000 + 36000 + 36000) / 30 = 8400
+    assert r2["delivery_total"] == 36000.0
+    assert r2["avg_price"] == 8400.0
 
 
 def test_compute_calculations_period_filter(factories, db_session):

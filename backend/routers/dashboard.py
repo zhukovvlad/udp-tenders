@@ -1,3 +1,4 @@
+from calendar import monthrange
 from datetime import date
 
 from fastapi import APIRouter, Depends
@@ -21,15 +22,26 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db)):
         .filter(Document.project_id == project_id)
         .scalar()
     )
-    totals = (
+    totals_by_type = (
         db.query(
-            func.sum(InvoiceItem.amount).label("total_amount"),
-            func.sum(InvoiceItem.quantity).label("total_qty"),
+            InvoiceItem.item_type,
+            func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * 0.2)).label("amount"),
         )
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .join(Document, Invoice.document_id == Document.id)
+        .filter(Document.project_id == project_id)
+        .group_by(InvoiceItem.item_type)
+        .all()
+    )
+    by_type = {row.item_type: float(row.amount or 0) for row in totals_by_type}
+    total_all = sum(by_type.values())
+
+    total_qty = (
+        db.query(func.sum(InvoiceItem.quantity))
+        .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+        .join(Document, Invoice.document_id == Document.id)
         .filter(Document.project_id == project_id, InvoiceItem.item_type == "material")
-        .first()
+        .scalar() or 0.0
     )
 
     # Full invoice date range for this project
@@ -43,15 +55,24 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db)):
 
     full_deviation = None
     if first_invoice_date and last_invoice_date:
+        # Normalize to full calendar months — same as compute_calculations auto-detect.
+        # Using raw invoice dates would clamp month boundaries differently and produce
+        # a different delivery proration denominator than the calculations API.
+        period_start = first_invoice_date.replace(day=1)
+        last_day = monthrange(last_invoice_date.year, last_invoice_date.month)[1]
+        period_end = last_invoice_date.replace(day=last_day)
         full_deviation = crud.compute_full_deviation(
-            db, project_id, first_invoice_date, last_invoice_date
+            db, project_id, period_start, period_end
         )
 
     return {
         "doc_count": doc_count or 0,
         "invoice_count": invoice_count or 0,
-        "total_amount": round(totals.total_amount or 0, 2),
-        "total_qty": round(totals.total_qty or 0, 2),
+        "total_amount": round(total_all, 2),
+        "material_amount": round(by_type.get("material", 0), 2),
+        "delivery_amount": round(by_type.get("delivery", 0), 2),
+        "other_amount": round(by_type.get("other", 0), 2),
+        "total_qty": round(float(total_qty), 2),
         "first_invoice_date": first_invoice_date.isoformat() if first_invoice_date else None,
         "last_invoice_date": last_invoice_date.isoformat() if last_invoice_date else None,
         "full_deviation_amount": full_deviation,
@@ -100,6 +121,7 @@ def list_project_invoices(project_id: int, db: Session = Depends(get_db)):
                     "unit": item.unit,
                     "unit_price": item.unit_price,
                     "amount": item.amount,
+                    "vat_amount": item.vat_amount,
                 }
                 for item in inv.items
             ],

@@ -118,4 +118,4 @@ class InvoiceItemFactory(_BaseFactory):
     # amount и vat_amount выводятся из quantity * unit_price — это предотвращает
     # рассинхронизацию при override quantity. Тесты могут передать amount явно.
     amount = factory.LazyAttribute(lambda obj: obj.quantity * obj.unit_price)
-    vat_amount = factory.LazyAttribute(lambda obj: round(obj.amount / 1.20 * 0.20, 2))
+    vat_amount = factory.LazyAttribute(lambda obj: round(obj.amount * 0.20, 2))

@@ -31,6 +31,7 @@ export interface DashboardInvoiceItem {
   unit: string | null;
   unit_price: number;
   amount: number;
+  vat_amount?: number | null;
 }
 
 /** Счёт в формате dashboard/invoices (позиции без id/vat_amount). */

@@ -5,6 +5,9 @@ export interface DashboardSummary {
   doc_count: number;
   invoice_count: number;
   total_amount: number;
+  material_amount: number;
+  delivery_amount: number;
+  other_amount: number;
   total_qty: number;
   first_invoice_date: ISODate | null;
   last_invoice_date: ISODate | null;

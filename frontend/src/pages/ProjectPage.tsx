@@ -384,8 +384,13 @@ export default function ProjectPage() {
                 <>
                   <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                     <KpiCard
-                      label="Оборот"
+                      label="Оборот, ₽ с НДС"
                       value={formatMoney(summaryQ.data.total_amount)}
+                      breakdown={[
+                        { label: "Материалы", value: formatMoney(summaryQ.data.material_amount) },
+                        ...(summaryQ.data.delivery_amount > 0 ? [{ label: "Доставка", value: formatMoney(summaryQ.data.delivery_amount) }] : []),
+                        ...(summaryQ.data.other_amount > 0 ? [{ label: "Прочее", value: formatMoney(summaryQ.data.other_amount) }] : []),
+                      ]}
                     />
                     <KpiCard
                       label="Объём м³"
@@ -451,8 +456,14 @@ export default function ProjectPage() {
                     <TableRow className="text-xs text-fg-tertiary hover:bg-transparent">
                       <TableHead className="font-medium">Класс</TableHead>
                       <TableHead className="font-medium">Период</TableHead>
-                      <TableHead className="font-medium text-right">Ср.цена</TableHead>
-                      <TableHead className="font-medium text-right">Плановая цена</TableHead>
+                      <TableHead className="font-medium text-right">
+                        <div>Ср.цена</div>
+                        <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
+                      </TableHead>
+                      <TableHead className="font-medium text-right">
+                        <div>Плановая цена</div>
+                        <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
+                      </TableHead>
                       <TableHead className="font-medium text-right">Откл.%</TableHead>
                       <TableHead className="font-medium text-right">Откл.₽</TableHead>
                       <TableHead className="font-medium text-right">Объём</TableHead>
@@ -589,7 +600,10 @@ export default function ProjectPage() {
                   <thead>
                     <tr className="border-b border-border-subtle text-left text-xs text-fg-tertiary">
                       <th className="px-4 py-2 font-medium">Класс</th>
-                      <th className="px-4 py-2 font-medium text-right">Цена</th>
+                      <th className="px-4 py-2 font-medium text-right">
+                        <div>Цена</div>
+                        <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
+                      </th>
                       <th className="px-4 py-2 font-medium">Период</th>
                       <th className="px-4 py-2 font-medium">Источник</th>
                       <th className="px-4 py-2 w-20"></th>

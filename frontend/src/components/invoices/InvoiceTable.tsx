@@ -64,14 +64,20 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
             <TableHead>Дата</TableHead>
             <TableHead>Поставщик</TableHead>
             <TableHead>Позиции</TableHead>
-            <TableHead className="text-right">Сумма</TableHead>
+            <TableHead className="text-right">
+              <div>Сумма</div>
+              <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
+            </TableHead>
             <TableHead>Статус</TableHead>
             <TableHead></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {invoices.map((inv) => {
-            const total = inv.items.reduce((s, it) => s + it.amount, 0);
+            const total = inv.items.reduce(
+              (s, it) => s + it.amount + (it.vat_amount ?? it.amount * 0.2),
+              0,
+            );
             const stage = getStage(inv, threshold);
             const { tone, label } = STAGE_CONFIG[stage];
             const confidencePct =

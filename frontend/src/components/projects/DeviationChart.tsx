@@ -77,6 +77,63 @@ function BarLabel(props: BarLabelProps) {
   );
 }
 
+interface FilterHeaderProps {
+  periodStart: string;
+  periodEnd: string;
+  dataStart?: string;
+  dataEnd?: string;
+  onPeriodStartChange: (v: string) => void;
+  onPeriodEndChange: (v: string) => void;
+  onPeriodReset?: () => void;
+}
+
+function FilterHeader({
+  periodStart,
+  periodEnd,
+  dataStart,
+  dataEnd,
+  onPeriodStartChange,
+  onPeriodEndChange,
+  onPeriodReset,
+}: FilterHeaderProps) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border-subtle">
+      <div>
+        <div className="text-sm font-medium">Отклонения по классам бетона</div>
+        <div className="text-xs text-fg-tertiary mt-0.5">относительно плановой цены</div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          type="date"
+          value={periodStart}
+          placeholder={dataStart}
+          onChange={(e) => onPeriodStartChange(e.target.value)}
+          className="w-36 text-xs"
+          data-testid="period-start-input"
+        />
+        <span className="text-xs text-fg-tertiary">—</span>
+        <Input
+          type="date"
+          value={periodEnd}
+          placeholder={dataEnd}
+          onChange={(e) => onPeriodEndChange(e.target.value)}
+          className="w-36 text-xs"
+          data-testid="period-end-input"
+        />
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onPeriodReset}
+          disabled={!periodStart && !periodEnd}
+          data-testid="period-reset-button"
+        >
+          Сбросить
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function DeviationChart({
   calculations,
   periodFilterActive = false,
@@ -98,40 +155,15 @@ export function DeviationChart({
     if (!hasFilterProps) return null;
     return (
       <div className="rounded-xl border border-border-subtle bg-surface overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border-subtle">
-          <div>
-            <div className="text-sm font-medium">Отклонения по классам бетона</div>
-            <div className="text-xs text-fg-tertiary mt-0.5">относительно плановой цены</div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Input
-              type="date"
-              value={periodStart}
-              placeholder={dataStart}
-              onChange={(e) => onPeriodStartChange(e.target.value)}
-              className="w-36 text-xs"
-              data-testid="period-start-input"
-            />
-            <span className="text-xs text-fg-tertiary">—</span>
-            <Input
-              type="date"
-              value={periodEnd}
-              placeholder={dataEnd}
-              onChange={(e) => (onPeriodEndChange ?? (() => {}))(e.target.value)}
-              className="w-36 text-xs"
-              data-testid="period-end-input"
-            />
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={onPeriodReset}
-              disabled={!periodStart && !periodEnd}
-              data-testid="period-reset-button"
-            >
-              Сбросить
-            </Button>
-          </div>
-        </div>
+        <FilterHeader
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          dataStart={dataStart}
+          dataEnd={dataEnd}
+          onPeriodStartChange={onPeriodStartChange}
+          onPeriodEndChange={onPeriodEndChange!}
+          onPeriodReset={onPeriodReset}
+        />
         <div className="px-5 py-10 text-center text-sm text-fg-tertiary">
           Нет данных за выбранный период
         </div>
@@ -217,42 +249,24 @@ export function DeviationChart({
   return (
     <div className="rounded-xl border border-border-subtle bg-surface overflow-hidden">
       {/* ── Header: title + period filter ── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border-subtle">
-        <div>
-          <div className="text-sm font-medium">Отклонения по классам бетона</div>
-          <div className="text-xs text-fg-tertiary mt-0.5">относительно плановой цены</div>
-        </div>
-        {onPeriodStartChange && (
-          <div className="flex items-center gap-2">
-            <Input
-              type="date"
-              value={periodStart}
-              placeholder={dataStart}
-              onChange={(e) => onPeriodStartChange(e.target.value)}
-              className="w-36 text-xs"
-              data-testid="period-start-input"
-            />
-            <span className="text-xs text-fg-tertiary">—</span>
-            <Input
-              type="date"
-              value={periodEnd}
-              placeholder={dataEnd}
-              onChange={(e) => (onPeriodEndChange ?? (() => {}))(e.target.value)}
-              className="w-36 text-xs"
-              data-testid="period-end-input"
-            />
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={onPeriodReset}
-              disabled={!periodStart && !periodEnd}
-              data-testid="period-reset-button"
-            >
-              Сбросить
-            </Button>
+      {hasFilterProps ? (
+        <FilterHeader
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          dataStart={dataStart}
+          dataEnd={dataEnd}
+          onPeriodStartChange={onPeriodStartChange!}
+          onPeriodEndChange={onPeriodEndChange!}
+          onPeriodReset={onPeriodReset}
+        />
+      ) : (
+        <div className="flex flex-wrap items-center gap-3 px-5 py-4 border-b border-border-subtle">
+          <div>
+            <div className="text-sm font-medium">Отклонения по классам бетона</div>
+            <div className="text-xs text-fg-tertiary mt-0.5">относительно плановой цены</div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ── Period summary banner ── */}
       {totalBannerDev !== null && (
