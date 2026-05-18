@@ -189,12 +189,12 @@ def test_monthly_summary_aggregates_by_month(client, factories):
     assert set(rows.keys()) == {(2026, 1), (2026, 3)}
 
     jan = rows[(2026, 1)]
-    assert jan["total_amount"] == 40000.0
+    assert jan["total_amount"] == 48000.0  # 40000 + 20% VAT
     assert jan["total_qty"] == 5.0
     assert jan["invoice_count"] == 1
 
     mar = rows[(2026, 3)]
-    assert mar["total_amount"] == 80000.0
+    assert mar["total_amount"] == 96000.0  # 80000 + 20% VAT
     assert mar["total_qty"] == 10.0
     assert mar["invoice_count"] == 1
 
@@ -212,7 +212,7 @@ def test_monthly_summary_counts_invoices_not_items(client, factories):
     row = response.json()[0]
     assert row["invoice_count"] == 1
     assert row["total_qty"] == 5.0
-    assert row["total_amount"] == 40000.0
+    assert row["total_amount"] == 48000.0  # (24000+16000) + 20% VAT
 
 
 def test_monthly_summary_ordered_chronologically(client, factories):

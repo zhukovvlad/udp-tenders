@@ -177,7 +177,10 @@ def get_monthly_summary(project_id: int, db: Session = Depends(get_db)):
         db.query(
             year_expr.label("year"),
             month_expr.label("month"),
-            func.sum(InvoiceItem.amount).label("total_amount"),
+            func.sum(
+                InvoiceItem.amount
+                + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)
+            ).label("total_amount"),
             func.sum(InvoiceItem.quantity).label("total_qty"),
             func.count(distinct(Invoice.id)).label("invoice_count"),
         )

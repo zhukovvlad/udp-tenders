@@ -121,7 +121,7 @@ function formatAmountShort(v: number): string {
 }
 
 const chartConfig = {
-  total_amount: { label: "Оборот, ₽" },
+  total_amount: { label: "Оборот, ₽ с НДС" },
 } satisfies ChartConfig;
 
 function TurnoverChart({ buckets }: { buckets: MonthlyBucket[] }) {
@@ -280,7 +280,7 @@ export function MonthlyTab({ projectId, projectName, onNavigateToMonth }: Monthl
           <TableHeader>
             <TableRow className="text-xs text-fg-tertiary hover:bg-transparent">
               <TableHead className="font-medium">Месяц</TableHead>
-              <TableHead className="font-medium text-right">Оборот, ₽</TableHead>
+              <TableHead className="font-medium text-right">Оборот, ₽ с НДС</TableHead>
               <TableHead className="font-medium text-right">Объём, м³</TableHead>
               <TableHead className="font-medium text-right">Счетов</TableHead>
             </TableRow>

@@ -363,7 +363,10 @@ export function DeviationChart({
         <div className="flex items-center justify-between gap-4 px-5 py-3 border-t border-border-subtle bg-surface-sunken">
           <span className="text-xs text-fg-tertiary">
             {withoutPrice.length} класс{pluralRu(withoutPrice.length)}{" "}
-            ({withoutPrice.map((c) => c.material_class_name).join(", ")}) без плановой цены — не учтены в расчёте
+            ({withoutPrice.map((c) => c.material_class_name).join(", ")}) без плановой цены —{" "}
+            {withoutPrice.length % 10 === 1 && withoutPrice.length % 100 !== 11
+              ? "не учтён в расчёте"
+              : "не учтены в расчёте"}
           </span>
           {typeof onConfigurePrice === "function" && (
             <Button
