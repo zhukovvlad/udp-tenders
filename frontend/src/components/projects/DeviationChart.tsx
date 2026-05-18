@@ -117,7 +117,7 @@ export function DeviationChart({
               type="date"
               value={periodEnd}
               placeholder={dataEnd}
-              onChange={(e) => onPeriodEndChange!(e.target.value)}
+              onChange={(e) => (onPeriodEndChange ?? (() => {}))(e.target.value)}
               className="w-36 text-xs"
               data-testid="period-end-input"
             />
@@ -237,7 +237,7 @@ export function DeviationChart({
               type="date"
               value={periodEnd}
               placeholder={dataEnd}
-              onChange={(e) => onPeriodEndChange!(e.target.value)}
+              onChange={(e) => (onPeriodEndChange ?? (() => {}))(e.target.value)}
               className="w-36 text-xs"
               data-testid="period-end-input"
             />
@@ -352,13 +352,14 @@ export function DeviationChart({
             ({withoutPrice.map((c) => c.material_class_name).join(", ")}) без плановой цены — не учтены в расчёте
           </span>
           {typeof onConfigurePrice === "function" && (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={onConfigurePrice}
               className="shrink-0 text-xs text-accent-text hover:underline"
             >
               Настроить плановые цены →
-            </button>
+            </Button>
           )}
         </div>
       )}

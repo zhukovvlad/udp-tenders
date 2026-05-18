@@ -56,7 +56,7 @@ import {
 } from "@/services/queries";
 import { useDebounce } from "@/lib/useDebounce";
 
-import { formatDate, formatMoney, formatNumber, formatPercent } from "@/lib/format";
+import { formatDate, formatMoney, formatNumber, formatPercent, pluralRu } from "@/lib/format";
 import { MONTH_NAMES_RU } from "@/lib/constants";
 import type { ID } from "@/types/common";
 import type { ReferencePrice } from "@/types/referencePrice";
@@ -394,7 +394,7 @@ export default function ProjectPage() {
                     <KpiCard
                       label="Счетов"
                       value={formatNumber(summaryQ.data.invoice_count)}
-                      suffix={`· ${summaryQ.data.doc_count} докум.`}
+                      suffix={`· ${formatNumber(summaryQ.data.doc_count)} докум.`}
                     />
                     <KpiCard
                       label={devKpiLabel}
@@ -416,9 +416,8 @@ export default function ProjectPage() {
                     {suppliers.length > 0 && (
                       <>
                         {" · "}
-                        <span className="text-fg-secondary font-medium">{suppliers.length}</span>
-                        {" поставщик"}
-                        {suppliers.length === 1 ? "" : suppliers.length < 5 ? "а" : "ов"}
+                        <span className="text-fg-secondary font-medium">{formatNumber(suppliers.length)}</span>
+                        {` поставщик${pluralRu(suppliers.length)}`}
                       </>
                     )}
                   </p>
