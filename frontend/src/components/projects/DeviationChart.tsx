@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Bar, BarChart, Cell, ReferenceLine, XAxis, YAxis } from "recharts";
 import type { LabelProps } from "recharts";
 import {
@@ -10,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui-domain/Button";
 import type { DashboardCalculation } from "@/types/dashboard";
 import { formatDate, formatMoney, pluralRu } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 interface Props {
   calculations: DashboardCalculation[];
@@ -96,39 +98,97 @@ function FilterHeader({
   onPeriodEndChange,
   onPeriodReset,
 }: FilterHeaderProps) {
+  const [startInvalid, setStartInvalid] = useState(false);
+  const [endInvalid, setEndInvalid] = useState(false);
+
+  // !valid && !valueMissing catches impossible dates (e.g. April 31) which browsers
+  // don't always report as badInput. onInput fires on every segment edit even when
+  // React deduplicates onChange (value stays "" across invalid typing).
+  const checkValidity = (el: HTMLInputElement) =>
+    !el.validity.valid && !el.validity.valueMissing;
+
+  function handleStartChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setStartInvalid(checkValidity(e.target));
+    onPeriodStartChange(e.target.value);
+  }
+  function handleEndChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setEndInvalid(checkValidity(e.target));
+    onPeriodEndChange(e.target.value);
+  }
+  function handleStartInput(e: React.SyntheticEvent<HTMLInputElement>) {
+    setStartInvalid(checkValidity(e.currentTarget));
+  }
+  function handleEndInput(e: React.SyntheticEvent<HTMLInputElement>) {
+    setEndInvalid(checkValidity(e.currentTarget));
+  }
+  function handleStartBlur(e: React.FocusEvent<HTMLInputElement>) {
+    setStartInvalid(checkValidity(e.target));
+  }
+  function handleEndBlur(e: React.FocusEvent<HTMLInputElement>) {
+    setEndInvalid(checkValidity(e.target));
+  }
+
+  const hasError = startInvalid || endInvalid;
+
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border-subtle">
       <div>
         <div className="text-sm font-medium">Отклонения по классам бетона</div>
         <div className="text-xs text-fg-tertiary mt-0.5">относительно плановой цены</div>
       </div>
-      <div className="flex items-center gap-2">
-        <Input
-          type="date"
-          value={periodStart}
-          placeholder={dataStart}
-          onChange={(e) => onPeriodStartChange(e.target.value)}
-          className="w-36 text-xs"
-          data-testid="period-start-input"
-        />
-        <span className="text-xs text-fg-tertiary">—</span>
-        <Input
-          type="date"
-          value={periodEnd}
-          placeholder={dataEnd}
-          onChange={(e) => onPeriodEndChange(e.target.value)}
-          className="w-36 text-xs"
-          data-testid="period-end-input"
-        />
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onPeriodReset}
-          disabled={!periodStart && !periodEnd}
-          data-testid="period-reset-button"
-        >
-          Сбросить
-        </Button>
+      <div className="flex flex-col items-end gap-2">
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Input
+              type="date"
+              value={periodStart}
+              placeholder={dataStart}
+              onChange={handleStartChange}
+              onInput={handleStartInput}
+              onBlur={handleStartBlur}
+              className={cn("w-36 text-xs", startInvalid && "pr-7")}
+              style={startInvalid ? { borderColor: "#E8524A", boxShadow: "0 0 0 1px #E8524A" } : undefined}
+              data-testid="period-start-input"
+            />
+            {startInvalid && (
+              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm leading-none" title="Некорректная дата">⚠</span>
+            )}
+          </div>
+          <span className="text-xs text-fg-tertiary">—</span>
+          <div className="relative">
+            <Input
+              type="date"
+              value={periodEnd}
+              placeholder={dataEnd}
+              onChange={handleEndChange}
+              onInput={handleEndInput}
+              onBlur={handleEndBlur}
+              className={cn("w-36 text-xs", endInvalid && "pr-7")}
+              style={endInvalid ? { borderColor: "#E8524A", boxShadow: "0 0 0 1px #E8524A" } : undefined}
+              data-testid="period-end-input"
+            />
+            {endInvalid && (
+              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm leading-none" title="Некорректная дата">⚠</span>
+            )}
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onPeriodReset}
+            disabled={!periodStart && !periodEnd}
+            data-testid="period-reset-button"
+          >
+            Сбросить
+          </Button>
+        </div>
+        {hasError && (
+          <div
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium"
+            style={{ background: "rgba(232,82,74,0.15)", color: "#E8524A", border: "1px solid rgba(232,82,74,0.4)" }}
+          >
+            ⚠ Некорректная дата — фильтр не применён
+          </div>
+        )}
       </div>
     </div>
   );
