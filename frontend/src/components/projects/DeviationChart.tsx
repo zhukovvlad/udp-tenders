@@ -106,10 +106,12 @@ function FilterHeader({
   useEffect(() => { if (!periodStart) setStartInvalid(false); }, [periodStart]);
   useEffect(() => { if (!periodEnd) setEndInvalid(false); }, [periodEnd]);
 
-  // validity.badInput: true when partial/impossible input can't form a valid date.
-  // Exclude valueMissing — empty field means "no filter", which is fine.
-  const isFieldInvalid = (el: HTMLInputElement) =>
-    !el.validity.valid && !el.validity.valueMissing;
+  // badInput is true when the browser has partial/impossible input it can't parse
+  // as a date (e.g. April 31 — browser sets value="" but badInput=true).
+  // el.value !== "" alone would never catch these because the browser sanitizes
+  // the value to "" for impossible dates. onInput fires on every segment keystroke —
+  // onChange alone misses it because React deduplicates when value stays "".
+  const isFieldInvalid = (el: HTMLInputElement) => el.validity.badInput;
 
   function handleStartChange(e: React.ChangeEvent<HTMLInputElement>) {
     const invalid = isFieldInvalid(e.target);
