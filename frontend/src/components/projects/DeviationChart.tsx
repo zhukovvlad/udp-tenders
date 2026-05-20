@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Bar, BarChart, Cell, ReferenceLine, XAxis, YAxis } from "recharts";
 import type { LabelProps } from "recharts";
 import {
@@ -8,8 +9,10 @@ import {
 } from "@/components/ui/chart";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui-domain/Button";
+import { AlertTriangle } from "lucide-react";
 import type { DashboardCalculation } from "@/types/dashboard";
 import { formatDate, formatMoney, pluralRu } from "@/lib/format";
+
 
 interface Props {
   calculations: DashboardCalculation[];
@@ -96,39 +99,112 @@ function FilterHeader({
   onPeriodEndChange,
   onPeriodReset,
 }: FilterHeaderProps) {
+  const [startInvalid, setStartInvalid] = useState(false);
+  const [endInvalid, setEndInvalid] = useState(false);
+
+  // Clear error state when the parent resets a field to empty (e.g. "Сбросить")
+  useEffect(() => { if (!periodStart) setStartInvalid(false); }, [periodStart]);
+  useEffect(() => { if (!periodEnd) setEndInvalid(false); }, [periodEnd]);
+
+  // badInput is true when the browser has partial/impossible input it can't parse
+  // as a date (e.g. April 31 — browser sets value="" but badInput=true).
+  // el.value !== "" alone would never catch these because the browser sanitizes
+  // the value to "" for impossible dates. onInput fires on every segment keystroke —
+  // onChange alone misses it because React deduplicates when value stays "".
+  const isFieldInvalid = (el: HTMLInputElement) => el.validity.badInput;
+
+  function handleStartChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const invalid = isFieldInvalid(e.target);
+    setStartInvalid(invalid);
+    // Don't propagate invalid (empty) value so the parent keeps its previous valid date
+    if (!invalid) onPeriodStartChange(e.target.value);
+  }
+  function handleEndChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const invalid = isFieldInvalid(e.target);
+    setEndInvalid(invalid);
+    if (!invalid) onPeriodEndChange(e.target.value);
+  }
+  // onInput fires on every segment keystroke — onChange alone misses it because
+  // React deduplicates when e.target.value stays "" throughout invalid typing.
+  function handleStartInput(e: React.SyntheticEvent<HTMLInputElement>) {
+    setStartInvalid(isFieldInvalid(e.currentTarget));
+  }
+  function handleEndInput(e: React.SyntheticEvent<HTMLInputElement>) {
+    setEndInvalid(isFieldInvalid(e.currentTarget));
+  }
+  function handleStartBlur(e: React.FocusEvent<HTMLInputElement>) {
+    setStartInvalid(isFieldInvalid(e.target));
+  }
+  function handleEndBlur(e: React.FocusEvent<HTMLInputElement>) {
+    setEndInvalid(isFieldInvalid(e.target));
+  }
+  function handleReset() {
+    setStartInvalid(false);
+    setEndInvalid(false);
+    onPeriodReset?.();
+  }
+
+  const hasError = startInvalid || endInvalid;
+
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border-subtle">
       <div>
         <div className="text-sm font-medium">Отклонения по классам бетона</div>
         <div className="text-xs text-fg-tertiary mt-0.5">относительно плановой цены</div>
       </div>
-      <div className="flex items-center gap-2">
-        <Input
-          type="date"
-          value={periodStart}
-          placeholder={dataStart}
-          onChange={(e) => onPeriodStartChange(e.target.value)}
-          className="w-36 text-xs"
-          data-testid="period-start-input"
-        />
-        <span className="text-xs text-fg-tertiary">—</span>
-        <Input
-          type="date"
-          value={periodEnd}
-          placeholder={dataEnd}
-          onChange={(e) => onPeriodEndChange(e.target.value)}
-          className="w-36 text-xs"
-          data-testid="period-end-input"
-        />
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onPeriodReset}
-          disabled={!periodStart && !periodEnd}
-          data-testid="period-reset-button"
-        >
-          Сбросить
-        </Button>
+      <div className="flex flex-col items-end gap-2">
+        <div className="flex items-center gap-2">
+          <Input
+            type="date"
+            value={periodStart}
+            placeholder={dataStart}
+            onChange={handleStartChange}
+            onInput={handleStartInput}
+            onBlur={handleStartBlur}
+            aria-invalid={startInvalid || undefined}
+            className="w-36 text-xs"
+            style={startInvalid ? { borderColor: "var(--color-destructive)", boxShadow: "0 0 0 1px var(--color-destructive)" } : undefined}
+            data-testid="period-start-input"
+          />
+          {startInvalid && (
+            <AlertTriangle aria-hidden size={14} className="shrink-0 text-destructive" />
+          )}
+          <span className="text-xs text-fg-tertiary">—</span>
+          <Input
+            type="date"
+            value={periodEnd}
+            placeholder={dataEnd}
+            onChange={handleEndChange}
+            onInput={handleEndInput}
+            onBlur={handleEndBlur}
+            aria-invalid={endInvalid || undefined}
+            className="w-36 text-xs"
+            style={endInvalid ? { borderColor: "var(--color-destructive)", boxShadow: "0 0 0 1px var(--color-destructive)" } : undefined}
+            data-testid="period-end-input"
+          />
+          {endInvalid && (
+            <AlertTriangle aria-hidden size={14} className="shrink-0 text-destructive" />
+          )}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleReset}
+            disabled={!periodStart && !periodEnd}
+            data-testid="period-reset-button"
+          >
+            Сбросить
+          </Button>
+        </div>
+        {hasError && (
+          <div
+            role="alert"
+            aria-live="polite"
+            className="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive"
+          >
+            <AlertTriangle aria-hidden size={12} />
+            Некорректная дата — фильтр не применён
+          </div>
+        )}
       </div>
     </div>
   );
