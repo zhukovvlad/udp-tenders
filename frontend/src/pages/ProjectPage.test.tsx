@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Routes, Route } from "react-router-dom";
@@ -445,5 +445,71 @@ describe("ProjectPage", () => {
 
     expect((startInput as HTMLInputElement).value).toBe("");
     expect((endInput as HTMLInputElement).value).toBe("");
+  });
+
+  it("invalid date shows error banner and does not send period params to API", async () => {
+    const receivedParams: URLSearchParams[] = [];
+    server.use(
+      http.get("/api/dashboard/calculations", ({ request }) => {
+        receivedParams.push(new URL(request.url).searchParams);
+        return HttpResponse.json([]);
+      })
+    );
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const endInput = await screen.findByTestId("period-end-input");
+
+    // Simulate badInput — jsdom doesn't implement date segment validation fully,
+    // so we trigger the native validity by firing an input event with badInput set.
+    Object.defineProperty(endInput, "validity", {
+      get: () => ({ badInput: true, valid: false, valueMissing: false }),
+      configurable: true,
+    });
+    await user.click(endInput);
+    act(() => {
+      endInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent("Некорректная дата");
+    });
+
+    // API must not have received any period_end param
+    expect(receivedParams.every((p) => !p.get("period_end"))).toBe(true);
+  });
+
+  it("reset button clears invalid error state", async () => {
+    const user = userEvent.setup();
+    renderProject();
+
+    const endInput = await screen.findByTestId("period-end-input");
+
+    Object.defineProperty(endInput, "validity", {
+      get: () => ({ badInput: true, valid: false, valueMissing: false }),
+      configurable: true,
+    });
+    await user.click(endInput);
+    act(() => {
+      endInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+
+    // Restore validity to valid, then click reset
+    Object.defineProperty(endInput, "validity", {
+      get: () => ({ badInput: false, valid: true, valueMissing: false }),
+      configurable: true,
+    });
+    const resetBtn = screen.getByTestId("period-reset-button");
+    await user.click(resetBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
   });
 });
