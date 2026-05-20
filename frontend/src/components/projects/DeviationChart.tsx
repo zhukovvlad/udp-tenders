@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Bar, BarChart, Cell, ReferenceLine, XAxis, YAxis } from "recharts";
 import type { LabelProps } from "recharts";
 import {
@@ -9,9 +9,10 @@ import {
 } from "@/components/ui/chart";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui-domain/Button";
+import { AlertTriangle } from "lucide-react";
 import type { DashboardCalculation } from "@/types/dashboard";
 import { formatDate, formatMoney, pluralRu } from "@/lib/format";
-import { cn } from "@/lib/utils";
+
 
 interface Props {
   calculations: DashboardCalculation[];
@@ -101,31 +102,44 @@ function FilterHeader({
   const [startInvalid, setStartInvalid] = useState(false);
   const [endInvalid, setEndInvalid] = useState(false);
 
-  // !valid && !valueMissing catches impossible dates (e.g. April 31) which browsers
-  // don't always report as badInput. onInput fires on every segment edit even when
-  // React deduplicates onChange (value stays "" across invalid typing).
-  const checkValidity = (el: HTMLInputElement) =>
+  // Clear error state when the parent resets a field to empty (e.g. "Сбросить")
+  useEffect(() => { if (!periodStart) setStartInvalid(false); }, [periodStart]);
+  useEffect(() => { if (!periodEnd) setEndInvalid(false); }, [periodEnd]);
+
+  // validity.badInput: true when partial/impossible input can't form a valid date.
+  // Exclude valueMissing — empty field means "no filter", which is fine.
+  const isFieldInvalid = (el: HTMLInputElement) =>
     !el.validity.valid && !el.validity.valueMissing;
 
   function handleStartChange(e: React.ChangeEvent<HTMLInputElement>) {
-    setStartInvalid(checkValidity(e.target));
-    onPeriodStartChange(e.target.value);
+    const invalid = isFieldInvalid(e.target);
+    setStartInvalid(invalid);
+    // Don't propagate invalid (empty) value so the parent keeps its previous valid date
+    if (!invalid) onPeriodStartChange(e.target.value);
   }
   function handleEndChange(e: React.ChangeEvent<HTMLInputElement>) {
-    setEndInvalid(checkValidity(e.target));
-    onPeriodEndChange(e.target.value);
+    const invalid = isFieldInvalid(e.target);
+    setEndInvalid(invalid);
+    if (!invalid) onPeriodEndChange(e.target.value);
   }
+  // onInput fires on every segment keystroke — onChange alone misses it because
+  // React deduplicates when e.target.value stays "" throughout invalid typing.
   function handleStartInput(e: React.SyntheticEvent<HTMLInputElement>) {
-    setStartInvalid(checkValidity(e.currentTarget));
+    setStartInvalid(isFieldInvalid(e.currentTarget));
   }
   function handleEndInput(e: React.SyntheticEvent<HTMLInputElement>) {
-    setEndInvalid(checkValidity(e.currentTarget));
+    setEndInvalid(isFieldInvalid(e.currentTarget));
   }
   function handleStartBlur(e: React.FocusEvent<HTMLInputElement>) {
-    setStartInvalid(checkValidity(e.target));
+    setStartInvalid(isFieldInvalid(e.target));
   }
   function handleEndBlur(e: React.FocusEvent<HTMLInputElement>) {
-    setEndInvalid(checkValidity(e.target));
+    setEndInvalid(isFieldInvalid(e.target));
+  }
+  function handleReset() {
+    setStartInvalid(false);
+    setEndInvalid(false);
+    onPeriodReset?.();
   }
 
   const hasError = startInvalid || endInvalid;
@@ -138,43 +152,41 @@ function FilterHeader({
       </div>
       <div className="flex flex-col items-end gap-2">
         <div className="flex items-center gap-2">
-          <div className="relative">
-            <Input
-              type="date"
-              value={periodStart}
-              placeholder={dataStart}
-              onChange={handleStartChange}
-              onInput={handleStartInput}
-              onBlur={handleStartBlur}
-              className={cn("w-36 text-xs", startInvalid && "pr-7")}
-              style={startInvalid ? { borderColor: "#E8524A", boxShadow: "0 0 0 1px #E8524A" } : undefined}
-              data-testid="period-start-input"
-            />
-            {startInvalid && (
-              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm leading-none" title="Некорректная дата">⚠</span>
-            )}
-          </div>
+          <Input
+            type="date"
+            value={periodStart}
+            placeholder={dataStart}
+            onChange={handleStartChange}
+            onInput={handleStartInput}
+            onBlur={handleStartBlur}
+            aria-invalid={startInvalid || undefined}
+            className="w-36 text-xs"
+            style={startInvalid ? { borderColor: "var(--color-destructive)", boxShadow: "0 0 0 1px var(--color-destructive)" } : undefined}
+            data-testid="period-start-input"
+          />
+          {startInvalid && (
+            <AlertTriangle aria-hidden size={14} className="shrink-0 text-destructive" />
+          )}
           <span className="text-xs text-fg-tertiary">—</span>
-          <div className="relative">
-            <Input
-              type="date"
-              value={periodEnd}
-              placeholder={dataEnd}
-              onChange={handleEndChange}
-              onInput={handleEndInput}
-              onBlur={handleEndBlur}
-              className={cn("w-36 text-xs", endInvalid && "pr-7")}
-              style={endInvalid ? { borderColor: "#E8524A", boxShadow: "0 0 0 1px #E8524A" } : undefined}
-              data-testid="period-end-input"
-            />
-            {endInvalid && (
-              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm leading-none" title="Некорректная дата">⚠</span>
-            )}
-          </div>
+          <Input
+            type="date"
+            value={periodEnd}
+            placeholder={dataEnd}
+            onChange={handleEndChange}
+            onInput={handleEndInput}
+            onBlur={handleEndBlur}
+            aria-invalid={endInvalid || undefined}
+            className="w-36 text-xs"
+            style={endInvalid ? { borderColor: "var(--color-destructive)", boxShadow: "0 0 0 1px var(--color-destructive)" } : undefined}
+            data-testid="period-end-input"
+          />
+          {endInvalid && (
+            <AlertTriangle aria-hidden size={14} className="shrink-0 text-destructive" />
+          )}
           <Button
             variant="secondary"
             size="sm"
-            onClick={onPeriodReset}
+            onClick={handleReset}
             disabled={!periodStart && !periodEnd}
             data-testid="period-reset-button"
           >
@@ -183,10 +195,12 @@ function FilterHeader({
         </div>
         {hasError && (
           <div
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium"
-            style={{ background: "rgba(232,82,74,0.15)", color: "#E8524A", border: "1px solid rgba(232,82,74,0.4)" }}
+            role="alert"
+            aria-live="polite"
+            className="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive"
           >
-            ⚠ Некорректная дата — фильтр не применён
+            <AlertTriangle aria-hidden size={12} />
+            Некорректная дата — фильтр не применён
           </div>
         )}
       </div>
