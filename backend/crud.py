@@ -89,11 +89,13 @@ def get_or_create_material_class(
     elif mc.calc_role != calc_role:
         # Preserved intentionally: the DB record represents a human-reviewed classification;
         # auto-update would allow LLM hallucinations to corrupt it.
-        # To reclassify, update the record directly via the material classes UI or API.
+        # To reclassify: delete the MaterialClass record via DELETE /api/material-classes/{id}
+        # so the next parse recreates it with the correct calc_role, or update directly in the DB.
         logger.warning(
             "get_or_create_material_class: class %r/%r found with calc_role=%r, "
             "but caller expects %r — stored value preserved; "
-            "update the record manually if reclassification is needed",
+            "to reclassify, delete the record via DELETE /api/material-classes/{id} "
+            "and re-parse, or update directly in the DB",
             name, material_type, mc.calc_role, calc_role,
         )
     return mc
