@@ -24,6 +24,7 @@ class MaterialClass(Base):
     id = Column(Integer, primary_key=True, index=True)
     material_type = Column(String, nullable=False)  # concrete / rebar / other
     name = Column(String, nullable=False)  # В15, В40
+    calc_role = Column(String, nullable=False, default="base")  # base / additive / exclude
     created_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
 
     reference_prices = relationship("ReferencePrice", back_populates="material_class")

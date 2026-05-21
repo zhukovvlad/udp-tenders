@@ -24,6 +24,7 @@ export interface DashboardCalculation {
   deviation_pct: number | null;
   deviation_amount: number | null;
   material_total: number | null;
+  /** Доставка + присадки (calc_role="additive") за период по классу, с НДС. */
   delivery_total: number | null;
   total_qty: number;
   invoice_count: number;
