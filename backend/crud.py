@@ -958,7 +958,7 @@ def _compute_supplier_project_deviation(
 
     for cid, contrib in class_contrib.items():
         qty = contrib["qty"]
-        if not qty:
+        if qty is None or qty <= 0:
             continue
         avg_price = (contrib["mat_with_vat"] + contrib["shared_with_vat"]) / qty
 

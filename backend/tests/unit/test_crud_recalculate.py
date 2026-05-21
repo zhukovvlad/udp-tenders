@@ -378,15 +378,17 @@ def test_supplier_deviation_uses_latest_ref_price_no_period_filter(factories, db
         quantity=10.0, unit_price=8000.0, amount=80000.0, vat_amount=16000.0,
     )
 
+    # Новая плановая цена — период не совпадает с датой счёта
+    # Создаётся первой, чтобы тест не мог пройти случайно из-за порядка вставки;
+    # функция обязана явно сортировать по period_start DESC, а не по insertion order.
+    factories.ReferencePriceFactory.create(
+        project=project, material_class=mc, price=10000.0,
+        period_start=date(2026, 1, 1), period_end=date(2026, 12, 31),
+    )
     # Старая плановая цена — период совпадает с датой счёта
     factories.ReferencePriceFactory.create(
         project=project, material_class=mc, price=9000.0,
         period_start=date(2025, 1, 1), period_end=date(2025, 12, 31),
-    )
-    # Новая плановая цена — период не совпадает с датой счёта
-    factories.ReferencePriceFactory.create(
-        project=project, material_class=mc, price=10000.0,
-        period_start=date(2026, 1, 1), period_end=date(2026, 12, 31),
     )
 
     deviation_pct, deviation_amount = crud._compute_supplier_project_deviation(
