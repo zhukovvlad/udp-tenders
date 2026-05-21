@@ -36,6 +36,7 @@ SYSTEM_PROMPT = """Ты — парсер счетов-фактур и УПД (у
         {
           "raw_name": "полное наименование из документа как есть",
           "item_type": "material",
+          "calc_role": "base",
           "material_class": "В40",
           "material_type": "concrete",
           "quantity": 7.0,
@@ -57,9 +58,14 @@ SYSTEM_PROMPT = """Ты — парсер счетов-фактур и УПД (у
 
 Правила:
 - Дату в формат YYYY-MM-DD
-- item_type: "material" — бетон, арматура, стройматериалы; "delivery" — доставка, перевозка, автобетоносмеситель; "other" — всё остальное
-- material_class: для бетона извлеки ТОЛЬКО класс прочности (В15, В25, В40 и т.д.) из полного названия; для арматуры — диаметр (d12, d16...); для доставки и прочего — null
-- material_type: "concrete" для бетона, "rebar" для арматуры, "other" для прочего; null для доставки
+- item_type: "material" — все материальные позиции: бетон, арматура, присадки, цементное молоко, проволока и др.; "delivery" — доставка, перевозка, автобетоносмеситель; "other" — только скидки, возвраты и корректировки
+- calc_role: роль позиции в расчёте стоимости (только для item_type="material"):
+  - "base" — первичный отслеживаемый материал: бетон (В15..В50), арматура (А500С, А240, А300), а также любой другой самостоятельный строительный материал (раствор, кирпич, металлопрокат и т.п.) с material_type="other"
+  - "additive" — добавка, пропорционально входящая в стоимость основного материала (не самостоятельный товар, а улучшитель смеси): пластификатор, гидрофобизатор, противоморозная добавка, ускоритель твердения; на практике встречается только в бетонных СФ
+  - "exclude" — сопутствующие позиции и услуги, которые не формируют стоимость материала и не распределяются пропорционально: цементное молоко, простой миксера, мойка миксера, проволока вязальная, разовые услуги и любые позиции, не являющиеся частью самого материала
+  - null — для item_type="delivery" и item_type="other"
+- material_class: для бетона и арматуры (calc_role="base") — ТОЛЬКО короткое обозначение класса: "В40", "В30", "А500С" — НЕ полная спецификация "В40 П4 F200 W12"; для добавок (calc_role="additive") — короткое торговое название: "Пластификатор", "Гидрофобизатор", "Противоморозная добавка"; для exclude — используй СТРОГО эти канонические имена: бетонная тематика→ "Цементное молоко", "Простой миксера", "Мойка миксера"; арматурная тематика→ "Проволока вязальная"; для доставки и прочего — null
+- material_type: "concrete" для бетонной тематики (включая присадки и цементное молоко), "rebar" для арматурной тематики (включая проволоку), "other" для прочих материалов; null для доставки
 - quantity, unit_price, amount — числа с плавающей точкой
 
 КРИТИЧЕСКИ ВАЖНО про цены и суммы — БЕРИ ИХ ИЗ ДОКУМЕНТА КАК ЕСТЬ, НИЧЕГО НЕ ПЕРЕСЧИТЫВАЙ:
@@ -223,11 +229,28 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
             items = []
             for item_idx, item in enumerate(inv_data.get("items", [])):
                 material_class_id = None
+                if item.get("item_type") == "material" and not item.get("material_class"):
+                    logger.warning(
+                        "[doc=%d] СФ №%s поз.%d '%s': item_type=material, но material_class пустой — "
+                        "позиция сохранится без класса материала",
+                        document_id, inv_number, item_idx + 1,
+                        item.get("raw_name", "")[:40],
+                    )
                 if item.get("item_type") == "material" and item.get("material_class"):
+                    raw_role = str(item.get("calc_role") or "base").strip().lower()
+                    if raw_role not in crud.VALID_CALC_ROLES:
+                        logger.warning(
+                            "[doc=%d] СФ №%s поз.%d '%s': неизвестный calc_role=%r от модели, "
+                            "используем 'base'",
+                            document_id, inv_number, item_idx + 1,
+                            item.get("raw_name", "")[:40], raw_role,
+                        )
+                        raw_role = "base"
                     mc = crud.get_or_create_material_class(
                         db,
                         name=item["material_class"],
                         material_type=item.get("material_type", "other"),
+                        calc_role=raw_role,
                     )
                     material_class_id = mc.id
 

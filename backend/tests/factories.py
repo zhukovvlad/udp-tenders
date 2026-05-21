@@ -66,6 +66,7 @@ class MaterialClassFactory(_BaseFactory):
     name = factory.LazyAttribute(
         lambda obj: {"concrete": "В25", "rebar": "d12"}.get(obj.material_type, "X")
     )
+    calc_role = "base"
 
 
 class ReferencePriceFactory(_BaseFactory):

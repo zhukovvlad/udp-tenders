@@ -1,3 +1,4 @@
+import logging
 from calendar import monthrange
 from datetime import UTC, date, datetime
 
@@ -14,6 +15,8 @@ from models import (
     ReferencePrice,
     Supplier,
 )
+
+logger = logging.getLogger(__name__)
 
 # Sentinel: field was not provided in the update payload (differs from explicit None)
 _UNSET = object()
@@ -67,15 +70,34 @@ def get_material_class(db: Session, class_id: int):
     return db.query(MaterialClass).filter(MaterialClass.id == class_id).first()
 
 
-def get_or_create_material_class(db: Session, name: str, material_type: str) -> MaterialClass:
+VALID_CALC_ROLES = {"base", "additive", "exclude"}
+
+
+def get_or_create_material_class(
+    db: Session, name: str, material_type: str, calc_role: str = "base"
+) -> MaterialClass:
+    if calc_role not in VALID_CALC_ROLES:
+        raise ValueError(f"Unknown calc_role {calc_role!r}; allowed: {sorted(VALID_CALC_ROLES)}")
     mc = db.query(MaterialClass).filter(
         MaterialClass.name == name, MaterialClass.material_type == material_type
     ).first()
     if not mc:
-        mc = MaterialClass(name=name, material_type=material_type)
+        mc = MaterialClass(name=name, material_type=material_type, calc_role=calc_role)
         db.add(mc)
         db.commit()
         db.refresh(mc)
+    elif mc.calc_role != calc_role:
+        # Preserved intentionally: the DB record represents a human-reviewed classification;
+        # auto-update would allow LLM hallucinations to corrupt it.
+        # To reclassify: delete the MaterialClass record via DELETE /api/material-classes/{id}
+        # so the next parse recreates it with the correct calc_role, or update directly in the DB.
+        logger.warning(
+            "get_or_create_material_class: class %r/%r found with calc_role=%r, "
+            "but caller expects %r — stored value preserved; "
+            "to reclassify, delete the record via DELETE /api/material-classes/{id} "
+            "and re-parse, or update directly in the DB",
+            name, material_type, mc.calc_role, calc_role,
+        )
     return mc
 
 
@@ -247,6 +269,43 @@ def _months_in_range(start: date, end: date) -> list[tuple[date, date]]:
     return months
 
 
+def _aggregate_by_class(
+    base_rows,
+    base_qty_per_invoice: dict[int, float],
+    shared_per_invoice: dict[int, float],
+) -> dict[int, dict]:
+    """Distribute shared costs proportionally across base material classes per invoice.
+
+    Args:
+        base_rows: query rows with fields (invoice_id, material_class_id, mat_total, mat_vat, qty).
+        base_qty_per_invoice: total base qty per invoice — denominator for proportional share.
+        shared_per_invoice: combined delivery + additive cost (with VAT) per invoice.
+
+    Returns dict[class_id -> {mat_with_vat, shared_with_vat, qty, invoice_ids}].
+    """
+    class_contrib: dict[int, dict] = {}
+    for row in base_rows:
+        cid = row.material_class_id
+        inv_id = row.invoice_id
+        qty_base_in_inv = base_qty_per_invoice.get(inv_id, 0.0)
+        if qty_base_in_inv <= 0:
+            continue
+        share = float(row.qty) / qty_base_in_inv
+        shared = shared_per_invoice.get(inv_id, 0.0) * share
+        if cid not in class_contrib:
+            class_contrib[cid] = {
+                "mat_with_vat": 0.0,
+                "shared_with_vat": 0.0,
+                "qty": 0.0,
+                "invoice_ids": set(),
+            }
+        class_contrib[cid]["mat_with_vat"] += float(row.mat_total) + float(row.mat_vat)
+        class_contrib[cid]["shared_with_vat"] += shared
+        class_contrib[cid]["qty"] += float(row.qty)
+        class_contrib[cid]["invoice_ids"].add(inv_id)
+    return class_contrib
+
+
 def compute_calculations(
     db: Session,
     project_id: int,
@@ -279,76 +338,143 @@ def compute_calculations(
     if not months:
         return []
 
-    # Preload material class names once
-    class_name_map: dict[int, str] = {
-        mc.id: mc.name for mc in db.query(MaterialClass).all()
-    }
+    # Names populated lazily per month and cached across months to avoid a full-table scan
+    class_name_map: dict[int, str] = {}
 
     results: list[dict] = []
 
     for month_start, month_end in months:
-        # Material items grouped by class for this month
-        class_q = (
+        # Все счета проекта за месяц
+        invoice_ids_month = [
+            row[0] for row in (
+                db.query(Invoice.id)
+                .join(Document, Invoice.document_id == Document.id)
+                .filter(
+                    Document.project_id == project_id,
+                    Invoice.date >= month_start,
+                    Invoice.date <= month_end,
+                )
+                .all()
+            )
+        ]
+        if not invoice_ids_month:
+            continue
+
+        # --- По каждому счёту: объём base-материалов по классам ---
+        # Знаменатель пропорции = только calc_role="base" внутри счёта
+        base_per_invoice_q = (
             db.query(
+                InvoiceItem.invoice_id,
                 InvoiceItem.material_class_id,
                 func.sum(InvoiceItem.amount).label("mat_total"),
-                func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)).label("mat_vat"),
+                func.sum(func.coalesce(
+                    InvoiceItem.vat_amount,
+                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100
+                )).label("mat_vat"),
                 func.sum(InvoiceItem.quantity).label("qty"),
-                func.count(Invoice.id.distinct()).label("invoice_count"),
             )
             .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
-            .join(Document, Invoice.document_id == Document.id)
+            .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
             .filter(
-                Document.project_id == project_id,
-                Invoice.date >= month_start,
-                Invoice.date <= month_end,
+                InvoiceItem.invoice_id.in_(invoice_ids_month),
                 InvoiceItem.item_type == "material",
-                InvoiceItem.material_class_id.isnot(None),
+                MaterialClass.calc_role == "base",
             )
         )
         if material_class_id is not None:
-            class_q = class_q.filter(InvoiceItem.material_class_id == material_class_id)
-        class_rows = class_q.group_by(InvoiceItem.material_class_id).all()
+            base_per_invoice_q = base_per_invoice_q.filter(
+                InvoiceItem.material_class_id == material_class_id
+            )
+        base_rows = base_per_invoice_q.group_by(
+            InvoiceItem.invoice_id, InvoiceItem.material_class_id
+        ).all()
 
-        if not class_rows:
+        if not base_rows:
             continue
 
-        class_ids = [r.material_class_id for r in class_rows]
-
-        # All material qty (denominator for delivery proration)
-        all_material_qty: float = (
-            db.query(func.sum(InvoiceItem.quantity))
-            .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
-            .join(Document, Invoice.document_id == Document.id)
-            .filter(
-                Document.project_id == project_id,
-                Invoice.date >= month_start,
-                Invoice.date <= month_end,
-                InvoiceItem.item_type == "material",
-            )
-            .scalar() or 0.0
-        )
-
-        # Total delivery amount and VAT for this month
-        delivery_agg = (
+        # Суммарный объём base-материалов по каждому счёту (знаменатель пропорции)
+        base_qty_per_invoice: dict[int, float] = {}
+        for row in (
             db.query(
-                func.coalesce(func.sum(InvoiceItem.amount), 0).label("total"),
-                func.coalesce(func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)), 0).label("vat"),
+                InvoiceItem.invoice_id,
+                func.sum(InvoiceItem.quantity).label("total_qty"),
+            )
+            .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
+            .filter(
+                InvoiceItem.invoice_id.in_(invoice_ids_month),
+                InvoiceItem.item_type == "material",
+                MaterialClass.calc_role == "base",
+            )
+            .group_by(InvoiceItem.invoice_id)
+            .all()
+        ):
+            base_qty_per_invoice[row.invoice_id] = float(row.total_qty)
+
+        # Доставка по каждому счёту (amount + VAT)
+        delivery_per_invoice: dict[int, float] = {}
+        for row in (
+            db.query(
+                InvoiceItem.invoice_id,
+                func.sum(
+                    InvoiceItem.amount +
+                    func.coalesce(
+                        InvoiceItem.vat_amount,
+                        InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100
+                    )
+                ).label("total_with_vat"),
             )
             .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
-            .join(Document, Invoice.document_id == Document.id)
             .filter(
-                Document.project_id == project_id,
-                Invoice.date >= month_start,
-                Invoice.date <= month_end,
+                InvoiceItem.invoice_id.in_(invoice_ids_month),
                 InvoiceItem.item_type == "delivery",
             )
-            .first()
-        )
-        delivery_total_period: float = float(delivery_agg.total) if delivery_agg else 0.0
-        delivery_vat_period: float = float(delivery_agg.vat) if delivery_agg else 0.0
+            .group_by(InvoiceItem.invoice_id)
+            .all()
+        ):
+            delivery_per_invoice[row.invoice_id] = float(row.total_with_vat)
 
-        # Reference prices overlapping this month, latest per class
+        # Присадки (calc_role="additive") по каждому счёту (amount + VAT)
+        additive_per_invoice: dict[int, float] = {}
+        for row in (
+            db.query(
+                InvoiceItem.invoice_id,
+                func.sum(
+                    InvoiceItem.amount +
+                    func.coalesce(
+                        InvoiceItem.vat_amount,
+                        InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100
+                    )
+                ).label("total_with_vat"),
+            )
+            .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+            .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
+            .filter(
+                InvoiceItem.invoice_id.in_(invoice_ids_month),
+                InvoiceItem.item_type == "material",
+                MaterialClass.calc_role == "additive",
+            )
+            .group_by(InvoiceItem.invoice_id)
+            .all()
+        ):
+            additive_per_invoice[row.invoice_id] = float(row.total_with_vat)
+
+        # Объединяем доставку и присадки в один словарь shared costs per invoice
+        shared_per_invoice = {
+            inv_id: delivery_per_invoice.get(inv_id, 0.0) + additive_per_invoice.get(inv_id, 0.0)
+            for inv_id in set(delivery_per_invoice) | set(additive_per_invoice)
+        }
+        # Агрегируем contribution по классу через все счета месяца
+        class_contrib = _aggregate_by_class(base_rows, base_qty_per_invoice, shared_per_invoice)
+
+        class_ids = list(class_contrib.keys())
+
+        # Подгружаем имена классов, которых ещё нет в кеше
+        missing_ids = [cid for cid in class_ids if cid not in class_name_map]
+        if missing_ids:
+            for mc in db.query(MaterialClass).filter(MaterialClass.id.in_(missing_ids)).all():
+                class_name_map[mc.id] = mc.name
+
+        # Плановые цены, перекрывающие месяц, последняя по классу
         ref_rows = (
             db.query(ReferencePrice)
             .filter(
@@ -370,35 +496,32 @@ def compute_calculations(
             if ref.material_class_id not in ref_by_class:
                 ref_by_class[ref.material_class_id] = ref
 
-        for r in class_rows:
-            if not r.qty:
+        for cid, contrib in class_contrib.items():
+            qty = contrib["qty"]
+            if qty <= 0:
                 continue
-            share = r.qty / all_material_qty if all_material_qty > 0 else 0.0
-            delivery_for_class = delivery_total_period * share
-            delivery_vat_for_class = delivery_vat_period * share
-            # avg_price includes VAT — consistent with reference prices entered with VAT by users
-            avg_price = (float(r.mat_total) + float(r.mat_vat) + delivery_for_class + delivery_vat_for_class) / float(r.qty)
+            # avg_price с НДС — корректно для сравнения с плановыми ценами (тоже с НДС)
+            avg_price = (contrib["mat_with_vat"] + contrib["shared_with_vat"]) / qty
 
-            ref = ref_by_class.get(r.material_class_id)
+            ref = ref_by_class.get(cid)
             ref_price = ref.price if ref else None
             deviation_pct = None
             deviation_amount = None
             if ref_price and ref_price > 0:
                 deviation_pct = round((avg_price - ref_price) / ref_price * 100, 2)
-                deviation_amount = round((avg_price - ref_price) * float(r.qty), 2)
+                deviation_amount = round((avg_price - ref_price) * qty, 2)
 
             results.append({
                 "project_id": project_id,
-                "material_class_id": r.material_class_id,
-                "material_class_name": class_name_map.get(r.material_class_id, "?"),
+                "material_class_id": cid,
+                "material_class_name": class_name_map.get(cid, "?"),
                 "period_start": month_start,
                 "period_end": month_end,
-                # material_total / delivery_total are VAT-inclusive (consistent with avg_price)
-                "material_total": round(float(r.mat_total) + float(r.mat_vat), 2),
-                "delivery_total": round(delivery_for_class + delivery_vat_for_class, 2),
-                "total_qty": round(float(r.qty), 3),
+                "material_total": round(contrib["mat_with_vat"], 2),
+                "delivery_total": round(contrib["shared_with_vat"], 2),  # доставка + присадки
+                "total_qty": round(qty, 3),
                 "avg_price": round(avg_price, 2),
-                "invoice_count": r.invoice_count,
+                "invoice_count": len(contrib["invoice_ids"]),
                 "reference_price": ref_price,
                 "deviation_pct": deviation_pct,
                 "deviation_amount": deviation_amount,
@@ -689,7 +812,9 @@ def _compute_supplier_project_deviation(
     """Вычислить отклонение от плана для пары поставщик×объект.
 
     Методология идентична compute_full_deviation, но привязана только к счетам
-    данного поставщика. Доставка распределяется пропорционально объёму материалов.
+    данного поставщика. Общие затраты (доставка + позиции с calc_role='additive')
+    распределяются пропорционально объёму базовых материалов (calc_role='base')
+    внутри каждого счёта.
 
     Отличие от compute_full_deviation: плановая цена выбирается без учёта периода —
     берётся самая свежая актуальная запись по каждому классу (order by period_start desc).
@@ -702,58 +827,111 @@ def _compute_supplier_project_deviation(
         db.query(Invoice.id)
         .join(Document, Invoice.document_id == Document.id)
         .filter(Invoice.supplier_id == supplier_id, Document.project_id == project_id)
-        .subquery()
     )
 
-    # Материальные позиции, сгруппированные по классу
-    class_rows = (
+    # Base-материалы по счёту×класс
+    base_rows = (
         db.query(
+            InvoiceItem.invoice_id,
             InvoiceItem.material_class_id,
             func.sum(InvoiceItem.amount).label("mat_total"),
-            func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)).label("mat_vat"),
+            func.sum(func.coalesce(
+                InvoiceItem.vat_amount,
+                InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100
+            )).label("mat_vat"),
             func.sum(InvoiceItem.quantity).label("qty"),
         )
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+        .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
         .filter(
             InvoiceItem.invoice_id.in_(invoice_ids_q),
             InvoiceItem.item_type == "material",
-            InvoiceItem.material_class_id.isnot(None),
+            MaterialClass.calc_role == "base",
         )
-        .group_by(InvoiceItem.material_class_id)
+        .group_by(InvoiceItem.invoice_id, InvoiceItem.material_class_id)
         .all()
     )
-    if not class_rows:
+    if not base_rows:
         return None, None
 
-    class_ids = [r.material_class_id for r in class_rows]
-
-    all_material_qty: float = (
-        db.query(func.sum(InvoiceItem.quantity))
+    # Объём base-материала по каждому счёту (знаменатель пропорции)
+    base_qty_per_invoice: dict[int, float] = {}
+    for row in (
+        db.query(
+            InvoiceItem.invoice_id,
+            func.sum(InvoiceItem.quantity).label("total_qty"),
+        )
+        .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
         .filter(
             InvoiceItem.invoice_id.in_(invoice_ids_q),
             InvoiceItem.item_type == "material",
+            MaterialClass.calc_role == "base",
         )
-        .scalar() or 0.0
-    )
-    delivery_total: float = (
-        db.query(func.sum(InvoiceItem.amount))
-        .filter(
-            InvoiceItem.invoice_id.in_(invoice_ids_q),
-            InvoiceItem.item_type == "delivery",
+        .group_by(InvoiceItem.invoice_id)
+        .all()
+    ):
+        base_qty_per_invoice[row.invoice_id] = float(row.total_qty)
+
+    # Shared costs (доставка + присадки) по счёту, с НДС
+    shared_per_invoice: dict[int, float] = {}
+
+    for row in (
+        db.query(
+            InvoiceItem.invoice_id,
+            func.sum(
+                InvoiceItem.amount +
+                func.coalesce(
+                    InvoiceItem.vat_amount,
+                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100
+                )
+            ).label("total_with_vat"),
         )
-        .scalar() or 0.0
-    )
-    delivery_vat_total: float = (
-        db.query(func.sum(func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)))
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .filter(
             InvoiceItem.invoice_id.in_(invoice_ids_q),
             InvoiceItem.item_type == "delivery",
         )
-        .scalar() or 0.0
-    )
+        .group_by(InvoiceItem.invoice_id)
+        .all()
+    ):
+        shared_per_invoice[row.invoice_id] = (
+            shared_per_invoice.get(row.invoice_id, 0.0) + float(row.total_with_vat)
+        )
 
-    # Последние плановые цены по объекту×класс (без ограничения периода — берём актуальные)
+    for row in (
+        db.query(
+            InvoiceItem.invoice_id,
+            func.sum(
+                InvoiceItem.amount +
+                func.coalesce(
+                    InvoiceItem.vat_amount,
+                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100
+                )
+            ).label("total_with_vat"),
+        )
+        .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+        .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
+        .filter(
+            InvoiceItem.invoice_id.in_(invoice_ids_q),
+            InvoiceItem.item_type == "material",
+            MaterialClass.calc_role == "additive",
+        )
+        .group_by(InvoiceItem.invoice_id)
+        .all()
+    ):
+        shared_per_invoice[row.invoice_id] = (
+            shared_per_invoice.get(row.invoice_id, 0.0) + float(row.total_with_vat)
+        )
+
+    # Агрегируем contribution по классу
+    class_contrib = _aggregate_by_class(base_rows, base_qty_per_invoice, shared_per_invoice)
+
+    if not class_contrib:
+        return None, None
+
+    class_ids = list(class_contrib.keys())
+
+    # Последние плановые цены по объекту×класс (без ограничения периода)
     ref_rows = (
         db.query(ReferencePrice)
         .filter(
@@ -777,18 +955,17 @@ def _compute_supplier_project_deviation(
     reference_total: float = 0.0
     any_ref = False
 
-    for r in class_rows:
-        if not r.qty:
+    for cid, contrib in class_contrib.items():
+        qty = contrib["qty"]
+        if qty is None or qty <= 0:
             continue
-        share = r.qty / all_material_qty if all_material_qty > 0 else 0.0
-        delivery_for_class = (delivery_total + delivery_vat_total) * share
-        avg_price = (r.mat_total + r.mat_vat + delivery_for_class) / r.qty
+        avg_price = (contrib["mat_with_vat"] + contrib["shared_with_vat"]) / qty
 
-        ref = ref_by_class.get(r.material_class_id)
+        ref = ref_by_class.get(cid)
         if ref and ref.price and ref.price > 0:
             any_ref = True
-            total_deviation += (avg_price - ref.price) * r.qty
-            reference_total += ref.price * r.qty
+            total_deviation += (avg_price - ref.price) * qty
+            reference_total += ref.price * qty
 
     if not any_ref or reference_total == 0.0:
         return None, None
