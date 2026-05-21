@@ -827,7 +827,6 @@ def _compute_supplier_project_deviation(
         db.query(Invoice.id)
         .join(Document, Invoice.document_id == Document.id)
         .filter(Invoice.supplier_id == supplier_id, Document.project_id == project_id)
-        .scalar_subquery()
     )
 
     # Base-материалы по счёту×класс
