@@ -70,14 +70,14 @@ def get_material_class(db: Session, class_id: int):
     return db.query(MaterialClass).filter(MaterialClass.id == class_id).first()
 
 
-_VALID_CALC_ROLES = {"base", "additive", "exclude"}
+VALID_CALC_ROLES = {"base", "additive", "exclude"}
 
 
 def get_or_create_material_class(
     db: Session, name: str, material_type: str, calc_role: str = "base"
 ) -> MaterialClass:
-    if calc_role not in _VALID_CALC_ROLES:
-        raise ValueError(f"Unknown calc_role {calc_role!r}; allowed: {sorted(_VALID_CALC_ROLES)}")
+    if calc_role not in VALID_CALC_ROLES:
+        raise ValueError(f"Unknown calc_role {calc_role!r}; allowed: {sorted(VALID_CALC_ROLES)}")
     mc = db.query(MaterialClass).filter(
         MaterialClass.name == name, MaterialClass.material_type == material_type
     ).first()
@@ -812,7 +812,9 @@ def _compute_supplier_project_deviation(
     """Вычислить отклонение от плана для пары поставщик×объект.
 
     Методология идентична compute_full_deviation, но привязана только к счетам
-    данного поставщика. Доставка распределяется пропорционально объёму материалов.
+    данного поставщика. Общие затраты (доставка + позиции с calc_role='additive')
+    распределяются пропорционально объёму базовых материалов (calc_role='base')
+    внутри каждого счёта.
 
     Отличие от compute_full_deviation: плановая цена выбирается без учёта периода —
     берётся самая свежая актуальная запись по каждому классу (order by period_start desc).

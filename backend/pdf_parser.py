@@ -231,7 +231,7 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
                 material_class_id = None
                 if item.get("item_type") == "material" and item.get("material_class"):
                     raw_role = item.get("calc_role") or "base"
-                    if raw_role not in crud._VALID_CALC_ROLES:
+                    if raw_role not in crud.VALID_CALC_ROLES:
                         logger.warning(
                             "[doc=%d] СФ №%s поз.%d '%s': неизвестный calc_role=%r от модели, "
                             "используем 'base'",
