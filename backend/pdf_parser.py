@@ -230,11 +230,20 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
             for item_idx, item in enumerate(inv_data.get("items", [])):
                 material_class_id = None
                 if item.get("item_type") == "material" and item.get("material_class"):
+                    raw_role = item.get("calc_role") or "base"
+                    if raw_role not in crud._VALID_CALC_ROLES:
+                        logger.warning(
+                            "[doc=%d] СФ №%s поз.%d '%s': неизвестный calc_role=%r от модели, "
+                            "используем 'base'",
+                            document_id, inv_number, item_idx + 1,
+                            item.get("raw_name", "")[:40], raw_role,
+                        )
+                        raw_role = "base"
                     mc = crud.get_or_create_material_class(
                         db,
                         name=item["material_class"],
                         material_type=item.get("material_type", "other"),
-                        calc_role=item.get("calc_role") or "base",
+                        calc_role=raw_role,
                     )
                     material_class_id = mc.id
 

@@ -29,7 +29,7 @@ def upgrade() -> None:
     # DEFAULT 'base' — все существующие классы (бетон, арматура) получают роль «основной материал».
     op.add_column(
         "material_classes",
-        sa.Column("calc_role", sa.String(), nullable=False, server_default="base"),
+        sa.Column("calc_role", sa.String(), nullable=False, server_default=sa.text("'base'")),
     )
 
     # Ограничение допустимых значений на уровне БД

@@ -353,6 +353,128 @@ def test_invoice_without_base_material_does_not_crash(factories, db_session):
     assert result == []
 
 
+# =============================================================================
+# Тесты _compute_supplier_project_deviation
+# =============================================================================
+
+
+def test_supplier_deviation_uses_latest_ref_price_no_period_filter(factories, db_session):
+    """_compute_supplier_project_deviation использует самую свежую плановую цену по классу
+    без привязки к периоду — в отличие от compute_calculations, которая фильтрует по периоду.
+
+    Сценарий: счёт за 2025, есть две плановые цены — старая (2025) и новая (2026).
+    Функция должна взять 2026 (более поздний period_start), а не 2025 (совпадает с датой счёта).
+    """
+    project = factories.ProjectFactory.create()
+    supplier = factories.SupplierFactory.create()
+    mc = factories.MaterialClassFactory.create(name="В40", material_type="concrete")
+    doc = factories.DocumentFactory.create(project=project)
+
+    inv = factories.InvoiceFactory.create(
+        document=doc, date=date(2025, 6, 15), supplier_id=supplier.id,
+    )
+    factories.InvoiceItemFactory.create(
+        invoice=inv, material_class=mc,
+        quantity=10.0, unit_price=8000.0, amount=80000.0, vat_amount=16000.0,
+    )
+
+    # Старая плановая цена — период совпадает с датой счёта
+    factories.ReferencePriceFactory.create(
+        project=project, material_class=mc, price=9000.0,
+        period_start=date(2025, 1, 1), period_end=date(2025, 12, 31),
+    )
+    # Новая плановая цена — период не совпадает с датой счёта
+    factories.ReferencePriceFactory.create(
+        project=project, material_class=mc, price=10000.0,
+        period_start=date(2026, 1, 1), period_end=date(2026, 12, 31),
+    )
+
+    deviation_pct, deviation_amount = crud._compute_supplier_project_deviation(
+        db_session, supplier.id, project.id
+    )
+
+    # avg_price = (80_000 + 16_000) / 10 = 9_600
+    # Берётся самая свежая цена: 10_000 (2026), а не 9_000 (2025)
+    # deviation_pct = (9_600 − 10_000) / 10_000 × 100 = −4.0
+    # deviation_amount = (9_600 − 10_000) × 10 = −4_000
+    assert deviation_pct == -4.0
+    assert deviation_amount == -4000.0
+
+
+def test_supplier_deviation_with_delivery_allocation(factories, db_session):
+    """_compute_supplier_project_deviation правильно включает доставку в avg_price
+    и считает отклонение через shared-cost аллокацию."""
+    project = factories.ProjectFactory.create()
+    supplier = factories.SupplierFactory.create()
+    mc = factories.MaterialClassFactory.create(name="В40", material_type="concrete")
+    factories.ReferencePriceFactory.create(
+        project=project, material_class=mc, price=12000.0,
+        period_start=date(2026, 1, 1), period_end=date(2026, 12, 31),
+    )
+    doc = factories.DocumentFactory.create(project=project)
+    inv = factories.InvoiceFactory.create(
+        document=doc, date=date(2026, 3, 15), supplier_id=supplier.id,
+    )
+
+    # В40: 10 м³ × 8_000 = 80_000, НДС 16_000 → mat_with_vat = 96_000
+    factories.InvoiceItemFactory.create(
+        invoice=inv, material_class=mc,
+        quantity=10.0, unit_price=8000.0, amount=80000.0, vat_amount=16000.0,
+    )
+    # Доставка: 40_000, НДС 8_000 → shared = 48_000, share В40 = 1.0
+    factories.InvoiceItemFactory.create(
+        invoice=inv, material_class=None,
+        item_type="delivery", quantity=1.0, unit_price=40000.0,
+        amount=40000.0, vat_amount=8000.0,
+    )
+
+    deviation_pct, deviation_amount = crud._compute_supplier_project_deviation(
+        db_session, supplier.id, project.id
+    )
+
+    # avg_price = (96_000 + 48_000) / 10 = 14_400
+    # ref_price = 12_000
+    # deviation_pct = (14_400 − 12_000) / 12_000 × 100 = 20.0
+    # deviation_amount = (14_400 − 12_000) × 10 = 24_000
+    assert deviation_pct == 20.0
+    assert deviation_amount == 24000.0
+
+
+def test_supplier_deviation_returns_none_when_no_invoices(factories, db_session):
+    """Нет счетов поставщика по объекту → функция возвращает (None, None)."""
+    project = factories.ProjectFactory.create()
+    supplier = factories.SupplierFactory.create()
+
+    deviation_pct, deviation_amount = crud._compute_supplier_project_deviation(
+        db_session, supplier.id, project.id
+    )
+
+    assert deviation_pct is None
+    assert deviation_amount is None
+
+
+def test_supplier_deviation_returns_none_when_no_ref_prices(factories, db_session):
+    """Нет плановых цен → функция возвращает (None, None), не 0."""
+    project = factories.ProjectFactory.create()
+    supplier = factories.SupplierFactory.create()
+    mc = factories.MaterialClassFactory.create()
+    doc = factories.DocumentFactory.create(project=project)
+    inv = factories.InvoiceFactory.create(
+        document=doc, date=date(2026, 3, 15), supplier_id=supplier.id,
+    )
+    factories.InvoiceItemFactory.create(
+        invoice=inv, material_class=mc,
+        quantity=10.0, unit_price=8000.0, amount=80000.0, vat_amount=16000.0,
+    )
+
+    deviation_pct, deviation_amount = crud._compute_supplier_project_deviation(
+        db_session, supplier.id, project.id
+    )
+
+    assert deviation_pct is None
+    assert deviation_amount is None
+
+
 def test_get_or_create_material_class_invalid_calc_role_raises(db_session):
     """Неизвестный calc_role вызывает ValueError ещё до обращения к БД."""
     import pytest
