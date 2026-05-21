@@ -4,11 +4,11 @@ Revision ID: c7d8e9f0a1b2
 Revises: a1b2c3d4e5f6
 Create Date: 2026-05-21 12:00:00.000000
 
-NOTE: downgrade() on this revision calls drop_column correctly, but the
-*previous* revision (a1b2c3d4e5f6) has NotImplementedError in its downgrade().
-Running `alembic downgrade -1` will raise before reaching this migration's
-drop_column. To roll back only this migration, use its explicit revision:
-  alembic downgrade a1b2c3d4e5f6
+NOTE: `alembic downgrade -1` from this revision (c7d8e9f0a1b2) works correctly —
+it runs this migration's downgrade() and stops at a1b2c3d4e5f6.
+However, going further (downgrade -2 or downgrade b3c7e9f12a45) will fail:
+revision a1b2c3d4e5f6 raises NotImplementedError in its downgrade() because
+the price_calculations table was dropped intentionally and cannot be restored.
 
 """
 from typing import Sequence, Union

@@ -229,6 +229,13 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
             items = []
             for item_idx, item in enumerate(inv_data.get("items", [])):
                 material_class_id = None
+                if item.get("item_type") == "material" and not item.get("material_class"):
+                    logger.warning(
+                        "[doc=%d] СФ №%s поз.%d '%s': item_type=material, но material_class пустой — "
+                        "позиция сохранится без класса материала",
+                        document_id, inv_number, item_idx + 1,
+                        item.get("raw_name", "")[:40],
+                    )
                 if item.get("item_type") == "material" and item.get("material_class"):
                     raw_role = str(item.get("calc_role") or "base").strip().lower()
                     if raw_role not in crud.VALID_CALC_ROLES:
