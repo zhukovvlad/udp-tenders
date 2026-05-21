@@ -32,6 +32,13 @@ def upgrade() -> None:
         sa.Column("calc_role", sa.String(), nullable=False, server_default="base"),
     )
 
+    # Ограничение допустимых значений на уровне БД
+    op.create_check_constraint(
+        "ck_material_classes_calc_role",
+        "material_classes",
+        "calc_role IN ('base', 'additive', 'exclude')",
+    )
+
     # Индекс для агрегации по счёту в compute_calculations()
     op.create_index(
         "ix_invoice_items_invoice_id_item_type",
@@ -42,4 +49,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_invoice_items_invoice_id_item_type", table_name="invoice_items")
+    op.drop_constraint("ck_material_classes_calc_role", "material_classes", type_="check")
     op.drop_column("material_classes", "calc_role")

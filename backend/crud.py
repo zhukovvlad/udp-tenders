@@ -70,9 +70,14 @@ def get_material_class(db: Session, class_id: int):
     return db.query(MaterialClass).filter(MaterialClass.id == class_id).first()
 
 
+_VALID_CALC_ROLES = {"base", "additive", "exclude"}
+
+
 def get_or_create_material_class(
     db: Session, name: str, material_type: str, calc_role: str = "base"
 ) -> MaterialClass:
+    if calc_role not in _VALID_CALC_ROLES:
+        raise ValueError(f"Unknown calc_role {calc_role!r}; allowed: {sorted(_VALID_CALC_ROLES)}")
     mc = db.query(MaterialClass).filter(
         MaterialClass.name == name, MaterialClass.material_type == material_type
     ).first()
@@ -82,6 +87,9 @@ def get_or_create_material_class(
         db.commit()
         db.refresh(mc)
     elif mc.calc_role != calc_role:
+        # Preserved intentionally: the DB record represents a human-reviewed classification;
+        # auto-update would allow LLM hallucinations to corrupt it.
+        # To reclassify, update the record directly via the material classes UI or API.
         logger.warning(
             "get_or_create_material_class: class %r/%r found with calc_role=%r, "
             "but caller expects %r — stored value preserved; "
@@ -259,6 +267,43 @@ def _months_in_range(start: date, end: date) -> list[tuple[date, date]]:
     return months
 
 
+def _aggregate_by_class(
+    base_rows,
+    base_qty_per_invoice: dict[int, float],
+    shared_per_invoice: dict[int, float],
+) -> dict[int, dict]:
+    """Distribute shared costs proportionally across base material classes per invoice.
+
+    Args:
+        base_rows: query rows with fields (invoice_id, material_class_id, mat_total, mat_vat, qty).
+        base_qty_per_invoice: total base qty per invoice — denominator for proportional share.
+        shared_per_invoice: combined delivery + additive cost (with VAT) per invoice.
+
+    Returns dict[class_id -> {mat_with_vat, shared_with_vat, qty, invoice_ids}].
+    """
+    class_contrib: dict[int, dict] = {}
+    for row in base_rows:
+        cid = row.material_class_id
+        inv_id = row.invoice_id
+        qty_base_in_inv = base_qty_per_invoice.get(inv_id, 0.0)
+        if qty_base_in_inv <= 0:
+            continue
+        share = float(row.qty) / qty_base_in_inv
+        shared = shared_per_invoice.get(inv_id, 0.0) * share
+        if cid not in class_contrib:
+            class_contrib[cid] = {
+                "mat_with_vat": 0.0,
+                "shared_with_vat": 0.0,
+                "qty": 0.0,
+                "invoice_ids": set(),
+            }
+        class_contrib[cid]["mat_with_vat"] += float(row.mat_total) + float(row.mat_vat)
+        class_contrib[cid]["shared_with_vat"] += shared
+        class_contrib[cid]["qty"] += float(row.qty)
+        class_contrib[cid]["invoice_ids"].add(inv_id)
+    return class_contrib
+
+
 def compute_calculations(
     db: Session,
     project_id: int,
@@ -411,32 +456,13 @@ def compute_calculations(
         ):
             additive_per_invoice[row.invoice_id] = float(row.total_with_vat)
 
+        # Объединяем доставку и присадки в один словарь shared costs per invoice
+        shared_per_invoice = {
+            inv_id: delivery_per_invoice.get(inv_id, 0.0) + additive_per_invoice.get(inv_id, 0.0)
+            for inv_id in set(delivery_per_invoice) | set(additive_per_invoice)
+        }
         # Агрегируем contribution по классу через все счета месяца
-        # contribution[class_id] = (mat_with_vat, shared_with_vat, qty, invoice_ids)
-        class_contrib: dict[int, dict] = {}
-        for row in base_rows:
-            cid = row.material_class_id
-            inv_id = row.invoice_id
-            qty_base_in_inv = base_qty_per_invoice.get(inv_id, 0.0)
-            if qty_base_in_inv <= 0:
-                continue
-            share = float(row.qty) / qty_base_in_inv
-            shared = (
-                delivery_per_invoice.get(inv_id, 0.0) +
-                additive_per_invoice.get(inv_id, 0.0)
-            ) * share
-
-            if cid not in class_contrib:
-                class_contrib[cid] = {
-                    "mat_with_vat": 0.0,
-                    "shared_with_vat": 0.0,
-                    "qty": 0.0,
-                    "invoice_ids": set(),
-                }
-            class_contrib[cid]["mat_with_vat"] += float(row.mat_total) + float(row.mat_vat)
-            class_contrib[cid]["shared_with_vat"] += shared
-            class_contrib[cid]["qty"] += float(row.qty)
-            class_contrib[cid]["invoice_ids"].add(inv_id)
+        class_contrib = _aggregate_by_class(base_rows, base_qty_per_invoice, shared_per_invoice)
 
         class_ids = list(class_contrib.keys())
 
@@ -895,20 +921,7 @@ def _compute_supplier_project_deviation(
         )
 
     # Агрегируем contribution по классу
-    class_contrib: dict[int, dict] = {}
-    for row in base_rows:
-        cid = row.material_class_id
-        inv_id = row.invoice_id
-        qty_base_in_inv = base_qty_per_invoice.get(inv_id, 0.0)
-        if qty_base_in_inv <= 0:
-            continue
-        share = float(row.qty) / qty_base_in_inv
-        shared = shared_per_invoice.get(inv_id, 0.0) * share
-        if cid not in class_contrib:
-            class_contrib[cid] = {"mat_with_vat": 0.0, "shared_with_vat": 0.0, "qty": 0.0}
-        class_contrib[cid]["mat_with_vat"] += float(row.mat_total) + float(row.mat_vat)
-        class_contrib[cid]["shared_with_vat"] += shared
-        class_contrib[cid]["qty"] += float(row.qty)
+    class_contrib = _aggregate_by_class(base_rows, base_qty_per_invoice, shared_per_invoice)
 
     if not class_contrib:
         return None, None

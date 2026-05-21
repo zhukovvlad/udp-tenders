@@ -71,9 +71,10 @@ CREATE INDEX ON invoice_items (invoice_id, item_type);
 
 ### `invoice_items` — ничего не меняется
 
-`item_type` остаётся с двумя значениями `"material"` / `"delivery"`.
+`item_type` остаётся с тремя значениями `"material"` / `"delivery"` / `"other"`.
 Доставка всегда входит в avg_price пропорционально — через `item_type`,
 а не через `calc_role` (у доставки нет `material_class_id`).
+Позиции `item_type="other"` (скидки, возвраты, корректировки) не участвуют в расчёте.
 
 ---
 

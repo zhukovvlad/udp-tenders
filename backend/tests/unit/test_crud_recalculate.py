@@ -353,6 +353,15 @@ def test_invoice_without_base_material_does_not_crash(factories, db_session):
     assert result == []
 
 
+def test_get_or_create_material_class_invalid_calc_role_raises(db_session):
+    """Неизвестный calc_role вызывает ValueError ещё до обращения к БД."""
+    import pytest
+    with pytest.raises(ValueError, match="calc_role"):
+        crud.get_or_create_material_class(
+            db_session, name="Что-то", material_type="concrete", calc_role="bad_value",
+        )
+
+
 def test_get_or_create_material_class_calc_role_mismatch_logs_warning(factories, db_session):
     """При несовпадении calc_role у существующей записи функция возвращает её без изменений и логирует warning."""
     # Создаём класс с calc_role="base" напрямую
