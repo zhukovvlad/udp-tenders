@@ -48,6 +48,12 @@
 
 - [ ] **InvoiceTable: tooltip со статусом СФ недоступен с клавиатуры и тач-устройств**
   Уверенность ИИ и дата верификации показываются только через нативный `title` на `<span tabIndex={0}>`.
+
+- [ ] **Дублирование blob-download паттерна в трёх местах**
+  `ProjectPage.tsx` (xlsx-экспорт), `MonthlyTab.tsx` (CSV) и `Reports.tsx` используют одинаковую
+  последовательность: `createObjectURL` → `appendChild(a)` → `click()` → `removeChild(a)` → `revokeObjectURL`.
+  Реализации немного расходятся (синхронный vs async revoke, санитизация имени файла).
+  **Решение:** вынести в хелпер `src/lib/downloadBlob.ts(blob, filename)` и обновить все три вызывающих.
   Нативные title-тултипы браузеры показывают только при hover, не при focus — поэтому полной доступности нет.
   **Решение:** заменить на focusable-компонент с `aria-describedby` или отдельный tooltip-компонент,
   либо вынести значения в видимый текст.
