@@ -32,6 +32,13 @@ def _align(h: str = "left", v: str = "center", wrap: bool = False) -> Alignment:
     return Alignment(horizontal=h, vertical=v, wrap_text=wrap)
 
 
+def _safe_str(v: object) -> object:
+    """Prevent formula injection: prefix strings starting with '=' with an apostrophe."""
+    if isinstance(v, str) and v.startswith("="):
+        return "'" + v
+    return v
+
+
 _THIN = Side(style="thin", color="BFBFBF")
 _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 
@@ -170,7 +177,7 @@ def _write_class_section(
 
     # ── Class section header ─────────────────────────────────────────────────
     ws.merge_cells(start_row=cur, start_column=1, end_row=cur, end_column=_N_COLS)
-    h = ws.cell(row=cur, column=1, value=class_name)
+    h = ws.cell(row=cur, column=1, value=_safe_str(class_name))
     h.fill = _fill(_C_CLASS_BG)
     h.font = _font(bold=True, color="FFFFFF", size=11)
     h.alignment = _align(h="left", v="center")
@@ -261,9 +268,9 @@ def _write_class_section(
 
             # Cols 1–9: static DB values (A–I)
             for col_idx, val in enumerate([
-                r["invoice_date"],              # A 1
-                r["invoice_number"],            # B 2
-                r["supplier_name"],             # C 3
+                r["invoice_date"],                        # A 1
+                _safe_str(r["invoice_number"]),             # B 2
+                _safe_str(r["supplier_name"]),              # C 3
                 r["qty"],                       # D 4
                 r["ref_price"],                 # E 5
                 r["vat_rate"],                  # F 6  Ставка НДС (decimal 0.20)
@@ -381,8 +388,8 @@ def export_excel(
     # ── Project info block ────────────────────────────────────────────────────
     info_fill = _fill(_C_HEADER_BG)
     info_lines = [
-        project.name,
-        project.contract_number or "",
+        _safe_str(project.name),
+        _safe_str(project.contract_number or ""),
         f"Период: {display_start.strftime('%d.%m.%Y')} — {display_end.strftime('%d.%m.%Y')}",
         f"Сформировано: {date.today().strftime('%d.%m.%Y')}",
     ]
