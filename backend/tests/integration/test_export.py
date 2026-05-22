@@ -505,6 +505,35 @@ class TestExportEndpoint:
         ws = load_workbook(BytesIO(resp.content)).active
         assert ws.cell(row=2, column=1).value == "Д-2026/01"
 
+    def test_formula_injection_strings_are_escaped(self, client, factories):
+        """_safe_str must prefix strings starting with =, +, -, @ with an apostrophe."""
+        project = factories.ProjectFactory.create(
+            name='=HYPERLINK("http://evil.com")',
+            contract_number="+evil",
+        )
+        mc = factories.MaterialClassFactory.create(name="-В25", calc_role="base")
+        doc = factories.DocumentFactory.create(project=project)
+        inv = factories.InvoiceFactory.create(
+            document=doc, date=date(2026, 3, 10), supplier_name="@inject",
+        )
+        factories.InvoiceItemFactory.create(invoice=inv, material_class=mc, quantity=10.0)
+        resp = client.get(
+            f"/api/export/excel?project_id={project.id}"
+            "&period_start=2026-03-01&period_end=2026-03-31"
+        )
+        assert resp.status_code == 200
+        ws = load_workbook(BytesIO(resp.content)).active
+        # Row 1: project name escaped (= → ')
+        assert ws.cell(row=1, column=1).value == "'=HYPERLINK(\"http://evil.com\")"
+        # Row 2: contract number escaped (+ → ')
+        assert ws.cell(row=2, column=1).value == "'+evil"
+        # Class section header escaped (- → ')
+        assert "'-В25" in _all_values(ws)
+        # Data row col C: supplier name escaped (@ → ')
+        data_row = _find_data_row(ws)
+        assert data_row is not None
+        assert ws.cell(row=data_row, column=3).value == "'@inject"
+
     def test_period_line_in_row_3_when_explicit_period(self, client, factories):
         project = factories.ProjectFactory.create()
         resp = client.get(
