@@ -32,7 +32,7 @@ def _find_data_row(ws) -> int | None:
     """Return 1-based row of the first row whose col D (4) holds a plain number > 0."""
     for r in range(1, ws.max_row + 1):
         v = ws.cell(row=r, column=4).value
-        if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+        if isinstance(v, int | float) and not isinstance(v, bool) and v > 0:
             return r
     return None
 

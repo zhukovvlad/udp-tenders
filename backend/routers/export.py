@@ -36,28 +36,28 @@ _THIN = Side(style="thin", color="BFBFBF")
 _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 
 # Color palette
-_C_HEADER_BG       = "1F4E79"   # dark navy — project header block
-_C_CLASS_BG        = "2E75B6"   # medium blue — material-class section title
-_C_COL_BG          = "4472C4"   # lighter blue — column header row
-_C_MONTH_BG        = "DEEAF1"   # very light blue — month sub-header
-_C_MONTH_TOTAL_BG  = "BDD7EE"   # light blue — month subtotal row
-_C_CLASS_TOTAL_BG  = "9DC3E6"   # medium light blue — class grand total row
-_C_TOTAL_BG        = "D6E4F0"   # kept for reference (not used in sections)
-_C_ODD             = "FFFFFF"   # white — odd data rows
-_C_EVEN            = "EBF3FB"   # pale blue — even data rows
-_C_RED_TEXT        = "C00000"   # red — overpayment
-_C_GREEN_TEXT      = "375623"   # green — savings
+_C_HEADER_BG = "1F4E79"  # dark navy — project header block
+_C_CLASS_BG = "2E75B6"  # medium blue — material-class section title
+_C_COL_BG = "4472C4"  # lighter blue — column header row
+_C_MONTH_BG = "DEEAF1"  # very light blue — month sub-header
+_C_MONTH_TOTAL_BG = "BDD7EE"  # light blue — month subtotal row
+_C_CLASS_TOTAL_BG = "9DC3E6"  # medium light blue — class grand total row
+_C_TOTAL_BG = "D6E4F0"  # kept for reference (not used in sections)
+_C_ODD = "FFFFFF"  # white — odd data rows
+_C_EVEN = "EBF3FB"  # pale blue — even data rows
+_C_RED_TEXT = "C00000"  # red — overpayment
+_C_GREEN_TEXT = "375623"  # green — savings
 
 _MONTH_NAMES_RU = [
     "", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
     "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
 ]
 
-_FMT_MONEY    = '#,##0.00 "₽"'
-_FMT_DATE     = "DD.MM.YYYY"
-_FMT_PCT      = '+0.0%;-0.0%;0.0%'
-_FMT_PCT_RATE = "0%"           # for vat_rate stored as decimal (0.20 → 20%)
-_FMT_QTY      = "#,##0.000"
+_FMT_MONEY = '#,##0.00 "₽"'
+_FMT_DATE = "DD.MM.YYYY"
+_FMT_PCT = "+0.0%;-0.0%;0.0%"
+_FMT_PCT_RATE = "0%"  # for vat_rate stored as decimal (0.20 → 20%)
+_FMT_QTY = "#,##0.000"
 
 # Column definitions: (header label, width, number_format, alignment)
 # Col  1=A Дата,  2=B Номер,  3=C Поставщик,  4=D Объём,  5=E Плановая цена

@@ -322,7 +322,7 @@ describe("ProjectPage", () => {
     const origCreateObjectURL = URL.createObjectURL;
 
     try {
-      URL.createObjectURL = (_blob: Blob) => "blob:fake";
+      URL.createObjectURL = (_blob: Blob) => "blob:fake"; // eslint-disable-line @typescript-eslint/no-unused-vars
 
       const realBlob = globalThis.Blob;
       const capturedBlobPartsRef = capturedBlobParts;
