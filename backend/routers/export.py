@@ -34,7 +34,6 @@ def _align(h: str = "left", v: str = "center", wrap: bool = False) -> Alignment:
 
 _THIN = Side(style="thin", color="BFBFBF")
 _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
-_BORDER_BOTTOM = Border(bottom=Side(style="medium", color="2E75B6"))
 
 # Color palette
 _C_HEADER_BG       = "1F4E79"   # dark navy — project header block

@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Download, Plus, Trash2, Pencil } from "lucide-react";
@@ -94,6 +95,8 @@ export default function ProjectPage() {
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось сформировать отчёт");
     } finally {
       setIsExporting(false);
     }

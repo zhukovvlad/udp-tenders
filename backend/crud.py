@@ -618,6 +618,9 @@ def compute_export_rows(
     if not base_rows:
         return []
 
+    # Narrow to only invoices that actually have base rows (reduces delivery/additive query scope)
+    invoice_ids = list({r.invoice_id for r in base_rows})
+
     # ── Total base qty per invoice (denominator for proportional allocation) ──
     total_base_qty_per_inv: dict[int, float] = {}
     for r in (
