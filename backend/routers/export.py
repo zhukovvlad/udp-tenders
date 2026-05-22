@@ -167,10 +167,9 @@ def _write_class_section(
     Layout per class:
       [Class header]
       [Column headers]
-      [Month sub-header — Январь 2025]
+      [Month header — Январь 2025]  ← single row with aggregated SUMPRODUCT formulas
         row … row (data)
-      [Итого Январь 2025]
-      [Month sub-header — Февраль 2025]
+      [Month header — Февраль 2025]
         …
       [ИТОГО по <class>]
       (spacer)
