@@ -88,9 +88,12 @@ export default function ProjectPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `отчёт-${project?.name ?? projectId}.xlsx`;
+      const safeName = String(project?.name ?? projectId).replace(/[\\/:*?"<>|]/g, "-");
+      a.download = `отчёт-${safeName}.xlsx`;
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 0);
     } finally {
       setIsExporting(false);
     }

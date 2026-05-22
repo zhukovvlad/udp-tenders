@@ -571,6 +571,8 @@ describe("ProjectPage", () => {
 
       const url = new URL(requests[0].url);
       expect(url.searchParams.get("project_id")).toBe("1");
+      expect(anchorClicks).toHaveLength(1);
+      expect(anchorClicks[0].download).toMatch(/отчёт.*\.xlsx$/);
     } finally {
       URL.createObjectURL = origCreateObjectURL;
       vi.restoreAllMocks();
@@ -594,6 +596,7 @@ describe("ProjectPage", () => {
       })
     );
 
+    const origCreateObjectURL = URL.createObjectURL;
     URL.createObjectURL = () => "blob:fake";
     const origCreateElement = document.createElement.bind(document);
     vi.spyOn(document, "createElement").mockImplementation((tag) => {
@@ -618,7 +621,7 @@ describe("ProjectPage", () => {
         expect(screen.getByRole("button", { name: /экспорт/i })).not.toBeDisabled()
       );
     } finally {
-      URL.createObjectURL = URL.createObjectURL; // restored via restoreAllMocks below
+      URL.createObjectURL = origCreateObjectURL;
       vi.restoreAllMocks();
     }
   });

@@ -85,7 +85,6 @@ _COLUMNS = [
     ("Откл. от плана, ₽",           18, _FMT_MONEY,      "right"),   # P 16  formula
 ]
 _N_COLS = len(_COLUMNS)
-_LAST_COL = get_column_letter(_N_COLS)
 
 
 def _dev_font(value, bold: bool = False, size: int = 10) -> Font:
@@ -94,71 +93,6 @@ def _dev_font(value, bold: bool = False, size: int = 10) -> Font:
         return _font(bold=bold, size=size)
     color = _C_RED_TEXT if value > 0 else _C_GREEN_TEXT
     return _font(bold=bold, color=color, size=size)
-
-
-def _write_subtotal_row(
-    ws,
-    row_num: int,
-    label: str,
-    fill: PatternFill,
-    label_font: Font,
-    data_font: Font,
-    data_start: int,
-    data_end: int,
-    dev_total_py: float,
-    w_dev_py: float,
-    height: int = 18,
-) -> None:
-    """Write an ИТОГО row (month subtotal) with Excel formulas.
-
-    Col layout (16 cols):
-      A=1 label, B=2, C=3 (empty)
-      D=4  Объём        SUM
-      E=5  blank        (Плановая цена — no avg)
-      F=6  blank        (Ставка НДС — no meaningful avg)
-      G=7  Бетон без    SUMPRODUCT weighted avg
-      H=8  Доставка без SUMPRODUCT weighted avg
-      I=9  Прочее без   SUMPRODUCT weighted avg
-      J=10 Итого без    =G+H+I (on this row)
-      K=11 Бетон с      SUMPRODUCT weighted avg
-      L=12 Доставка с   SUMPRODUCT weighted avg
-      M=13 Прочее с     SUMPRODUCT weighted avg
-      N=14 Итого с      =K+L+M (on this row)
-      O=15 Откл.%       =IFERROR(P / SUMPRODUCT((E>0)*E*D), "")
-      P=16 Откл.₽       =IFERROR(SUM(P_range), "")
-    """
-    s, e = data_start, data_end
-    r = row_num
-
-    def _c(col_idx, value, font=None, fmt=None, h="right"):
-        cell = ws.cell(row=r, column=col_idx, value=value)
-        cell.fill = fill
-        cell.font = font or data_font
-        cell.border = _BORDER
-        cell.alignment = _align(h=h)
-        if fmt:
-            cell.number_format = fmt
-        return cell
-
-    _c(1, label, font=label_font, h="left")
-    for ci in (2, 3):
-        _c(ci, None)
-    _c(4, f"=SUM(D{s}:D{e})", fmt=_FMT_QTY)
-    _c(5, None)   # Плановая — not averaged
-    _c(6, None)   # Ставка НДС — not averaged
-    _c(7,  f'=IFERROR(SUMPRODUCT(G{s}:G{e},D{s}:D{e})/SUM(D{s}:D{e}),"")', fmt=_FMT_MONEY)  # Бетон без НДС
-    _c(8,  f'=IFERROR(SUMPRODUCT(H{s}:H{e},D{s}:D{e})/SUM(D{s}:D{e}),"")', fmt=_FMT_MONEY)  # Доставка без НДС
-    _c(9,  f'=IFERROR(SUMPRODUCT(I{s}:I{e},D{s}:D{e})/SUM(D{s}:D{e}),"")', fmt=_FMT_MONEY)  # Прочее без НДС
-    _c(10, f"=G{r}+H{r}+I{r}", fmt=_FMT_MONEY)  # Итого без НДС
-    _c(11, f'=IFERROR(SUMPRODUCT(K{s}:K{e},D{s}:D{e})/SUM(D{s}:D{e}),"")', fmt=_FMT_MONEY)  # Бетон с НДС
-    _c(12, f'=IFERROR(SUMPRODUCT(L{s}:L{e},D{s}:D{e})/SUM(D{s}:D{e}),"")', fmt=_FMT_MONEY)  # Доставка с НДС
-    _c(13, f'=IFERROR(SUMPRODUCT(M{s}:M{e},D{s}:D{e})/SUM(D{s}:D{e}),"")', fmt=_FMT_MONEY)  # Прочее с НДС
-    _c(14, f"=K{r}+L{r}+M{r}", fmt=_FMT_MONEY)  # Итого с НДС
-    _c(16, f'=IFERROR(SUM(P{s}:P{e}),"")', font=_dev_font(dev_total_py, bold=True), fmt=_FMT_MONEY)
-    _c(15, f'=IFERROR(P{r}/SUMPRODUCT((E{s}:E{e}>0)*E{s}:E{e}*D{s}:D{e}),"")',
-       font=_dev_font(w_dev_py, bold=True), fmt=_FMT_PCT)
-
-    ws.row_dimensions[r].height = height
 
 
 def _write_grand_total_row(
@@ -172,10 +106,7 @@ def _write_grand_total_row(
     dev_total_py: float,
     w_dev_py: float,
 ) -> None:
-    """Write the class-level grand total row across multiple non-contiguous month data ranges.
-
-    Same 13-col layout as _write_subtotal_row, but uses multi-range SUMPRODUCT formulas.
-    """
+    """Write the class-level grand total row across multiple non-contiguous month data ranges."""
     r = row_num
 
     def _c(col_idx, value, font=None, fmt=None, h="right"):

@@ -711,9 +711,13 @@ def compute_export_rows(
         .all()
     )
 
+    ref_by_class: dict[int, list[ReferencePrice]] = {}
+    for rp in all_ref:
+        ref_by_class.setdefault(rp.material_class_id, []).append(rp)
+
     def _ref_price(class_id: int, inv_date: date) -> float | None:
-        for rp in all_ref:
-            if rp.material_class_id == class_id and rp.period_start <= inv_date <= rp.period_end:
+        for rp in ref_by_class.get(class_id, []):
+            if rp.period_start <= inv_date <= rp.period_end:
                 return rp.price
         return None
 
@@ -744,7 +748,7 @@ def compute_export_rows(
         total_per_m3 = mat_per_m3 + delivery_per_m3 + other_per_m3
 
         inv = invoice_map[inv_id]
-        vat_rate_decimal = (inv.vat_rate or 20.0) / 100.0
+        vat_rate_decimal = (inv.vat_rate if inv.vat_rate is not None else 20.0) / 100.0
         ref_price = _ref_price(cid, inv.date)
         deviation_pct = (
             round((total_per_m3 - ref_price) / ref_price * 100, 2)
