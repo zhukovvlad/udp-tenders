@@ -33,9 +33,15 @@ def _align(h: str = "left", v: str = "center", wrap: bool = False) -> Alignment:
 
 
 def _safe_str(v: object) -> object:
-    """Prevent formula injection: prefix strings starting with '=' with an apostrophe."""
-    if isinstance(v, str) and v.startswith("="):
-        return "'" + v
+    """Prevent Excel formula injection.
+
+    Excel may interpret cells starting with =, +, - or @ as formulas. For any string
+    whose first non-whitespace character is one of these, prefix an apostrophe.
+    """
+    if isinstance(v, str):
+        s = v.lstrip()
+        if s.startswith(("=", "+", "-", "@")):
+            return "'" + v
     return v
 
 
@@ -310,10 +316,10 @@ def _write_class_section(
             # Col 14 (N): Итого с НДС = K+L+M
             _dc(14, f"=K{n}+L{n}+M{n}")
             # Col 15 (O): Откл. %
-            _dc(15, f'=IFERROR((N{n}-E{n})/E{n},"")',
+            _dc(15, f'=IFERROR(IF(E{n}>0,(N{n}-E{n})/E{n},""),"")',
                 font=_dev_font(r["deviation_pct"]), fmt=_FMT_PCT)
             # Col 16 (P): Откл. ₽
-            _dc(16, f'=IFERROR((N{n}-E{n})*D{n},"")',
+            _dc(16, f'=IFERROR(IF(E{n}>0,(N{n}-E{n})*D{n},""),"")',
                 font=_dev_font(r["deviation_amount"]))
 
             ws.row_dimensions[cur].height = 16
