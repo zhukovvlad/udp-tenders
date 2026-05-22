@@ -100,7 +100,18 @@ export default function ProjectPage() {
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 0);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Не удалось сформировать отчёт");
+      // axios blob responses return error body as Blob — parse it to get backend detail
+      let message = "Не удалось сформировать отчёт";
+      try {
+        const blob = (err as { response?: { data?: unknown } })?.response?.data;
+        if (blob instanceof Blob) {
+          const json = JSON.parse(await blob.text()) as { detail?: unknown };
+          if (typeof json.detail === "string") message = json.detail;
+        }
+      } catch {
+        // ignore parse errors, keep generic message
+      }
+      toast.error(message);
     } finally {
       setIsExporting(false);
     }
