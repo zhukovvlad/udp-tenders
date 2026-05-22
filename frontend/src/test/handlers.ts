@@ -105,4 +105,15 @@ export const handlers = [
   http.post("/api/suppliers/:id/merge", () => HttpResponse.json({ id: 1, name: "ООО «ЭРКОН»", inn: "7723746396" })),
   http.get("/api/suppliers/:id/projects", () => HttpResponse.json(sampleSupplierProjectRows)),
   http.get("/api/suppliers/:id/invoices-list", () => HttpResponse.json(sampleSupplierInvoices)),
+
+  // Export
+  http.get("/api/export/excel", () =>
+    HttpResponse.arrayBuffer(new ArrayBuffer(8), {
+      headers: {
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": 'attachment; filename*=UTF-8\'\'%D0%BE%D1%82%D1%87%D1%91%D1%82.xlsx',
+      },
+    })
+  ),
 ];

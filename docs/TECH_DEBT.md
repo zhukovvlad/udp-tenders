@@ -78,6 +78,14 @@
   **Решение:** перенести логику deviation в один batched-запрос с GROUP BY supplier_id, project_id,
   переиспользовав агрегаты из основного SELECT и JOIN reference_prices.
 
+- [ ] **Excel-экспорт: только интеграционные тесты, нет unit-тестов для генерации workbook**
+  `routers/export.py` покрыт 18 интеграционными тестами (`tests/integration/test_export.py`),
+  которые проверяют и HTTP-слой, и структуру workbook. Чистую логику генерации Excel (формулы,
+  стили, заголовки) можно вынести в отдельную функцию без зависимости от БД и покрыть unit-тестами,
+  что ускорит CI и упростит отладку вёрстки файла.
+  **Решение:** извлечь `_build_workbook(rows, project, period) -> openpyxl.Workbook` в отдельную
+  функцию, написать unit-тесты на неё без TEST_DATABASE_URL.
+
 - [ ] **Pydantic response_model для роутера `/api/suppliers`**
   Эндпоинты `GET /suppliers`, `GET /{id}`, `GET /{id}/projects`, `GET /{id}/invoices-list` возвращают
   raw dict/list без `response_model=`, что нарушает соглашение кодовой базы и не генерирует OpenAPI-схему.

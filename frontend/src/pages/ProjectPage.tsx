@@ -54,6 +54,7 @@ import {
   useDeleteReferencePrice,
   useMaterialClasses,
 } from "@/services/queries";
+import { reportsApi } from "@/services/api/reports";
 import { useDebounce } from "@/lib/useDebounce";
 
 import { formatDate, formatMoney, formatNumber, formatPercent, pluralRu } from "@/lib/format";
@@ -71,6 +72,29 @@ export default function ProjectPage() {
 
   // ── upload sheet ──
   const [uploadOpen, setUploadOpen] = useState(false);
+
+  // ── export ──
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExport = async () => {
+    if (!projectId || isExporting) return;
+    setIsExporting(true);
+    try {
+      const blob = await reportsApi.excelBlob({
+        project_id: projectId,
+        period_start: periodStart || undefined,
+        period_end: periodEnd || undefined,
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `отчёт-${project?.name ?? projectId}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // ── calculation period filters ──
   const [periodStart, setPeriodStart] = useState("");
@@ -313,8 +337,13 @@ export default function ProjectPage() {
           }
           actions={
             <>
-              <Button variant="secondary" leftIcon={<Download size={14} />}>
-                Экспорт
+              <Button
+                variant="secondary"
+                leftIcon={<Download size={14} />}
+                onClick={handleExport}
+                disabled={isExporting}
+              >
+                {isExporting ? "Формирую..." : "Экспорт"}
               </Button>
               <Button
                 leftIcon={<Plus size={14} />}

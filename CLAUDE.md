@@ -37,7 +37,7 @@ just test-backend         # all pytest (~22s)
 just test-backend-unit    # unit only, no DB, ~1s
 just test-backend-integration  # requires TEST_DATABASE_URL
 
-just test-frontend        # vitest (66 tests, ~7s)
+just test-frontend        # vitest (75 tests, ~10s)
 just lint                 # ruff + eslint
 just typecheck-frontend   # tsc -b --noEmit
 just coverage-backend     # HTML → backend/htmlcov/index.html
@@ -98,6 +98,8 @@ Supplier → Invoices (one supplier, many projects)
 
 `GET /dashboard/calculations` вычисляет данные на лету (нет кеша) через `crud.compute_calculations()` — единый источник истины для аналитики цен. `compute_full_deviation()` делегирует в неё же.
 
+`GET /api/export/excel?project_id=&period_start=&period_end=&material_class_id=` генерирует openpyxl-файл через `crud.compute_export_rows()` → `routers/export.py`. Возвращает `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`. **16 колонок (A–P):** дата, номер СФ, поставщик, объём м³, плановая цена, ставка НДС, материал/доставка/прочее без НДС, итого без НДС (формула), те же три с НДС (формулы), итого с НДС (формула), откл. % и откл. ₽ (формулы). Месячные строки с агрегатами через SUMPRODUCT-формулы, разделители между месяцами, grand total на класс. Кнопка «Экспорт» в `ProjectPage.tsx` использует `periodStart`/`periodEnd` напрямую (не debounced) — правильно для действия по кнопке.
+
 ### Методология расчёта avg_price
 
 Средняя цена (`avg_price`) вычисляется **с НДС** — чтобы сравнение с плановыми ценами было корректным (плановые цены вводятся пользователем тоже с НДС).
@@ -149,6 +151,7 @@ deviation_amount = (avg_price − ref_price) × qty
 - All API calls via MSW v2 (`src/test/server.ts` + `src/test/handlers.ts`). `onUnhandledRequest: "error"` — add a handler for every new endpoint.
 - `renderWithProviders` from `src/test/utils.tsx` — wraps in QueryClient (retries=0), MemoryRouter, ThemeProvider.
 - New endpoint? Add to `handlers.ts` before writing the test.
+- Binary endpoints (blob/arraybuffer) must return `HttpResponse.arrayBuffer(...)` in MSW handlers, not `HttpResponse.json(...)`.
 
 ---
 
