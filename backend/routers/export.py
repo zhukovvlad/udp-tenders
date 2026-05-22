@@ -148,7 +148,7 @@ def _write_grand_total_row(
     _c(14, f"=K{r}+L{r}+M{r}", fmt=_FMT_MONEY)   # Итого с НДС
 
     sum_p = ",".join(f"P{s}:P{e}" for s, e in data_ranges)
-    _c(16, f'=IFERROR(SUM({sum_p}),"")', font=_dev_font(dev_total_py, bold=True, size=12), fmt=_FMT_MONEY)
+    _c(16, f'=IF(COUNT({sum_p})=0,"",SUM({sum_p}))', font=_dev_font(dev_total_py, bold=True, size=12), fmt=_FMT_MONEY)
 
     denom = "+".join(f"SUMPRODUCT((E{s}:E{e}>0)*E{s}:E{e}*D{s}:D{e})" for s, e in data_ranges)
     _c(15, f'=IFERROR(P{r}/({denom}),"")', font=_dev_font(dev_total_py, bold=True, size=12), fmt=_FMT_PCT)
@@ -261,7 +261,7 @@ def _write_class_section(
         _hc(12, f'=IFERROR(SUMPRODUCT(L{s}:L{e},D{s}:D{e})/SUM(D{s}:D{e}),"")', fmt=_FMT_MONEY)
         _hc(13, f'=IFERROR(SUMPRODUCT(M{s}:M{e},D{s}:D{e})/SUM(D{s}:D{e}),"")', fmt=_FMT_MONEY)
         _hc(14, f"=K{rh}+L{rh}+M{rh}", fmt=_FMT_MONEY)   # Итого с НДС
-        _hc(16, f'=IFERROR(SUM(P{s}:P{e}),"")', font=_dev_font(month_dev, bold=True), fmt=_FMT_MONEY)
+        _hc(16, f'=IF(COUNT(P{s}:P{e})=0,"",SUM(P{s}:P{e}))', font=_dev_font(month_dev, bold=True), fmt=_FMT_MONEY)
         _hc(15, f'=IFERROR(P{rh}/SUMPRODUCT((E{s}:E{e}>0)*E{s}:E{e}*D{s}:D{e}),"")',
             font=_dev_font(month_dev, bold=True), fmt=_FMT_PCT)
         ws.row_dimensions[rh].height = 18
