@@ -474,10 +474,10 @@ class TestExportEndpoint:
         assert "attachment" in cd
         assert ".xlsx" in cd
 
-    def test_unknown_project_returns_error_json(self, client):
+    def test_unknown_project_returns_404(self, client):
         resp = client.get("/api/export/excel?project_id=999999")
-        assert resp.status_code == 200
-        assert resp.json() == {"error": "Проект не найден"}
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Проект не найден"
 
     # ── No-data case ─────────────────────────────────────────────────────────
 

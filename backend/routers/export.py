@@ -3,7 +3,7 @@ from io import BytesIO
 from itertools import groupby
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -104,7 +104,6 @@ def _write_grand_total_row(
     data_font: Font,
     data_ranges: list[tuple[int, int]],
     dev_total_py: float,
-    w_dev_py: float,
 ) -> None:
     """Write the class-level grand total row across multiple non-contiguous month data ranges."""
     r = row_num
@@ -140,7 +139,7 @@ def _write_grand_total_row(
     _c(16, f'=IFERROR(SUM({sum_p}),"")', font=_dev_font(dev_total_py, bold=True, size=12), fmt=_FMT_MONEY)
 
     denom = "+".join(f"SUMPRODUCT((E{s}:E{e}>0)*E{s}:E{e}*D{s}:D{e})" for s, e in data_ranges)
-    _c(15, f'=IFERROR(P{r}/({denom}),"")', font=_dev_font(w_dev_py, bold=True, size=12), fmt=_FMT_PCT)
+    _c(15, f'=IFERROR(P{r}/({denom}),"")', font=_dev_font(dev_total_py, bold=True, size=12), fmt=_FMT_PCT)
 
     ws.row_dimensions[r].height = 24
 
@@ -164,8 +163,8 @@ def _write_class_section(
       [ИТОГО по <class>]
       (spacer)
 
-    Columns 1–8: static DB values.
-    Columns 9–11: Excel formulas (Итого = F+G+H; Откл.% = (I-E)/E; Откл.₽ = (I-E)*D).
+    Columns 1–9 (A–I): static DB values.
+    Columns 10–16 (J–P): Excel formulas (totals and deviations).
     Subtotal and grand-total rows also use SUMPRODUCT/SUM formulas.
     """
     cur = start_row
@@ -214,12 +213,6 @@ def _write_class_section(
             row["deviation_amount"] for row in month_rows
             if row["deviation_amount"] is not None
         )
-        month_rows_ref = [row for row in month_rows if row["deviation_pct"] is not None]
-        qty_ref_m = sum(row["qty"] for row in month_rows_ref)
-        w_dev_m = (
-            sum(row["deviation_pct"] * row["qty"] for row in month_rows_ref) / qty_ref_m
-            if qty_ref_m else 0
-        )
 
         hdr_fill = _fill(_C_MONTH_BG)
         hdr_font = _font(bold=True, color="1F4E79", size=11)
@@ -258,7 +251,7 @@ def _write_class_section(
         _hc(14, f"=K{rh}+L{rh}+M{rh}", fmt=_FMT_MONEY)   # Итого с НДС
         _hc(16, f'=IFERROR(SUM(P{s}:P{e}),"")', font=_dev_font(month_dev, bold=True), fmt=_FMT_MONEY)
         _hc(15, f'=IFERROR(P{rh}/SUMPRODUCT((E{s}:E{e}>0)*E{s}:E{e}*D{s}:D{e}),"")',
-            font=_dev_font(w_dev_m, bold=True), fmt=_FMT_PCT)
+            font=_dev_font(month_dev, bold=True), fmt=_FMT_PCT)
         ws.row_dimensions[rh].height = 18
         cur += 1
 
@@ -332,12 +325,6 @@ def _write_class_section(
 
     # ── Class grand total ────────────────────────────────────────────────────
     grand_dev = sum(r["deviation_amount"] for r in rows if r["deviation_amount"] is not None)
-    rows_ref = [r for r in rows if r["deviation_pct"] is not None]
-    qty_ref_all = sum(r["qty"] for r in rows_ref)
-    w_dev_all = (
-        sum(r["deviation_pct"] * r["qty"] for r in rows_ref) / qty_ref_all
-        if qty_ref_all else 0
-    )
     _write_grand_total_row(
         ws, cur,
         label=f"ИТОГО по {class_name}",
@@ -346,7 +333,6 @@ def _write_class_section(
         data_font=_font(bold=True, color="1F4E79", size=12),
         data_ranges=data_ranges,
         dev_total_py=grand_dev,
-        w_dev_py=w_dev_all,
     )
     cur += 1
 
@@ -369,7 +355,7 @@ def export_excel(
 ):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
-        return {"error": "Проект не найден"}
+        raise HTTPException(status_code=404, detail="Проект не найден")
 
     rows = crud.compute_export_rows(db, project_id, period_start, period_end, material_class_id)
 
@@ -455,8 +441,8 @@ def export_excel(
     wb.save(output)
     output.seek(0)
 
-    safe_name = project.name.replace("/", "-").replace("\\", "-")
-    filename = f"отчёт_{safe_name}_{display_start}_{display_end}.xlsx"
+    safe_name = "".join("-" if ch in "\\/" + ':*?"<>|\r\n' else ch for ch in project.name).strip(" .-")
+    filename = f"отчёт_{safe_name or project.id}_{display_start}_{display_end}.xlsx"
     encoded = quote(filename)
 
     return StreamingResponse(
