@@ -322,7 +322,7 @@ describe("ProjectPage", () => {
     const origCreateObjectURL = URL.createObjectURL;
 
     try {
-      URL.createObjectURL = (_blob: Blob) => "blob:fake";
+      URL.createObjectURL = (_blob: Blob) => "blob:fake"; // eslint-disable-line @typescript-eslint/no-unused-vars
 
       const realBlob = globalThis.Blob;
       const capturedBlobPartsRef = capturedBlobParts;
@@ -511,5 +511,164 @@ describe("ProjectPage", () => {
     await waitFor(() => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
+  });
+
+  // ── Excel export ────────────────────────────────────────────────────────
+
+  it("renders an Экспорт button", async () => {
+    renderProject();
+    const btn = await screen.findByRole("button", { name: /экспорт/i });
+    expect(btn).toBeInTheDocument();
+  });
+
+  it("Экспорт button is enabled on load", async () => {
+    renderProject();
+    const btn = await screen.findByRole("button", { name: /экспорт/i });
+    expect(btn).not.toBeDisabled();
+  });
+
+  it("clicking Экспорт calls GET /api/export/excel with project_id", async () => {
+    const requests: Request[] = [];
+    server.use(
+      http.get("/api/export/excel", ({ request }) => {
+        requests.push(request);
+        return HttpResponse.arrayBuffer(new ArrayBuffer(8), {
+          headers: {
+            "Content-Type":
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "Content-Disposition": "attachment; filename*=UTF-8''%D0%BE%D1%82%D1%87%D1%91%D1%82.xlsx",
+          },
+        });
+      })
+    );
+
+    const origCreateObjectURL = URL.createObjectURL;
+    const anchorClicks: { href: string; download: string }[] = [];
+    const origCreateElement = document.createElement.bind(document);
+
+    try {
+      URL.createObjectURL = () => "blob:fake-xlsx";
+      vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+        const el = origCreateElement(tag);
+        if (tag === "a") {
+          vi.spyOn(el as HTMLAnchorElement, "click").mockImplementation(() => {
+            anchorClicks.push({
+              href: (el as HTMLAnchorElement).href,
+              download: (el as HTMLAnchorElement).download,
+            });
+          });
+        }
+        return el;
+      });
+
+      const user = userEvent.setup();
+      renderProject();
+
+      const btn = await screen.findByRole("button", { name: /экспорт/i });
+      await user.click(btn);
+
+      await waitFor(() => expect(requests).toHaveLength(1));
+
+      const url = new URL(requests[0].url);
+      expect(url.searchParams.get("project_id")).toBe("1");
+      expect(anchorClicks).toHaveLength(1);
+      expect(anchorClicks[0].download).toMatch(/отчёт.*\.xlsx$/);
+    } finally {
+      URL.createObjectURL = origCreateObjectURL;
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("Экспорт button shows Формирую... while request is in flight", async () => {
+    let resolve!: () => void;
+    const pending = new Promise<void>((res) => { resolve = res; });
+
+    server.use(
+      http.get("/api/export/excel", async () => {
+        await pending;
+        return HttpResponse.arrayBuffer(new ArrayBuffer(8), {
+          headers: {
+            "Content-Type":
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "Content-Disposition": "attachment; filename*=UTF-8''test.xlsx",
+          },
+        });
+      })
+    );
+
+    const origCreateObjectURL = URL.createObjectURL;
+    URL.createObjectURL = () => "blob:fake";
+    const origCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tag) => {
+      const el = origCreateElement(tag);
+      if (tag === "a") vi.spyOn(el as HTMLAnchorElement, "click").mockImplementation(() => {});
+      return el;
+    });
+
+    try {
+      const user = userEvent.setup();
+      renderProject();
+
+      const btn = await screen.findByRole("button", { name: /экспорт/i });
+      await user.click(btn);
+
+      // While request is in-flight
+      expect(await screen.findByRole("button", { name: /формирую/i })).toBeDisabled();
+
+      resolve();
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /экспорт/i })).not.toBeDisabled()
+      );
+    } finally {
+      URL.createObjectURL = origCreateObjectURL;
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("clicking Экспорт passes period_start and period_end when inputs are filled", async () => {
+    const requests: Request[] = [];
+    server.use(
+      http.get("/api/export/excel", ({ request }) => {
+        requests.push(request);
+        return HttpResponse.arrayBuffer(new ArrayBuffer(8), {
+          headers: {
+            "Content-Type":
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "Content-Disposition": "attachment; filename*=UTF-8''test.xlsx",
+          },
+        });
+      })
+    );
+
+    const origCreateObjectURL = URL.createObjectURL;
+    const origCreateElement = document.createElement.bind(document);
+    try {
+      URL.createObjectURL = () => "blob:fake";
+      vi.spyOn(document, "createElement").mockImplementation((tag) => {
+        const el = origCreateElement(tag);
+        if (tag === "a") vi.spyOn(el as HTMLAnchorElement, "click").mockImplementation(() => {});
+        return el;
+      });
+
+      const user = userEvent.setup();
+      renderProject();
+
+      const startInput = await screen.findByTestId("period-start-input");
+      const endInput = screen.getByTestId("period-end-input");
+      await user.type(startInput, "2026-03-01");
+      await user.type(endInput, "2026-03-31");
+
+      const btn = screen.getByRole("button", { name: /экспорт/i });
+      await user.click(btn);
+
+      await waitFor(() => expect(requests).toHaveLength(1));
+      const params = new URL(requests[0].url).searchParams;
+      expect(params.get("period_start")).toBe("2026-03-01");
+      expect(params.get("period_end")).toBe("2026-03-31");
+    } finally {
+      URL.createObjectURL = origCreateObjectURL;
+      vi.restoreAllMocks();
+    }
   });
 });

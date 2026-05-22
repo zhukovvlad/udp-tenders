@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Download, Plus, Trash2, Pencil } from "lucide-react";
@@ -54,6 +55,7 @@ import {
   useDeleteReferencePrice,
   useMaterialClasses,
 } from "@/services/queries";
+import { reportsApi } from "@/services/api/reports";
 import { useDebounce } from "@/lib/useDebounce";
 
 import { formatDate, formatMoney, formatNumber, formatPercent, pluralRu } from "@/lib/format";
@@ -71,6 +73,49 @@ export default function ProjectPage() {
 
   // ── upload sheet ──
   const [uploadOpen, setUploadOpen] = useState(false);
+
+  // ── export ──
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExport = async () => {
+    if (!projectId || isExporting) return;
+    setIsExporting(true);
+    try {
+      const blob = await reportsApi.excelBlob({
+        project_id: projectId,
+        period_start: periodStart || undefined,
+        period_end: periodEnd || undefined,
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safeName = String(project?.name ?? projectId)
+        .replace(/[\\/:*?"<>|\r\n]/g, "-")
+        .trim()
+        .replace(/^[ .-]+|[ .-]+$/g, "");
+      const periodSuffix = periodStart || periodEnd ? `_${periodStart || ""}–${periodEnd || ""}` : "";
+      a.download = `отчёт-${safeName || projectId}${periodSuffix}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL?.(url), 0);
+    } catch (err) {
+      // axios blob responses return error body as Blob — parse it to get backend detail
+      let message = "Не удалось сформировать отчёт";
+      try {
+        const blob = (err as { response?: { data?: unknown } })?.response?.data;
+        if (blob instanceof Blob) {
+          const json = JSON.parse(await blob.text()) as { detail?: unknown };
+          if (typeof json.detail === "string") message = json.detail;
+        }
+      } catch {
+        // ignore parse errors, keep generic message
+      }
+      toast.error(message);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // ── calculation period filters ──
   const [periodStart, setPeriodStart] = useState("");
@@ -313,8 +358,13 @@ export default function ProjectPage() {
           }
           actions={
             <>
-              <Button variant="secondary" leftIcon={<Download size={14} />}>
-                Экспорт
+              <Button
+                variant="secondary"
+                leftIcon={<Download size={14} />}
+                onClick={handleExport}
+                disabled={isExporting}
+              >
+                {isExporting ? "Формирую..." : "Экспорт"}
               </Button>
               <Button
                 leftIcon={<Plus size={14} />}

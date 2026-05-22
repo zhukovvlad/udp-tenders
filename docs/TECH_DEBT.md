@@ -52,6 +52,12 @@
   **Решение:** заменить на focusable-компонент с `aria-describedby` или отдельный tooltip-компонент,
   либо вынести значения в видимый текст.
 
+- [ ] **Дублирование blob-download паттерна в трёх местах**
+  `ProjectPage.tsx` (xlsx-экспорт), `MonthlyTab.tsx` (CSV) и `Reports.tsx` используют одинаковую
+  последовательность: `createObjectURL` → `appendChild(a)` → `click()` → `removeChild(a)` → `revokeObjectURL`.
+  Реализации немного расходятся (синхронный vs async revoke, санитизация имени файла).
+  **Решение:** вынести в хелпер `src/lib/downloadBlob.ts(blob, filename)` и обновить все три вызывающих.
+
 - [ ] **Suppliers / SupplierPage: строки таблиц кликабельны только мышью**
   `TableRow onClick={() => navigate(...)}` в `Suppliers.tsx` и `SupplierPage.tsx` не работает с клавиатурой.
   Это cross-cutting concern: тот же паттерн используется в `ProjectPage`, `InvoiceTable` и др.
@@ -77,6 +83,14 @@
   Для поставщика на N объектах — N × ~5 SQL-запросов. При ≥20 объектах становится заметным.
   **Решение:** перенести логику deviation в один batched-запрос с GROUP BY supplier_id, project_id,
   переиспользовав агрегаты из основного SELECT и JOIN reference_prices.
+
+- [ ] **Excel-экспорт: только интеграционные тесты, нет unit-тестов для генерации workbook**
+  `routers/export.py` покрыт интеграционными тестами (`tests/integration/test_export.py`),
+  которые проверяют и HTTP-слой, и структуру workbook. Чистую логику генерации Excel (формулы,
+  стили, заголовки) можно вынести в отдельную функцию без зависимости от БД и покрыть unit-тестами,
+  что ускорит CI и упростит отладку вёрстки файла.
+  **Решение:** извлечь `_build_workbook(rows, project, period) -> openpyxl.Workbook` в отдельную
+  функцию, написать unit-тесты на неё без TEST_DATABASE_URL.
 
 - [ ] **Pydantic response_model для роутера `/api/suppliers`**
   Эндпоинты `GET /suppliers`, `GET /{id}`, `GET /{id}/projects`, `GET /{id}/invoices-list` возвращают
