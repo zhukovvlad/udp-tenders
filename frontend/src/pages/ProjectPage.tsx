@@ -89,8 +89,12 @@ export default function ProjectPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      const safeName = String(project?.name ?? projectId).replace(/[\\/:*?"<>|]/g, "-");
-      a.download = `отчёт-${safeName}.xlsx`;
+      const safeName = String(project?.name ?? projectId)
+        .replace(/[\\/:*?"<>|\r\n]/g, "-")
+        .trim()
+        .replace(/^[ .-]+|[ .-]+$/g, "");
+      const periodSuffix = periodStart || periodEnd ? `_${periodStart || ""}–${periodEnd || ""}` : "";
+      a.download = `отчёт-${safeName || projectId}${periodSuffix}.xlsx`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
