@@ -98,7 +98,7 @@ export default function ProjectPage() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 0);
+      setTimeout(() => URL.revokeObjectURL?.(url), 0);
     } catch (err) {
       // axios blob responses return error body as Blob — parse it to get backend detail
       let message = "Не удалось сформировать отчёт";

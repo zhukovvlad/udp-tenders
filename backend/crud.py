@@ -704,6 +704,8 @@ def compute_export_rows(
         .filter(
             ReferencePrice.project_id == project_id,
             ReferencePrice.material_class_id.in_(class_ids),
+            ReferencePrice.period_end >= period_start,
+            ReferencePrice.period_start <= period_end,
         )
         .order_by(
             ReferencePrice.material_class_id,
