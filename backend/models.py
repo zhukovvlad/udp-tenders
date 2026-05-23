@@ -48,7 +48,7 @@ class Organization(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     inn = Column(String, nullable=True, index=True)
-    created_at = Column(DateTime, server_default=sa_text("now()"))
+    created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
 
     users = relationship("User", back_populates="organization")
     project_links = relationship("ProjectOrganization", back_populates="organization")
@@ -70,7 +70,7 @@ class User(Base):
         nullable=True,
     )
     is_active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(DateTime, server_default=sa_text("now()"))
+    created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
 
     organization = relationship("Organization", back_populates="users")
     refresh_tokens = relationship(
@@ -88,7 +88,7 @@ class ProjectOrganization(Base):
         SqlEnum(ProjectRole, name="project_role", native_enum=False),
         nullable=False,
     )
-    created_at = Column(DateTime, server_default=sa_text("now()"))
+    created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
 
     project = relationship("Project", back_populates="org_links")
     organization = relationship("Organization", back_populates="project_links")
@@ -107,7 +107,7 @@ class RefreshToken(Base):
     token_hash = Column(String, nullable=False, unique=True)  # unique уже создаёт индекс в PG
     expires_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, server_default=sa_text("now()"))
+    created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
     user_agent = Column(String, nullable=True)
     ip_address = Column(String, nullable=True)
 

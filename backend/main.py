@@ -98,9 +98,9 @@ app.include_router(auth_router.router)
 # Список зависимостей для бизнес-роутеров
 _auth_dep = [Depends(get_current_user)]
 
-# Admin и org-management — авторизация + проверка роли внутри роутера
-app.include_router(admin_router.router, dependencies=_auth_dep)
-app.include_router(orgs_router.router, dependencies=_auth_dep)
+# Admin и org-management — авторизация + проверка роли на каждом endpoint внутри роутера
+app.include_router(admin_router.router)
+app.include_router(orgs_router.router)
 
 # Бизнес-роутеры — требуют валидного access-токена
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"], dependencies=_auth_dep)
