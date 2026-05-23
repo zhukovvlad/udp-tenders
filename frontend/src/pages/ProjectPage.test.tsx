@@ -2,10 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { Routes, Route } from "react-router-dom";
+import { Link, Routes, Route, useParams } from "react-router-dom";
 import { renderWithProviders } from "@/test/utils";
 import { server } from "@/test/server";
-import { sampleReferencePrice, sampleDashboardInvoices } from "@/test/fixtures";
+import { sampleProject, sampleReferencePrice, sampleDashboardInvoices } from "@/test/fixtures";
 import ProjectPage from "./ProjectPage";
 
 // MSW handlers provide:
@@ -670,5 +670,47 @@ describe("ProjectPage", () => {
       URL.createObjectURL = origCreateObjectURL;
       vi.restoreAllMocks();
     }
+  });
+
+  // ── Key-based remount ───────────────────────────────────────────────────
+
+  it("active tab resets to overview when navigating to a different project (ProjectPageWrapper remount)", async () => {
+    const user = userEvent.setup();
+
+    const project2 = { ...sampleProject, id: 2, name: "ЖК Тестовый-2" };
+    server.use(
+      http.get("/api/projects", () => HttpResponse.json([sampleProject, project2])),
+    );
+
+    // Replicates App.tsx ProjectPageWrapper: key={id} causes full remount on route change.
+    function ProjectPageKeyed() {
+      const { id } = useParams<{ id: string }>();
+      return <ProjectPage key={id} />;
+    }
+
+    renderWithProviders(
+      <>
+        <Link to="/projects/2" data-testid="nav-p2">P2</Link>
+        <Routes>
+          <Route path="/projects/:id" element={<ProjectPageKeyed />} />
+        </Routes>
+      </>,
+      { initialRoute: "/projects/1" },
+    );
+
+    // Switch to invoices tab
+    const invoicesTab = await screen.findByTestId("project-tab-invoices");
+    await user.click(invoicesTab);
+    await waitFor(() => {
+      expect(invoicesTab).toHaveAttribute("aria-selected", "true");
+    });
+
+    // Navigate to a different project — ProjectPageKeyed remounts ProjectPage with fresh state
+    await user.click(screen.getByTestId("nav-p2"));
+
+    // Overview tab must be active — useState("overview") re-initialised on remount
+    await waitFor(() => {
+      expect(screen.getByTestId("project-tab-overview")).toHaveAttribute("aria-selected", "true");
+    });
   });
 });

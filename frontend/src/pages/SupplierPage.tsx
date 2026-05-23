@@ -83,8 +83,11 @@ function EditSupplierDialog({
   const updateMut = useUpdateSupplier();
   const mergeMut = useMergeSupplier();
 
+  const isBusy = updateMut.isPending || mergeMut.isPending;
+
   function handleOpenChange(v: boolean) {
     if (!v) {
+      if (isBusy) return; // block close while mutation is in-flight
       setFieldError(null);
       setConflict(null);
       onClose();
@@ -134,8 +137,6 @@ function EditSupplierDialog({
       setConflict(null);
     }
   }
-
-  const isBusy = updateMut.isPending || mergeMut.isPending;
 
   // ── merge confirmation screen ──────────────────────────────────
   if (conflict) {
@@ -540,7 +541,7 @@ function TabSkeleton() {
 
 // ─── Main page ───────────────────────────────────────────────────
 
-export default function SupplierPage() {
+function SupplierPageContent() {
   const { id } = useParams<{ id: string }>();
   const supplierId = (() => {
     const parsed = Number(id);
@@ -548,6 +549,7 @@ export default function SupplierPage() {
   })();
 
   const [editOpen, setEditOpen] = useState(false);
+  const [editNonce, setEditNonce] = useState(0);
 
   const detailQ = useSupplierDetail(supplierId);
   const projectsQ = useSupplierProjects(supplierId);
@@ -584,7 +586,7 @@ export default function SupplierPage() {
                 variant="secondary"
                 size="md"
                 leftIcon={<Pencil size={14} />}
-                onClick={() => setEditOpen(true)}
+                onClick={() => { setEditOpen(true); setEditNonce((n) => n + 1); }}
                 disabled={!supplier}
               >
                 Редактировать
@@ -650,7 +652,7 @@ export default function SupplierPage() {
 
       {supplierId && supplier && (
         <EditSupplierDialog
-          key={editOpen ? supplierId : "closed"}
+          key={editNonce}
           open={editOpen}
           onClose={() => setEditOpen(false)}
           supplierId={supplierId}
@@ -662,3 +664,11 @@ export default function SupplierPage() {
   );
 }
 
+/**
+ * key={id} пересоздаёт компонент при переходе между поставщиками,
+ * сбрасывая editOpen и активную вкладку автоматически.
+ */
+export default function SupplierPage() {
+  const { id } = useParams<{ id: string }>();
+  return <SupplierPageContent key={id} />;
+}
