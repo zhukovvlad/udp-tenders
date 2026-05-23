@@ -53,7 +53,7 @@ export default function Suppliers() {
   const [categoryFilter, setCategoryFilter] = useState<string>("__all__");
   const [sort, setSort] = useState<SortKey>("turnover");
 
-  const suppliers = suppliersQ.data ?? [];
+  const suppliers = useMemo(() => suppliersQ.data ?? [], [suppliersQ.data]);
 
   // Все уникальные категории для фильтра
   const allCategories = useMemo(() => {

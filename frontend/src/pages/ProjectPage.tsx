@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Download, Plus, Trash2, Pencil } from "lucide-react";
 
@@ -129,14 +129,6 @@ export default function ProjectPage() {
   // ── invoice month filter (set when navigating from «По месяцам» tab) ──
   const [invoiceMonthFilter, setInvoiceMonthFilter] = useState<{ year: number; month: number } | null>(null);
 
-  // Reset per-project state when projectId changes (same component instance, different route).
-  useEffect(() => {
-    setInvoiceMonthFilter(null);
-    setActiveTab("overview");
-    setPeriodStart("");
-    setPeriodEnd("");
-  }, [projectId]);
-
   // ── reference price dialog ──
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   const [rpClassId, setRpClassId] = useState<string>("");
@@ -181,8 +173,8 @@ export default function ProjectPage() {
   const deleteRefPrice = useDeleteReferencePrice();
 
   // ── derived ──
-  const calculations = calculationsQ.data ?? [];
-  const invoices = invoicesQ.data ?? [];
+  const calculations = useMemo(() => calculationsQ.data ?? [], [calculationsQ.data]);
+  const invoices = useMemo(() => invoicesQ.data ?? [], [invoicesQ.data]);
   const referencePrices = referencePricesQ.data ?? [];
   const materialClasses = materialClassesQ.data ?? [];
 

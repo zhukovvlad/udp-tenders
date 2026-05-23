@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { Download, Lightbulb, Pencil } from "lucide-react";
 import axios from "axios";
@@ -79,16 +79,6 @@ function EditSupplierDialog({
 
   // second-step state: merge confirmation
   const [conflict, setConflict] = useState<InnConflict | null>(null);
-
-  // Сброс стейта при каждом открытии (иначе прошлые черновики остаются).
-  useEffect(() => {
-    if (open) {
-      setName(initialName);
-      setInn(initialInn ?? "");
-      setFieldError(null);
-      setConflict(null);
-    }
-  }, [open, initialName, initialInn]);
 
   const updateMut = useUpdateSupplier();
   const mergeMut = useMergeSupplier();
@@ -660,6 +650,7 @@ export default function SupplierPage() {
 
       {supplierId && supplier && (
         <EditSupplierDialog
+          key={editOpen ? supplierId : "closed"}
           open={editOpen}
           onClose={() => setEditOpen(false)}
           supplierId={supplierId}
