@@ -48,7 +48,13 @@ interface RenderWithProvidersOptions extends Omit<RenderOptions, "wrapper"> {
   /**
    * Предзаполнить кэш `currentUser`.
    * - По умолчанию: DEFAULT_TEST_USER (org admin).
-   * - null — симулировать неавторизованный сценарий (кэш пуст, ProtectedRoute редиректнет).
+   * - null — кэш остаётся пустым, `useCurrentUser()` сделает запрос `/api/auth/me`.
+   *   MSW-хендлер по умолчанию возвращает валидного пользователя, поэтому редиректа
+   *   НЕ будет. Чтобы протестировать неавторизованный сценарий, переопределите
+   *   хендлер в тесте:
+   *   ```ts
+   *   server.use(http.get("/api/auth/me", () => new HttpResponse(null, { status: 401 })));
+   *   ```
    */
   initialUser?: User | null;
 }

@@ -1,5 +1,6 @@
 import logging
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,13 +21,19 @@ from routers import orgs as orgs_router
 from routers import settings as settings_router
 from s3 import ensure_bucket
 
-try:
-    ensure_bucket()
-    logger.info("MinIO bucket готов")
-except Exception as e:
-    logger.warning(f"MinIO недоступен при старте: {e}")
 
-app = FastAPI(title="УПД Трекер цен", version="2.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Инициализация при старте приложения (не при импорте модуля)."""
+    try:
+        ensure_bucket()
+        logger.info("MinIO bucket готов")
+    except Exception as e:
+        logger.warning(f"MinIO недоступен при старте: {e}")
+    yield
+
+
+app = FastAPI(title="УПД Трекер цен", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
