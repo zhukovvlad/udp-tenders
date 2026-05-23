@@ -3,6 +3,8 @@ import { render, type RenderOptions } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
+import { CURRENT_USER_QUERY_KEY } from "@/hooks/useAuth";
+import type { User } from "@/types/auth";
 
 export function createTestQueryClient(): QueryClient {
   return new QueryClient({
@@ -12,6 +14,16 @@ export function createTestQueryClient(): QueryClient {
     },
   });
 }
+
+/** Дефолтный пользователь для тестов — org admin. */
+const DEFAULT_TEST_USER: User = {
+  id: 1,
+  email: "test@example.com",
+  org_id: 1,
+  org_role: "admin",
+  is_superuser: false,
+  organization: { id: 1, name: "Тест Орг", inn: null },
+};
 
 interface WrapperProps {
   children: ReactNode;
@@ -30,17 +42,36 @@ export function AllProviders({ children, queryClient, initialRoute = "/" }: Wrap
   );
 }
 
+interface RenderWithProvidersOptions extends Omit<RenderOptions, "wrapper"> {
+  initialRoute?: string;
+  queryClient?: QueryClient;
+  /**
+   * Предзаполнить кэш `currentUser`.
+   * - По умолчанию: DEFAULT_TEST_USER (org admin).
+   * - null — симулировать неавторизованный сценарий (кэш пуст, ProtectedRoute редиректнет).
+   */
+  initialUser?: User | null;
+}
+
 export function renderWithProviders(
   ui: ReactElement,
-  options?: { initialRoute?: string; queryClient?: QueryClient } & Omit<RenderOptions, "wrapper">
+  options: RenderWithProvidersOptions = {}
 ) {
-  const { initialRoute, queryClient, ...rest } = options ?? {};
+  const { initialRoute, queryClient: qcFromOptions, initialUser = DEFAULT_TEST_USER, ...rest } = options;
+  const qc = qcFromOptions ?? createTestQueryClient();
+
+  // Предзаполняем кэш currentUser — ProtectedRoute не будет делать реальный запрос
+  if (initialUser !== null) {
+    qc.setQueryData(CURRENT_USER_QUERY_KEY, initialUser);
+  }
+
   return render(ui, {
     wrapper: ({ children }) => (
-      <AllProviders queryClient={queryClient} initialRoute={initialRoute}>
+      <AllProviders queryClient={qc} initialRoute={initialRoute}>
         {children}
       </AllProviders>
     ),
     ...rest,
   });
 }
+

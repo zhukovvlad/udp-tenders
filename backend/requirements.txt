@@ -9,3 +9,8 @@ boto3==1.35.0
 psycopg[binary]==3.2.13
 alembic==1.14.1
 pgvector==0.4.2
+pyjwt>=2.8.0
+pwdlib[argon2]>=0.2.1
+pydantic-settings>=2.5.0
+pydantic[email]>=2.0.0
+click>=8.1.0

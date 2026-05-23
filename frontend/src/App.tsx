@@ -1,19 +1,21 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { Toaster, toast } from "sonner";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AppShell } from "@/components/layout/AppShell";
+import { useCurrentUser } from "@/hooks/useAuth";
 import Dashboard from "@/pages/Dashboard";
-import Projects from "@/pages/Projects";
-import ProjectPage from "@/pages/ProjectPage";
-import Suppliers from "@/pages/Suppliers";
-import SupplierPage from "@/pages/SupplierPage";
-import Materials from "@/pages/Materials";
+import LoginPage from "@/pages/LoginPage";
 import MaterialPage from "@/pages/MaterialPage";
+import Materials from "@/pages/Materials";
+import ProjectPage from "@/pages/ProjectPage";
+import Projects from "@/pages/Projects";
 import Reports from "@/pages/Reports";
-import SettingsPage from "@/pages/Settings";
 import Review from "@/pages/Review";
+import SettingsPage from "@/pages/Settings";
+import SupplierPage from "@/pages/SupplierPage";
+import Suppliers from "@/pages/Suppliers";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -26,29 +28,51 @@ const queryClient = new QueryClient({
   },
 });
 
+/**
+ * Guard-компонент: проверяет наличие авторизованного пользователя.
+ * Пока идёт загрузка — ничего не рендерим (избегаем мигания).
+ * При ошибке или отсутствии user — редирект на /login.
+ */
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { data: user, isLoading, isError } = useCurrentUser();
+  if (isLoading) return null;
+  if (isError || !user) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <ThemeProvider attribute="data-theme" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <Routes>
-            <Route element={<AppShell />}>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/projects" element={<Projects />} />
-              <Route path="/projects/:id" element={<ProjectPage />} />
-              <Route path="/suppliers" element={<Suppliers />} />
-              <Route path="/suppliers/:id" element={<SupplierPage />} />
-              <Route path="/materials" element={<Materials />} />
-              <Route path="/materials/:id" element={<MaterialPage />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/documents/:id" element={<Review />} />
-              <Route path="/upload" element={<Navigate to="/projects" replace />} />
-              <Route path="/material-classes" element={<Navigate to="/materials" replace />} />
-              <Route path="/reference-prices" element={<Navigate to="/projects" replace />} />
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Route>
+            <Route path="/login" element={<LoginPage />} />
+            <Route
+              path="/*"
+              element={
+                <ProtectedRoute>
+                  <Routes>
+                    <Route element={<AppShell />}>
+                      <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                      <Route path="/dashboard" element={<Dashboard />} />
+                      <Route path="/projects" element={<Projects />} />
+                      <Route path="/projects/:id" element={<ProjectPage />} />
+                      <Route path="/suppliers" element={<Suppliers />} />
+                      <Route path="/suppliers/:id" element={<SupplierPage />} />
+                      <Route path="/materials" element={<Materials />} />
+                      <Route path="/materials/:id" element={<MaterialPage />} />
+                      <Route path="/reports" element={<Reports />} />
+                      <Route path="/settings" element={<SettingsPage />} />
+                      <Route path="/documents/:id" element={<Review />} />
+                      <Route path="/upload" element={<Navigate to="/projects" replace />} />
+                      <Route path="/material-classes" element={<Navigate to="/materials" replace />} />
+                      <Route path="/reference-prices" element={<Navigate to="/projects" replace />} />
+                      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                    </Route>
+                  </Routes>
+                </ProtectedRoute>
+              }
+            />
           </Routes>
         </BrowserRouter>
         <Toaster richColors position="top-right" />
@@ -56,3 +80,4 @@ export default function App() {
     </ThemeProvider>
   );
 }
+

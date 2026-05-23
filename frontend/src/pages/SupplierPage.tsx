@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { Download, Lightbulb, Pencil } from "lucide-react";
 import axios from "axios";
@@ -77,18 +77,21 @@ function EditSupplierDialog({
   const [inn, setInn] = useState(initialInn ?? "");
   const [fieldError, setFieldError] = useState<string | null>(null);
 
-  // second-step state: merge confirmation — объявляется до useEffect, который его использует
+  // second-step state: merge confirmation
   const [conflict, setConflict] = useState<InnConflict | null>(null);
 
-  // Сброс стейта при каждом открытии (иначе прошлые черновики остаются)
-  useEffect(() => {
-    if (open) {
-      setName(initialName);
-      setInn(initialInn ?? "");
-      setFieldError(null);
-      setConflict(null);
-    }
-  }, [open, initialName, initialInn]);
+  // Сброс стейта при каждом открытии (иначе прошлые черновики остаются).
+  // "setState during render" — React-approved alternative to useEffect+setState.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open && open) {
+    setPrevOpen(open);
+    setName(initialName);
+    setInn(initialInn ?? "");
+    setFieldError(null);
+    setConflict(null);
+  } else if (prevOpen !== open) {
+    setPrevOpen(open);
+  }
 
   const updateMut = useUpdateSupplier();
   const mergeMut = useMergeSupplier();

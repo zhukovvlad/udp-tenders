@@ -99,6 +99,14 @@ db-test-migrate:
 
 # === Misc ===
 
+# Создать суперюзера системы (интерактивный ввод пароля)
+create-superuser email:
+    cd backend && python -m cli create-superuser --email {{email}}
+
+# Создать организацию
+create-org name:
+    cd backend && python -m cli create-org --name "{{name}}"
+
 clean:
     rm -rf backend/.pytest_cache backend/htmlcov backend/.coverage backend/coverage.xml
     find backend -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

@@ -12,7 +12,8 @@ Target user: тендерный менеджер (procurement/tender manager) in
 
 | Layer | Technology |
 |---|---|
-| Backend | Python 3.12+, FastAPI, SQLAlchemy (sync), Alembic |
+| Backend | Python 3.12+, FastAPI, SQLAlchemy (sync), Alembic, pydantic-settings |
+| Auth | pyjwt (HS256), pwdlib[argon2] — httpOnly cookies, double-submit CSRF, refresh token rotation |
 | Database | PostgreSQL via **Neon** (serverless) — `postgresql+psycopg://` DSN |
 | File storage | MinIO (S3-compatible), local binary `minio.exe` |
 | PDF parsing | OpenRouter API (`OPENROUTER_API_KEY`) — Mistral OCR / Claude Vision |
@@ -42,6 +43,8 @@ just lint                 # ruff + eslint
 just typecheck-frontend   # tsc -b --noEmit
 just coverage-backend     # HTML → backend/htmlcov/index.html
 just db-migrate           # alembic upgrade head
+just create-superuser     # python -m cli create-superuser (interactive)
+just create-org           # python -m cli create-org (interactive)
 ```
 
 Shell on Windows: Git bash at `C:\Program Files\Git\bin\bash.exe`. Invoke as:
@@ -55,14 +58,19 @@ All scripts use Unix syntax.
 ```
 UDP/
 ├── backend/
-│   ├── main.py           — FastAPI app, CORS, routers, middleware
-│   ├── models.py         — ORM models (Project, Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice, Supplier)
+│   ├── main.py           — FastAPI app, CORS, routers, middleware, CSRF middleware
+│   ├── config.py         — pydantic-settings Settings (single source of truth for env vars)
+│   ├── models.py         — ORM models (Project, Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice, Supplier, Organization, User, ProjectOrganization, RefreshToken)
 │   ├── crud.py           — DB operations, compute_calculations, supplier aggregates
+│   ├── security.py       — pure crypto helpers: hash_password, JWT encode/decode, refresh token, CSRF
+│   ├── auth.py           — FastAPI auth dependencies: get_current_user, require_csrf, ProjectAccess
+│   ├── cli.py            — Click CLI: create-superuser, create-org, create-user
 │   ├── pdf_parser.py     — OpenRouter API parsing
 │   ├── s3.py             — MinIO helpers
-│   ├── routers/          — projects, invoices, dashboard, export, material_classes, reference_prices, settings, suppliers
+│   ├── utils.py          — get_client_ip helper
+│   ├── routers/          — projects, invoices, dashboard, export, material_classes, reference_prices, settings, suppliers, auth, admin, orgs
 │   ├── alembic/          — migrations
-│   └── tests/            — unit/ + integration/ + fixtures/
+│   └── tests/            — unit/ + integration/ + fixtures/ + test_auth_coverage.py
 ├── frontend/src/
 │   ├── pages/            — Dashboard, Projects, ProjectPage, Suppliers, SupplierPage, Materials, Reports, Review, Settings
 │   ├── components/       — ui/, ui-domain/, layout/, dashboard/, projects/, invoices/, review/
@@ -91,9 +99,12 @@ UDP/
 ## Database models — key relationships
 
 ```
+Organization → Users (org members via OrgRole)
+Organization → Projects (via ProjectOrganization — ProjectRole: customer/contractor)
 Project → Documents → Invoices → InvoiceItems → MaterialClass
 Project → ReferencePrices (project ↔ material_class ↔ period)
 Supplier → Invoices (one supplier, many projects)
+User → RefreshTokens (many, revokable, 14 days)
 ```
 
 `GET /dashboard/calculations` вычисляет данные на лету (нет кеша) через `crud.compute_calculations()` — единый источник истины для аналитики цен. `compute_full_deviation()` делегирует в неё же.
@@ -138,20 +149,36 @@ deviation_amount = (avg_price − ref_price) × qty
 
 ---
 
+## Auth system
+
+- **Transport**: httpOnly cookies — `access_token` (Path=/), `refresh_token` (Path=/api/auth), `csrf_token` (readable by JS, Path=/).
+- **CSRF**: double-submit cookie pattern — CSRF middleware in `main.py` + `require_csrf` dependency. Exempt paths: login, /docs, /openapi.json.
+- **JWT**: HS256, 30 min expiry. Payload: `sub` (user id), `org_id`, `is_superuser`, `org_role`, `exp`, `iat`, `jti`.
+- **Refresh tokens**: stored in DB (`refresh_tokens` table), hashed (SHA-256), 14-day expiry, revokable. Rotated on each `/api/auth/refresh` call.
+- **Roles**: `OrgRole` (superadmin / admin / member) per organization. `ProjectRole` (customer / contractor) per project link. First user in a new org auto-gets `superadmin`.
+- **Endpoints**: `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/auth/me`.
+- **All business routers** require `get_current_user`. Org-level data isolation for project/invoice queries is **not yet enforced** (see TECH_DEBT.md) — auth only prevents unauthenticated access.
+- **CLI**: `just create-superuser` / `just create-org` — use these to bootstrap the first users.
+- **Auth coverage guardian**: `tests/test_auth_coverage.py` — hits every route without a token, expects 401/403. Run with `just test-backend-unit`.
+
+---
+
 ## Testing conventions
 
 ### Backend
-- **Unit tests** (`tests/unit/`): no DB, pure functions.
+- **Unit tests** (`tests/unit/`): no DB, pure functions. Includes `test_security.py` (14 tests) and `test_auth_deps.py` (20 tests).
 - **Integration tests** (`tests/integration/`): require `TEST_DATABASE_URL` (separate Neon branch). Each test runs in a transaction + savepoint → full isolation, automatic rollback.
 - **Fixtures**: `factory_boy` factories in `tests/factories.py`. AI responses mocked via `respx` + JSON fixtures in `tests/fixtures/openrouter/`.
 - `block_real_openrouter` autouse fixture — any accidental real call fails loudly.
 - `in_memory_s3` — MinIO mocked for upload tests.
+- **Auth in tests**: the `client` fixture in `conftest.py` overrides `get_current_user` with a mock superuser and sets the CSRF cookie + header (`X-CSRF-Token: test-csrf-token`). Integration tests are auth-transparent.
 
 ### Frontend
 - All API calls via MSW v2 (`src/test/server.ts` + `src/test/handlers.ts`). `onUnhandledRequest: "error"` — add a handler for every new endpoint.
-- `renderWithProviders` from `src/test/utils.tsx` — wraps in QueryClient (retries=0), MemoryRouter, ThemeProvider.
+- `renderWithProviders` from `src/test/utils.tsx` — wraps in QueryClient (retries=0), MemoryRouter, ThemeProvider. Accepts `initialUser` param (default: `DEFAULT_TEST_USER`); pass `null` for unauthenticated scenarios.
 - New endpoint? Add to `handlers.ts` before writing the test.
 - Binary endpoints (blob/arraybuffer) must return `HttpResponse.arrayBuffer(...)` in MSW handlers, not `HttpResponse.json(...)`.
+- Auth endpoints already handled in `handlers.ts` (`GET /api/auth/me`, `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/refresh`).
 
 ---
 
@@ -180,8 +207,10 @@ deviation_amount = (avg_price − ref_price) × qty
 ```
 backend/.env          — production config (gitignored)
 backend/.env.test     — TEST_DATABASE_URL for integration tests (gitignored)
-backend/.env.example  — template
+backend/.env.example  — template (includes SECRET_KEY, COOKIE_SECURE, ALLOWED_ORIGINS)
 ```
+
+Required env variables for auth: `SECRET_KEY` (≥32 random bytes, hex), `COOKIE_SECURE` (true in prod), `ALLOWED_ORIGINS` (comma-separated).
 
 MinIO must be running separately: `minio.exe server ./minio-data --console-address ":9001"`
 
@@ -215,7 +244,8 @@ The `/suppliers` and `/suppliers/:id` sections implement MVP analytics. The foll
 
 - E2E tests (Playwright) — spec written, not implemented.
 - GitHub Actions CI — not configured yet.
-- Auth / multi-user — settings router exists, no real auth yet.
+- Org-level data isolation — auth is enforced but project/invoice queries don't yet filter by org (see TECH_DEBT.md).
+- Password reset / email verification — not implemented.
 - Production deployment — planned, not live.
 - Suppliers: «Сравнение» tab (market benchmark) — backlog, needs ≥3 suppliers per material class.
 - Suppliers: Excel/PDF export — button is a stub.
