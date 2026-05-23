@@ -63,7 +63,7 @@ UDP/
 │   ├── models.py         — ORM models (Project, Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice, Supplier, Organization, User, ProjectOrganization, RefreshToken)
 │   ├── crud.py           — DB operations, compute_calculations, supplier aggregates
 │   ├── security.py       — pure crypto helpers: hash_password, JWT encode/decode, refresh token, CSRF
-│   ├── auth.py           — FastAPI auth dependencies: get_current_user, require_csrf, ProjectAccess
+│   ├── auth.py           — FastAPI auth dependencies: get_current_user, require_csrf, require_superuser, require_org_admin, require_org_admin_with_org, ProjectAccess
 │   ├── cli.py            — Click CLI: create-superuser, create-org, create-user
 │   ├── pdf_parser.py     — OpenRouter API parsing
 │   ├── s3.py             — MinIO helpers

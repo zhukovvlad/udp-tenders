@@ -25,7 +25,15 @@ class UserCreate(BaseModel):
     org_role: OrgRole = OrgRole.member
 
 
-@router.post("/users", status_code=status.HTTP_201_CREATED)
+class OrgUserOut(BaseModel):
+    id: int
+    email: str
+    org_id: int | None
+    org_role: str | None
+    is_active: bool
+
+
+@router.post("/users", status_code=status.HTTP_201_CREATED, response_model=OrgUserOut)
 def create_user(
     body: UserCreate,
     db: Session = Depends(get_db),
@@ -54,10 +62,16 @@ def create_user(
     db.commit()
     db.refresh(user)
     logger.info("user_created id=%s email=%s org_id=%s role=%s", user.id, user.email, current_user.org_id, body.org_role)
-    return {"id": user.id, "email": user.email, "org_id": current_user.org_id, "org_role": body.org_role.value}
+    return OrgUserOut(
+        id=user.id,
+        email=user.email,
+        org_id=current_user.org_id,
+        org_role=body.org_role.value,
+        is_active=True,
+    )
 
 
-@router.get("/users")
+@router.get("/users", response_model=list[OrgUserOut])
 def list_users(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_org_admin_with_org),
@@ -65,11 +79,12 @@ def list_users(
     """Список пользователей своей организации."""
     users = db.query(User).filter(User.org_id == current_user.org_id).order_by(User.id).all()
     return [
-        {
-            "id": u.id,
-            "email": u.email,
-            "org_role": u.org_role.value if u.org_role else None,
-            "is_active": u.is_active,
-        }
+        OrgUserOut(
+            id=u.id,
+            email=u.email,
+            org_id=u.org_id,
+            org_role=u.org_role.value if u.org_role else None,
+            is_active=u.is_active,
+        )
         for u in users
     ]
