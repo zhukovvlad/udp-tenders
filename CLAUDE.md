@@ -38,7 +38,7 @@ just test-backend         # all pytest (~22s)
 just test-backend-unit    # unit only, no DB, ~1s
 just test-backend-integration  # requires TEST_DATABASE_URL
 
-just test-frontend        # vitest (75 tests, ~10s)
+just test-frontend        # vitest (78 tests, ~10s)
 just lint                 # ruff + eslint
 just typecheck-frontend   # tsc -b --noEmit
 just coverage-backend     # HTML → backend/htmlcov/index.html

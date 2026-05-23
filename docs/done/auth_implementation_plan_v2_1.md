@@ -674,14 +674,14 @@ if __name__ == "__main__":
 Использование:
 
 ```bash
-python -m backend.cli create-superuser --email admin@test.com
+python -m cli create-superuser --email admin@test.com
 ```
 
 Добавить в `justfile`:
 
 ```
 create-superuser email:
-    python -m backend.cli create-superuser --email {{email}}
+    python -m cli create-superuser --email {{email}}
 ```
 
 ### 4.2 `backend/routers/admin.py` — только superuser
