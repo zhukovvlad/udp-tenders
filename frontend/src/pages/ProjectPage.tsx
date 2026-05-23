@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Download, Plus, Trash2, Pencil } from "lucide-react";
 
@@ -130,16 +130,12 @@ export default function ProjectPage() {
   const [invoiceMonthFilter, setInvoiceMonthFilter] = useState<{ year: number; month: number } | null>(null);
 
   // Reset per-project state when projectId changes (same component instance, different route).
-  // "setState during render" is the React-approved alternative to useEffect+setState here:
-  // React discards the first render's output and immediately re-renders with fresh state.
-  const [prevProjectId, setPrevProjectId] = useState(projectId);
-  if (prevProjectId !== projectId) {
-    setPrevProjectId(projectId);
+  useEffect(() => {
     setInvoiceMonthFilter(null);
     setActiveTab("overview");
     setPeriodStart("");
     setPeriodEnd("");
-  }
+  }, [projectId]);
 
   // ── reference price dialog ──
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Bar, BarChart, Cell, ReferenceLine, XAxis, YAxis } from "recharts";
 import type { LabelProps } from "recharts";
 import {
@@ -103,18 +103,8 @@ function FilterHeader({
   const [endInvalid, setEndInvalid] = useState(false);
 
   // When the parent changes a field (e.g. "Сбросить" or new valid date), reset the local invalid state.
-  // "setState during render" is the React-approved alternative to useEffect+setState:
-  // we track the previous prop value and reset whenever the prop changes.
-  const [prevPeriodStart, setPrevPeriodStart] = useState(periodStart);
-  const [prevPeriodEnd, setPrevPeriodEnd] = useState(periodEnd);
-  if (prevPeriodStart !== periodStart) {
-    setPrevPeriodStart(periodStart);
-    setStartInvalid(false);
-  }
-  if (prevPeriodEnd !== periodEnd) {
-    setPrevPeriodEnd(periodEnd);
-    setEndInvalid(false);
-  }
+  useEffect(() => { setStartInvalid(false); }, [periodStart]);
+  useEffect(() => { setEndInvalid(false); }, [periodEnd]);
 
   // badInput is true when the browser has partial/impossible input it can't parse
   // as a date (e.g. April 31 — browser sets value="" but badInput=true).

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { Download, Lightbulb, Pencil } from "lucide-react";
 import axios from "axios";
@@ -81,17 +81,14 @@ function EditSupplierDialog({
   const [conflict, setConflict] = useState<InnConflict | null>(null);
 
   // Сброс стейта при каждом открытии (иначе прошлые черновики остаются).
-  // "setState during render" — React-approved alternative to useEffect+setState.
-  const [prevOpen, setPrevOpen] = useState(open);
-  if (prevOpen !== open && open) {
-    setPrevOpen(open);
-    setName(initialName);
-    setInn(initialInn ?? "");
-    setFieldError(null);
-    setConflict(null);
-  } else if (prevOpen !== open) {
-    setPrevOpen(open);
-  }
+  useEffect(() => {
+    if (open) {
+      setName(initialName);
+      setInn(initialInn ?? "");
+      setFieldError(null);
+      setConflict(null);
+    }
+  }, [open, initialName, initialInn]);
 
   const updateMut = useUpdateSupplier();
   const mergeMut = useMergeSupplier();
