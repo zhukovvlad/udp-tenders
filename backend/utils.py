@@ -1,7 +1,18 @@
 """Вспомогательные утилиты для backend."""
+from datetime import UTC, datetime
+
 from fastapi import Request
 
 from config import settings
+
+
+def utcnow() -> datetime:
+    """Текущее время в UTC как naive datetime.
+
+    Все DateTime-колонки в БД объявлены без timezone=True, поэтому
+    сохраняем naive UTC повсеместно. Функция — единое место для этого соглашения.
+    """
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def get_client_ip(request: Request) -> str | None:

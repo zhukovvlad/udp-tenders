@@ -4,7 +4,7 @@
 CSRF защита — double-submit cookie pattern (csrf_token).
 """
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr
@@ -21,7 +21,7 @@ from security import (
     hash_refresh_token,
     verify_password,
 )
-from utils import get_client_ip
+from utils import get_client_ip, utcnow
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -38,7 +38,7 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str,
     refresh_token — httpOnly, Path=/api/auth (ограничен только auth-эндпоинтами)
     csrf_token — НЕ httpOnly (фронт должен прочитать и вложить в заголовок)
     """
-    common = {"httponly": True, "secure": settings.COOKIE_SECURE, "samesite": "lax"}
+    common = {"httponly": True, "secure": settings.COOKIE_SECURE, "samesite": "lax", "domain": settings.COOKIE_DOMAIN}
     response.set_cookie(
         ACCESS_COOKIE_NAME,
         access_token,
@@ -62,6 +62,7 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str,
         httponly=False,
         secure=settings.COOKIE_SECURE,
         samesite="lax",
+        domain=settings.COOKIE_DOMAIN,
     )
 
 
@@ -72,7 +73,7 @@ def _clear_auth_cookies(response: Response) -> None:
         (REFRESH_COOKIE_NAME, "/api/auth"),
         (CSRF_COOKIE_NAME, "/"),
     ]:
-        response.delete_cookie(name, path=path)
+        response.delete_cookie(name, path=path, domain=settings.COOKIE_DOMAIN)
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +112,7 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
     db.add(RefreshToken(
         user_id=user.id,
         token_hash=refresh_hashed,
-        expires_at=datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        expires_at=utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
         user_agent=request.headers.get("user-agent"),
         ip_address=client_ip,
     ))
@@ -139,7 +140,7 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
         .filter(
             RefreshToken.token_hash == hashed,
             RefreshToken.revoked_at.is_(None),
-            RefreshToken.expires_at > datetime.now(UTC),
+            RefreshToken.expires_at > utcnow(),
         )
         .with_for_update()  # блокировка строки — предотвращает двойную выдачу при параллельных /refresh
         .first()
@@ -151,12 +152,12 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
     if not user or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User is inactive")
     # Ротация: отзываем старый токен, создаём новый
-    rt.revoked_at = datetime.now(UTC)
+    rt.revoked_at = utcnow()
     new_raw, new_hashed = generate_refresh_token()
     db.add(RefreshToken(
         user_id=user.id,
         token_hash=new_hashed,
-        expires_at=datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        expires_at=utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
         user_agent=request.headers.get("user-agent"),
         ip_address=get_client_ip(request),
     ))
@@ -182,7 +183,7 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
         db.query(RefreshToken).filter(
             RefreshToken.token_hash == hashed,
             RefreshToken.revoked_at.is_(None),
-        ).update({"revoked_at": datetime.now(UTC)})
+        ).update({"revoked_at": utcnow()})
         db.commit()
     _clear_auth_cookies(response)
     return {"status": "ok"}

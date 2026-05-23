@@ -2,6 +2,8 @@ import logging
 from calendar import monthrange
 from datetime import UTC, date, datetime
 
+from utils import utcnow
+
 from sqlalchemy import case, func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, aliased, joinedload
@@ -866,7 +868,7 @@ def get_or_create_supplier(db: Session, name: str, inn: str | None) -> Supplier:
         if not supplier:
             stmt = (
                 pg_insert(Supplier)
-                .values(name=name, inn=inn, created_at=datetime.now(UTC).replace(tzinfo=None))
+                .values(name=name, inn=inn, created_at=utcnow())
                 .on_conflict_do_nothing(index_elements=["inn"])
                 .returning(Supplier.id)
             )
@@ -883,7 +885,7 @@ def get_or_create_supplier(db: Session, name: str, inn: str | None) -> Supplier:
         if not supplier:
             stmt = (
                 pg_insert(Supplier)
-                .values(name=name, inn=None, created_at=datetime.now(UTC).replace(tzinfo=None))
+                .values(name=name, inn=None, created_at=utcnow())
                 .on_conflict_do_nothing(index_elements=["name"], index_where=text("inn IS NULL"))
                 .returning(Supplier.id)
             )
