@@ -37,9 +37,15 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     except jwt.InvalidTokenError as e:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token") from e
 
+    sub = payload.get("sub")
+    try:
+        user_id = int(sub)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token") from e
+
     user = (
         db.query(User)
-        .filter(User.id == int(payload["sub"]), User.is_active == True)  # noqa: E712
+        .filter(User.id == user_id, User.is_active.is_(True))
         .first()
     )
     if not user:

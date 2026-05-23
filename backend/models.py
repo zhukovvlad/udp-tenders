@@ -11,10 +11,12 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
-    text as sa_text,
 )
 from sqlalchemy import (
     Enum as SqlEnum,
+)
+from sqlalchemy import (
+    text as sa_text,
 )
 from sqlalchemy.orm import relationship
 

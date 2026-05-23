@@ -97,7 +97,7 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
     возвращаем общее 401 «Invalid credentials».
     """
     client_ip = get_client_ip(request)
-    user = db.query(User).filter(User.email == body.email, User.is_active == True).first()  # noqa: E712
+    user = db.query(User).filter(User.email == body.email, User.is_active.is_(True)).first()
     if not user or not verify_password(body.password, user.password_hash):
         logger.warning("login_failed email=%s ip=%s", body.email, client_ip)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")

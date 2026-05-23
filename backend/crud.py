@@ -1,8 +1,6 @@
 import logging
 from calendar import monthrange
-from datetime import UTC, date, datetime
-
-from utils import utcnow
+from datetime import date
 
 from sqlalchemy import case, func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -17,6 +15,7 @@ from models import (
     ReferencePrice,
     Supplier,
 )
+from utils import utcnow
 
 logger = logging.getLogger(__name__)
 
