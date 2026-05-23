@@ -1,7 +1,8 @@
 """Централизованная конфигурация через pydantic-settings.
 
-Все переменные окружения читаются отсюда. Не использовать os.getenv() напрямую
-в других модулях — только через этот объект settings.
+Основной способ читать переменные окружения в коде приложения — через объект
+settings, а не через os.getenv() напрямую. Для инфраструктурных модулей
+(alembic/env.py, tooling-скрипты) допустимы исключения.
 """
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict

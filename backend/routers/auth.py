@@ -141,7 +141,7 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
             RefreshToken.revoked_at.is_(None),
             RefreshToken.expires_at > datetime.now(UTC),
         )
-        .with_for_update()  # блокировка строки — предотвращает двойной выдаче при параллельных /refresh
+        .with_for_update()  # блокировка строки — предотвращает двойную выдачу при параллельных /refresh
         .first()
     )
     if not rt:
