@@ -1,9 +1,119 @@
+import enum
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
+from sqlalchemy import (
+    Enum as SqlEnum,
+)
+from sqlalchemy import (
+    text as sa_text,
+)
 from sqlalchemy.orm import relationship
 
 from database import Base
+
+# ---------------------------------------------------------------------------
+#  Auth enums
+# ---------------------------------------------------------------------------
+
+class OrgRole(str, enum.Enum):
+    """Роль пользователя внутри организации."""
+    superadmin = "superadmin"
+    admin = "admin"
+    member = "member"
+
+
+class ProjectRole(str, enum.Enum):
+    """Роль организации на проекте."""
+    customer = "customer"      # заказчик — видит все данные, управляет плановыми ценами
+    contractor = "contractor"  # подрядчик — видит только свои загрузки
+
+
+# ---------------------------------------------------------------------------
+#  Auth models
+# ---------------------------------------------------------------------------
+
+class Organization(Base):
+    """Организация — единица изоляции данных."""
+    __tablename__ = "organizations"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    inn = Column(String, nullable=True, index=True)
+    created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
+
+    users = relationship("User", back_populates="organization")
+    project_links = relationship("ProjectOrganization", back_populates="organization")
+
+
+class User(Base):
+    """Пользователь системы — принадлежит организации (или суперюзер без org)."""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    email = Column(String, nullable=False, unique=True)  # unique уже создаёт индекс в PG
+    password_hash = Column(String, nullable=False)
+    is_superuser = Column(Boolean, nullable=False, default=False)
+    # native_enum=False: хранит VARCHAR с CHECK constraint, а не PG ENUM.
+    # Это позволяет добавлять значения без ALTER TYPE и без блокировки таблицы.
+    org_role = Column(
+        SqlEnum(OrgRole, name="org_role", native_enum=False),
+        nullable=True,
+    )
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
+
+    organization = relationship("Organization", back_populates="users")
+    refresh_tokens = relationship(
+        "RefreshToken", back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class ProjectOrganization(Base):
+    """Связь проект ↔ организация с ролью (customer/contractor)."""
+    __tablename__ = "project_organizations"
+
+    project_id = Column(Integer, ForeignKey("projects.id"), primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), primary_key=True)
+    project_role = Column(
+        SqlEnum(ProjectRole, name="project_role", native_enum=False),
+        nullable=False,
+    )
+    created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
+
+    project = relationship("Project", back_populates="org_links")
+    organization = relationship("Organization", back_populates="project_links")
+
+
+class RefreshToken(Base):
+    """Refresh-токены — хранимые в БД, отзываемые.
+
+    Хранится хэш токена (sha256), сам токен пользователю отдаётся в httpOnly cookie.
+    Ротация: при каждом /refresh старый revoked_at проставляется, создаётся новый.
+    """
+    __tablename__ = "refresh_tokens"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String, nullable=False, unique=True)  # unique уже создаёт индекс в PG
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
+    user_agent = Column(String, nullable=True)
+    ip_address = Column(String, nullable=True)
+
+    user = relationship("User", back_populates="refresh_tokens")
 
 
 class Project(Base):
@@ -12,10 +122,14 @@ class Project(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     contract_number = Column(String)
+    customer_org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
 
     documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
     reference_prices = relationship("ReferencePrice", back_populates="project", cascade="all, delete-orphan")
+    org_links = relationship(
+        "ProjectOrganization", back_populates="project", cascade="all, delete-orphan"
+    )
 
 
 class MaterialClass(Base):
@@ -55,7 +169,15 @@ class Document(Base):
     s3_key = Column(String)
     doc_type = Column(String, default="unknown")
     status = Column(String, default="parsed")
+    # sha256 hex дайджест файла — дедупликация до парсинга (экономит вызовы AI)
+    file_hash = Column(String(64), nullable=True, index=True)
+    uploaded_by_org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    uploaded_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     uploaded_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "file_hash", name="uq_documents_project_file_hash"),
+    )
 
     project = relationship("Project", back_populates="documents")
     invoices = relationship("Invoice", back_populates="document", cascade="all, delete-orphan")

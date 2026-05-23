@@ -102,9 +102,9 @@ function FilterHeader({
   const [startInvalid, setStartInvalid] = useState(false);
   const [endInvalid, setEndInvalid] = useState(false);
 
-  // Clear error state when the parent resets a field to empty (e.g. "Сбросить")
-  useEffect(() => { if (!periodStart) setStartInvalid(false); }, [periodStart]);
-  useEffect(() => { if (!periodEnd) setEndInvalid(false); }, [periodEnd]);
+  // When the parent changes a field (e.g. "Сбросить" or new valid date), reset the local invalid state.
+  useEffect(() => { setStartInvalid(false); }, [periodStart]);
+  useEffect(() => { setEndInvalid(false); }, [periodEnd]);
 
   // badInput is true when the browser has partial/impossible input it can't parse
   // as a date (e.g. April 31 — browser sets value="" but badInput=true).

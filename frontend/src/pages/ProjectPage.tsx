@@ -129,7 +129,7 @@ export default function ProjectPage() {
   // ── invoice month filter (set when navigating from «По месяцам» tab) ──
   const [invoiceMonthFilter, setInvoiceMonthFilter] = useState<{ year: number; month: number } | null>(null);
 
-  // Reset per-project state when projectId changes (same component instance, different route)
+  // Reset per-project state when projectId changes (same component instance, different route).
   useEffect(() => {
     setInvoiceMonthFilter(null);
     setActiveTab("overview");

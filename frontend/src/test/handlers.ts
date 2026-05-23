@@ -116,4 +116,19 @@ export const handlers = [
       },
     })
   ),
+
+  // Auth
+  http.get("/api/auth/me", () =>
+    HttpResponse.json({
+      id: 1,
+      email: "test@example.com",
+      org_id: 1,
+      org_role: "admin",
+      is_superuser: false,
+      organization: { id: 1, name: "Тест Орг", inn: null },
+    })
+  ),
+  http.post("/api/auth/login", () => HttpResponse.json({ status: "ok" })),
+  http.post("/api/auth/logout", () => HttpResponse.json({ status: "ok" })),
+  http.post("/api/auth/refresh", () => HttpResponse.json({ status: "ok" })),
 ];
