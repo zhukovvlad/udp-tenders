@@ -13,10 +13,11 @@ declare module "axios" {
   }
 }
 
-/** Читает значение куки по имени. */
+/** Читает значение куки по имени. Поддерживает стандартный формат `a=1; b=2`. */
 function getCookie(name: string): string | null {
-  const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
-  return match ? decodeURIComponent(match[2]) : null;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${escaped}=([^;]+)`));
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 const api = axios.create({

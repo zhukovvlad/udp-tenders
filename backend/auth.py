@@ -94,6 +94,24 @@ def require_org_admin(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
+def require_org_admin_with_org(current_user: User = Depends(get_current_user)) -> User:
+    """Разрешить доступ только org-админам (superadmin/admin) с org_id.
+
+    Суперюзеры без организации (без org_id) блокируются явно — они управляют
+    пользователями через /api/admin.
+
+    Raises:
+        403 если суперюзер, роль member, или нет org_id.
+    """
+    if current_user.is_superuser:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Суперюзеры управляют пользователями через /api/admin")
+    if current_user.org_role not in (OrgRole.superadmin, OrgRole.admin):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Org admin required")
+    if not current_user.org_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "User has no organization")
+    return current_user
+
+
 class ProjectAccess:
     """Контекст проверенного доступа к проекту.
 

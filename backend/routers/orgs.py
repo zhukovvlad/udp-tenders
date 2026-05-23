@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
-from auth import require_org_admin
+from auth import require_org_admin_with_org
 from database import get_db
 from models import OrgRole, User
 from security import hash_password
@@ -29,7 +29,7 @@ class UserCreate(BaseModel):
 def create_user(
     body: UserCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_org_admin),
+    current_user: User = Depends(require_org_admin_with_org),
 ):
     """Создать пользователя в собственной организации.
 
@@ -38,8 +38,6 @@ def create_user(
 
     org_role ограничена: member или admin (superadmin — только через /api/admin).
     """
-    if not current_user.org_id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "User has no organization")
     if body.org_role == OrgRole.superadmin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "superadmin роль назначается только через /api/admin")
     if db.query(User).filter(User.email == body.email).first():
@@ -62,11 +60,9 @@ def create_user(
 @router.get("/users")
 def list_users(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_org_admin),
+    current_user: User = Depends(require_org_admin_with_org),
 ):
     """Список пользователей своей организации."""
-    if not current_user.org_id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "User has no organization")
     users = db.query(User).filter(User.org_id == current_user.org_id).order_by(User.id).all()
     return [
         {
