@@ -1,16 +1,24 @@
 """Вспомогательные утилиты для backend."""
 from fastapi import Request
 
+from config import settings
+
 
 def get_client_ip(request: Request) -> str | None:
     """Возвращает реальный IP клиента с учётом reverse-proxy.
 
-    Читает заголовок X-Forwarded-For (добавляется Nginx/Caddy перед приложением).
-    Если заголовка нет — берёт request.client.host напрямую.
+    Использует X-Forwarded-For только при TRUSTED_PROXIES > 0 (установить в .env при
+    работе за Nginx/Caddy). Без этой настройки X-Forwarded-For игнорируется целиком,
+    чтобы не доверять клиентскому заголовку.
+
+    При TRUSTED_PROXIES=N берётся запись, добавленная N-ым доверенным прокси срава в XFF.
     Может вернуть None, если приложение запущено без ASGI-сокета (unit-тесты).
     """
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        # X-Forwarded-For: client, proxy1, proxy2 — берём самый левый
-        return forwarded.split(",")[0].strip()
+    if settings.TRUSTED_PROXIES > 0:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            parts = [p.strip() for p in forwarded.split(",")]
+            # С N доверенными прокси реальный IP находится на позиции -(N) справа в XFF
+            index = max(0, len(parts) - settings.TRUSTED_PROXIES)
+            return parts[index]
     return request.client.host if request.client else None

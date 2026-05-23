@@ -23,6 +23,7 @@ api.interceptors.request.use((config) => {
   if (method && ["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
     const csrf = getCookie("csrf_token");
     if (csrf) {
+      config.headers = config.headers ?? {};
       config.headers["X-CSRF-Token"] = csrf;
     }
   }
@@ -46,9 +47,10 @@ api.interceptors.response.use(
       try {
         refreshing =
           refreshing ??
-          api.post("/auth/refresh").then(() => {
-            refreshing = null;
-          });
+          api.post("/auth/refresh").then(
+            () => { refreshing = null; },
+            () => { refreshing = null; },
+          );
         await refreshing;
         return api(original);
       } catch {

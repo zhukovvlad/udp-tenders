@@ -40,8 +40,8 @@ def create_user(
     """
     if not current_user.org_id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "User has no organization")
-    if body.org_role == OrgRole.superadmin and not current_user.org_role == OrgRole.superadmin:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only org superadmin can create admins")
+    if body.org_role == OrgRole.superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "superadmin роль назначается только через /api/admin")
     if db.query(User).filter(User.email == body.email).first():
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
 

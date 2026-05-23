@@ -43,8 +43,8 @@ just lint                 # ruff + eslint
 just typecheck-frontend   # tsc -b --noEmit
 just coverage-backend     # HTML → backend/htmlcov/index.html
 just db-migrate           # alembic upgrade head
-just create-superuser     # python -m cli create-superuser (interactive)
-just create-org           # python -m cli create-org (interactive)
+just create-superuser email  # python -m cli create-superuser (password prompt)
+just create-org name         # python -m cli create-org --name
 ```
 
 Shell on Windows: Git bash at `C:\Program Files\Git\bin\bash.exe`. Invoke as:
@@ -210,7 +210,7 @@ backend/.env.test     — TEST_DATABASE_URL for integration tests (gitignored)
 backend/.env.example  — template (includes SECRET_KEY, COOKIE_SECURE, ALLOWED_ORIGINS)
 ```
 
-Required env variables for auth: `SECRET_KEY` (≥32 random bytes, hex), `COOKIE_SECURE` (true in prod), `ALLOWED_ORIGINS` (comma-separated).
+Required env variables for auth: `SECRET_KEY` (≥32 random bytes, hex), `COOKIE_SECURE` (true in prod), `ALLOWED_ORIGINS` (JSON array: `["http://localhost:5173"]`).
 
 MinIO must be running separately: `minio.exe server ./minio-data --console-address ":9001"`
 

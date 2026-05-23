@@ -102,18 +102,18 @@ function FilterHeader({
   const [startInvalid, setStartInvalid] = useState(false);
   const [endInvalid, setEndInvalid] = useState(false);
 
-  // When the parent clears a field (e.g. "Сбросить"), reset the local invalid state.
+  // When the parent changes a field (e.g. "Сбросить" or new valid date), reset the local invalid state.
   // "setState during render" is the React-approved alternative to useEffect+setState:
-  // we track the previous prop value and reset only when the prop transitions to empty.
+  // we track the previous prop value and reset whenever the prop changes.
   const [prevPeriodStart, setPrevPeriodStart] = useState(periodStart);
   const [prevPeriodEnd, setPrevPeriodEnd] = useState(periodEnd);
   if (prevPeriodStart !== periodStart) {
     setPrevPeriodStart(periodStart);
-    if (!periodStart) setStartInvalid(false);
+    setStartInvalid(false);
   }
   if (prevPeriodEnd !== periodEnd) {
     setPrevPeriodEnd(periodEnd);
-    if (!periodEnd) setEndInvalid(false);
+    setEndInvalid(false);
   }
 
   // badInput is true when the browser has partial/impossible input it can't parse

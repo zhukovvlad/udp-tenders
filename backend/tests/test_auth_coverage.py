@@ -3,6 +3,8 @@
 Этот тест навсегда фиксирует инвариант: новая ручка не может случайно оказаться публичной.
 Если тест упадёт — значит добавили новый роутер без auth dependency.
 """
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -41,10 +43,8 @@ def test_endpoint_requires_auth(method: str, path: str) -> None:
     if path in PUBLIC_PATHS:
         pytest.skip("Публичный endpoint — auth не требуется")
 
-    # Подставляем валидные числовые id в path-параметры
-    test_path = path
-    for placeholder in ["{project_id}", "{id}", "{document_id}", "{org_id}"]:
-        test_path = test_path.replace(placeholder, "1")
+    # Подставляем валидные числовые id во все path-параметры в формате {anything}
+    test_path = re.sub(r"\{[^}]+\}", "1", path)
 
     client = TestClient(app, raise_server_exceptions=False)
     response = client.request(method, test_path)

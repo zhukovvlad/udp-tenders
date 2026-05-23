@@ -141,12 +141,15 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
             RefreshToken.revoked_at.is_(None),
             RefreshToken.expires_at > datetime.now(UTC),
         )
+        .with_for_update()  # блокировка строки — предотвращает двойной выдаче при параллельных /refresh
         .first()
     )
     if not rt:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED)
 
     user = rt.user
+    if not user or not user.is_active:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User is inactive")
     # Ротация: отзываем старый токен, создаём новый
     rt.revoked_at = datetime.now(UTC)
     new_raw, new_hashed = generate_refresh_token()

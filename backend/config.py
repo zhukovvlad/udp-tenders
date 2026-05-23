@@ -11,13 +11,16 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # JWT / безопасность
-    SECRET_KEY: str = Field(min_length=32, default="insecure-dev-key-32-chars-replace-me!!")
+    SECRET_KEY: str = Field(min_length=32)  # обязательное поле — при отсутствии в .env запуск упадёт
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 14
 
     # Куки
     COOKIE_SECURE: bool = False  # True в проде (HTTPS)
     COOKIE_DOMAIN: str | None = None
+
+    # Количество доверенных reverse-proxy в цепочке (0 = прямое соединение; X-Forwarded-For игнорируется)
+    TRUSTED_PROXIES: int = 0
 
     # CORS — wildcard "*" несовместим с credentials=True в браузере
     ALLOWED_ORIGINS: list[str] = ["http://localhost:5173"]
