@@ -13,7 +13,6 @@ from logging_config import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-from database import engine
 from routers import admin as admin_router
 from routers import auth as auth_router
 from routers import dashboard, export, invoices, material_classes, projects, reference_prices, suppliers

@@ -22,6 +22,12 @@ PUBLIC_PATHS: set[str] = {
 }
 
 
+@pytest.fixture(scope="module")
+def unauth_client() -> TestClient:
+    """TestClient без аутентификации, один на весь модуль (lifespan запускается один раз)."""
+    return TestClient(app, raise_server_exceptions=False)
+
+
 def _collect_routes() -> list[tuple[str, str]]:
     """Собрать все ручки из app.routes как (method, path)."""
     result = []
@@ -36,7 +42,7 @@ def _collect_routes() -> list[tuple[str, str]]:
 
 
 @pytest.mark.parametrize("method,path", _collect_routes())
-def test_endpoint_requires_auth(method: str, path: str) -> None:
+def test_endpoint_requires_auth(method: str, path: str, unauth_client: TestClient) -> None:
     """Убедиться, что ручка возвращает 401 или 403 при отсутствии токена.
 
     Для публичных ручек тест пропускается.
@@ -47,8 +53,7 @@ def test_endpoint_requires_auth(method: str, path: str) -> None:
     # Подставляем валидные числовые id во все path-параметры в формате {anything}
     test_path = re.sub(r"\{[^}]+\}", "1", path)
 
-    client = TestClient(app, raise_server_exceptions=False)
-    response = client.request(method, test_path)
+    response = unauth_client.request(method, test_path)
     assert response.status_code in (401, 403), (
         f"{method} {path} вернул {response.status_code} без аутентификации — "
         "добавь auth dependency к роутеру."
