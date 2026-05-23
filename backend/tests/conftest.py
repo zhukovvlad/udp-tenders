@@ -24,6 +24,12 @@ from sqlalchemy.orm import Session
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_ROOT))
 
+# Гарантируем наличие SECRET_KEY (HS256) до импорта backend-модулей.
+# Settings() вызывается при первом импорте config.py (на который ссылается database.py и др.).
+# В CI и при локальных unit-тестах .env может отсутствовать — этот setdefault
+# подставляет тестовое значение, не перетирая реальный SECRET_KEY из .env.
+os.environ.setdefault("SECRET_KEY", "test-only-secret-key-not-for-production-32ch!!")
+
 # Сохраняем оригинальный httpx.AsyncClient.send в момент импорта conftest,
 # ДО того, как block_real_openrouter автоматически заменит его на guard.
 # Используется в mock_openrouter для восстановления рабочего send (вместо
