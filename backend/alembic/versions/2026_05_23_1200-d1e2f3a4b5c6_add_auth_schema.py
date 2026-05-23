@@ -63,7 +63,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("email"),
     )
-    op.create_index("ix_users_email", "users", ["email"])
+    # ix_users_email не создаём — UniqueConstraint("email") уже создаёт уникальный индекс в PG
     op.create_index("ix_users_org_id", "users", ["org_id"])
 
     # 3. Создаём таблицу project_organizations
@@ -96,7 +96,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("token_hash"),
     )
     op.create_index("ix_refresh_tokens_user_id", "refresh_tokens", ["user_id"])
-    op.create_index("ix_refresh_tokens_token_hash", "refresh_tokens", ["token_hash"])
+    # ix_refresh_tokens_token_hash не создаём — UniqueConstraint("token_hash") уже создаёт индекс в PG
 
     # 5. Добавляем колонки в projects
     op.add_column(
@@ -138,7 +138,6 @@ def downgrade() -> None:
     op.drop_table("refresh_tokens")
     op.drop_table("project_organizations")
     op.drop_index("ix_users_org_id", "users")
-    op.drop_index("ix_users_email", "users")
     op.drop_table("users")
     op.drop_index("ix_organizations_inn", "organizations")
     op.drop_table("organizations")

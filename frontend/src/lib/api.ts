@@ -37,6 +37,7 @@ api.interceptors.response.use(
   (r) => r,
   async (error) => {
     const original = error.config;
+    if (!original) return Promise.reject(error);
     if (
       error.response?.status === 401 &&
       !original._retry &&
@@ -47,10 +48,9 @@ api.interceptors.response.use(
       try {
         refreshing =
           refreshing ??
-          api.post("/auth/refresh").then(
-            () => { refreshing = null; },
-            () => { refreshing = null; },
-          );
+          api.post("/auth/refresh").finally(() => {
+            refreshing = null;
+          });
         await refreshing;
         return api(original);
       } catch {

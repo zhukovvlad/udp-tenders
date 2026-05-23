@@ -60,7 +60,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
-    email = Column(String, nullable=False, unique=True, index=True)
+    email = Column(String, nullable=False, unique=True)  # unique уже создаёт индекс в PG
     password_hash = Column(String, nullable=False)
     is_superuser = Column(Boolean, nullable=False, default=False)
     # native_enum=False: хранит VARCHAR с CHECK constraint, а не PG ENUM.
@@ -104,7 +104,7 @@ class RefreshToken(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    token_hash = Column(String, nullable=False, unique=True, index=True)
+    token_hash = Column(String, nullable=False, unique=True)  # unique уже создаёт индекс в PG
     expires_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=sa_text("now()"))
