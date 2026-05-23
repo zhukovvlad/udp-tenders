@@ -59,7 +59,8 @@ api.interceptors.response.use(
       error.response?.status === 401 &&
       !original._retry &&
       original.url !== "/auth/refresh" &&
-      original.url !== "/auth/login"
+      original.url !== "/auth/login" &&
+      getCookie("csrf_token") !== null // нет куки — нет сессии, refresh бессмысленен
     ) {
       original._retry = true;
       try {
@@ -67,8 +68,7 @@ api.interceptors.response.use(
         await refreshing;
         return api(original);
       } catch {
-        // Refresh тоже не удался — перенаправить на логин
-        window.location.href = "/login";
+        // Refresh не удался — отдаём 401 наверх; ProtectedLayout сделает Navigate /login
         return Promise.reject(error);
       }
     }
