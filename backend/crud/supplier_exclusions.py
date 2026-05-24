@@ -7,7 +7,7 @@ from models import ProjectSupplierExclusion
 def get_excluded_supplier_ids(db: Session, project_id: int) -> set[int]:
     """Возвращает множество supplier_id, исключённых из расчётов для данного проекта."""
     rows = (
-        db.query(ProjectSupplierExclusion)
+        db.query(ProjectSupplierExclusion.supplier_id)
         .filter(ProjectSupplierExclusion.project_id == project_id)
         .all()
     )

@@ -327,12 +327,19 @@ def compute_export_rows(
     """
     # Resolve date bounds from invoice data when not provided
     if period_start is None or period_end is None:
-        bounds = (
+        bounds_q = (
             db.query(func.min(Invoice.date), func.max(Invoice.date))
             .join(Document, Invoice.document_id == Document.id)
             .filter(Document.project_id == project_id)
-            .first()
         )
+        if excluded_supplier_ids:
+            bounds_q = bounds_q.filter(
+                or_(
+                    Invoice.supplier_id.is_(None),
+                    Invoice.supplier_id.notin_(excluded_supplier_ids),
+                )
+            )
+        bounds = bounds_q.first()
         if not bounds or not bounds[0]:
             return []
         if period_start is None:
