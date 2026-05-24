@@ -39,7 +39,7 @@ def delete_document(db: Session, doc_id: int):
 # --- Invoices ---
 
 def create_invoice(db: Session, document_id: int, number: str, invoice_date: date,
-                   supplier_name: str | None, supplier_inn: str | None, vat_rate: float,
+                   supplier_name: str | None, supplier_inn: str | None, vat_rate: float | None,
                    confidence: float, items: list[dict]) -> Invoice:
     # Нормализуем: пустые строки и whitespace → None
     _inn = (supplier_inn.strip() or None) if supplier_inn else None

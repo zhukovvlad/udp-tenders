@@ -60,10 +60,11 @@ def get_reference_prices(db: Session, project_id: int = None, material_class_id:
 
 def create_reference_price(db: Session, project_id: int, material_class_id: int,
                            price: float, period_start: date, period_end: date,
-                           source: str = None) -> ReferencePrice:
+                           source: str | None = None) -> ReferencePrice:
     rp = ReferencePrice(
         project_id=project_id, material_class_id=material_class_id,
-        price=price, period_start=period_start, period_end=period_end, source=source,
+        price=price, period_start=period_start, period_end=period_end,
+        source=source or None,
     )
     db.add(rp)
     db.commit()
