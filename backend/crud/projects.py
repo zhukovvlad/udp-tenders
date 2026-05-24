@@ -64,7 +64,7 @@ def create_reference_price(db: Session, project_id: int, material_class_id: int,
     rp = ReferencePrice(
         project_id=project_id, material_class_id=material_class_id,
         price=price, period_start=period_start, period_end=period_end,
-        source=source or None,
+        source=source if (isinstance(source, str) and source.strip()) else None,
     )
     db.add(rp)
     db.commit()
