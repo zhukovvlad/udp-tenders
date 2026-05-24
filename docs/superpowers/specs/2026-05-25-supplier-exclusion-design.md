@@ -9,7 +9,7 @@
 
 ## Решение
 
-Новая join-таблица `project_supplier_exclusions` (opt-out: запись = исключён). Управляется через таб «Поставщики» в карточке объекта — чекбокс в строке поставщика. Фильтрация применяется во всех расчётных путях **когда `project_id` задан**: карточка объекта (`GET /dashboard/calculations?project_id=X`), summary (`GET /dashboard/summary?project_id=X`), Excel-экспорт. Глобальный дашборд без `project_id` — исключения не применяются (endpoint уже имеет N+1, добавлять ещё один запрос на проект нецелесообразно для MVP).
+Новая join-таблица `project_supplier_exclusions` (opt-out: запись = исключён). Управляется через таб «Поставщики» в карточке объекта — чекбокс в строке поставщика. Фильтрация применяется во всех расчётных путях: карточка объекта (`GET /dashboard/calculations?project_id=X`), summary (`GET /dashboard/summary?project_id=X`), monthly-summary (`GET /dashboard/monthly-summary?project_id=X`), Excel-экспорт. Глобальный дашборд без `project_id` (`GET /dashboard/calculations` без параметра) — исключения применяются через bulk-prefetch: все записи `project_supplier_exclusions` загружаются одним запросом и раздаются по проектам.
 
 ## База данных
 

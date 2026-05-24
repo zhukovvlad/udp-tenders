@@ -188,10 +188,12 @@ def list_calculations(
 @router.get("/monthly-summary")
 def get_monthly_summary(project_id: int, db: Session = Depends(get_db)):
     """Помесячная агрегация по проекту: оборот (материалы), объём, количество СФ."""
+    excluded = get_excluded_supplier_ids(db, project_id)
+
     year_expr = extract("year", Invoice.date)
     month_expr = extract("month", Invoice.date)
 
-    rows = (
+    q = (
         db.query(
             year_expr.label("year"),
             month_expr.label("month"),
@@ -208,10 +210,12 @@ def get_monthly_summary(project_id: int, db: Session = Depends(get_db)):
             Document.project_id == project_id,
             InvoiceItem.item_type == "material",
         )
-        .group_by(year_expr, month_expr)
-        .order_by(year_expr, month_expr)
-        .all()
     )
+    if excluded:
+        q = q.filter(
+            or_(Invoice.supplier_id.is_(None), Invoice.supplier_id.notin_(excluded))
+        )
+    rows = q.group_by(year_expr, month_expr).order_by(year_expr, month_expr).all()
 
     return [
         {

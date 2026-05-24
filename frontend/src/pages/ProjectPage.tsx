@@ -952,6 +952,7 @@ export default function ProjectPage() {
                             ) : (
                               <Checkbox
                                 checked={!excluded}
+                                aria-label={excluded ? `Включить ${s.name} в расчёты` : `Исключить ${s.name} из расчётов`}
                                 onCheckedChange={(checked: boolean) => {
                                   if (checked) {
                                     toggleExclusion.mutate({ supplierId: s.id, excluded: false });
@@ -975,8 +976,14 @@ export default function ProjectPage() {
                             </div>
                             {isPopoverOpen && (
                               <div className="mt-2 p-3 rounded-lg border border-border-subtle bg-surface shadow-md space-y-2">
-                                <p className="text-xs text-fg-secondary">Причина исключения (необязательно)</p>
+                                <label
+                                  htmlFor={`exclusion-reason-${s.id}`}
+                                  className="text-xs text-fg-secondary"
+                                >
+                                  Причина исключения (необязательно)
+                                </label>
                                 <input
+                                  id={`exclusion-reason-${s.id}`}
                                   autoFocus
                                   className="w-full rounded border border-border-subtle px-2 py-1 text-sm bg-bg text-fg focus:outline-none focus:ring-1 focus:ring-accent"
                                   placeholder="Аварийная закупка, нерепрезентативная цена..."
