@@ -48,6 +48,8 @@ def delete_project_route(project_id: int, db: Session = Depends(get_db)):
 @router.get("/{project_id}/suppliers")
 def list_project_suppliers(project_id: int, db: Session = Depends(get_db)):
     """Список поставщиков проекта с кол-вом счетов. Инвойсы без supplier_id не включаются."""
+    if not db.query(Project).filter(Project.id == project_id).first():
+        raise HTTPException(status_code=404, detail="Проект не найден")
     rows = (
         db.query(
             Supplier.id,
@@ -71,6 +73,8 @@ def list_project_suppliers(project_id: int, db: Session = Depends(get_db)):
 @router.get("/{project_id}/supplier-exclusions")
 def list_supplier_exclusions(project_id: int, db: Session = Depends(get_db)):
     """Список supplier_id, исключённых из расчётов для данного проекта."""
+    if not db.query(Project).filter(Project.id == project_id).first():
+        raise HTTPException(status_code=404, detail="Проект не найден")
     return sorted(get_excluded_supplier_ids(db, project_id))
 
 

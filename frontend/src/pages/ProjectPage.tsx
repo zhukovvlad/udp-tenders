@@ -938,20 +938,23 @@ export default function ProjectPage() {
                     {(projectSuppliersQ.data ?? []).map((s) => {
                       const excluded = supplierExclusionsQ.data?.has(s.id) ?? false;
                       const isPopoverOpen = exclusionPopover?.supplierId === s.id;
-                      const isPending =
+                      const isThisRowPending =
                         toggleExclusion.isPending &&
                         toggleExclusion.variables?.supplierId === s.id;
+                      // Disable all checkboxes while any toggle is in flight to prevent race conditions
+                      const isAnyPending = toggleExclusion.isPending;
                       return (
                         <tr
                           key={s.id}
                           className="border-b border-border-subtle last:border-0 hover:bg-surface-hover"
                         >
                           <td className="px-4 py-2 text-center">
-                            {isPending ? (
+                            {isThisRowPending ? (
                               <Loader2 className="mx-auto size-4 animate-spin text-fg-tertiary" />
                             ) : (
                               <Checkbox
                                 checked={!excluded}
+                                disabled={isAnyPending}
                                 aria-label={excluded ? `Включить ${s.name} в расчёты` : `Исключить ${s.name} из расчётов`}
                                 onCheckedChange={(checked: boolean) => {
                                   if (checked) {

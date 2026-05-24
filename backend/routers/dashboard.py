@@ -149,11 +149,14 @@ def list_calculations(
     """Live-вычисление расчётов помесячно. Если project_id не задан — по всем проектам."""
     if project_id is None:
         projects = db.query(Project).all()
-        # Bulk-load all exclusions in a single query to avoid N+1
-        all_exclusions = db.query(ProjectSupplierExclusion).all()
+        # Bulk-load all exclusions in a single query to avoid N+1; select only needed columns
+        all_exclusions = db.query(
+            ProjectSupplierExclusion.project_id,
+            ProjectSupplierExclusion.supplier_id,
+        ).all()
         exclusions_by_project: dict[int, set[int]] = {}
-        for exc in all_exclusions:
-            exclusions_by_project.setdefault(exc.project_id, set()).add(exc.supplier_id)
+        for exc_project_id, exc_supplier_id in all_exclusions:
+            exclusions_by_project.setdefault(exc_project_id, set()).add(exc_supplier_id)
         rows: list[dict] = []
         for p in projects:
             excl = exclusions_by_project.get(p.id) or None
