@@ -549,7 +549,6 @@ function SupplierPageContent() {
   })();
 
   const [editOpen, setEditOpen] = useState(false);
-  const [editNonce, setEditNonce] = useState(0);
 
   const detailQ = useSupplierDetail(supplierId);
   const projectsQ = useSupplierProjects(supplierId);
@@ -586,7 +585,7 @@ function SupplierPageContent() {
                 variant="secondary"
                 size="md"
                 leftIcon={<Pencil size={14} />}
-                onClick={() => { setEditOpen(true); setEditNonce((n) => n + 1); }}
+                onClick={() => setEditOpen(true)}
                 disabled={!supplier}
               >
                 Редактировать
@@ -652,7 +651,7 @@ function SupplierPageContent() {
 
       {supplierId && supplier && (
         <EditSupplierDialog
-          key={editNonce}
+          key={`${supplierId}-${editOpen}`}
           open={editOpen}
           onClose={() => setEditOpen(false)}
           supplierId={supplierId}
