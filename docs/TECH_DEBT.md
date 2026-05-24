@@ -78,6 +78,14 @@
   пересылают весь список по wire. Для типичного проекта (десятки счетов в месяц) некритично,
   но при крупном объёме данных стоит заменить на subquery/CTE.
 
+- [ ] **N+1 в `get_projects` / `get_documents` / `get_document`**
+  `crud.projects.get_projects` не делает eager-loading `documents`, но роутер обращается к
+  `p.documents` для подсчёта `doc_count` — один SELECT на проект. Аналогично `get_documents` /
+  `get_document` не загружают `invoices`/`items`, но роутеры их обходят.
+  **Решение:** добавить `selectinload(Project.documents)` в `get_projects` (или считать `doc_count`
+  агрегатной колонкой через `func.count`); добавить `selectinload(Document.invoices)` и
+  `selectinload(Invoice.items)` в `get_documents`/`get_document`.
+
 - [ ] **N+1 в `get_supplier_project_stats`**
   `crud.get_supplier_project_stats` вызывает `_compute_supplier_project_deviation` в Python-цикле.
   Для поставщика на N объектах — N × ~5 SQL-запросов. При ≥20 объектах становится заметным.

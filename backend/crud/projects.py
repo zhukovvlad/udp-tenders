@@ -51,9 +51,9 @@ def get_reference_prices(db: Session, project_id: int = None, material_class_id:
         joinedload(ReferencePrice.project),
         joinedload(ReferencePrice.material_class),
     )
-    if project_id:
+    if project_id is not None:
         q = q.filter(ReferencePrice.project_id == project_id)
-    if material_class_id:
+    if material_class_id is not None:
         q = q.filter(ReferencePrice.material_class_id == material_class_id)
     return q.order_by(ReferencePrice.period_start.desc()).all()
 

@@ -9,9 +9,9 @@ from models import Document, Invoice, InvoiceItem
 
 def get_documents(db: Session, project_id: int = None, status: str = None):
     q = db.query(Document).order_by(Document.uploaded_at.desc())
-    if project_id:
+    if project_id is not None:
         q = q.filter(Document.project_id == project_id)
-    if status:
+    if status is not None:
         q = q.filter(Document.status == status)
     return q.all()
 
