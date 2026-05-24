@@ -147,10 +147,13 @@ def get_supplier_duplicates(db: Session, threshold: float = 85.0) -> list[tuple]
     Внутри SQL similarity() работает в диапазоне 0.0–1.0.
     Возвращаемый score также равен pg_trgm similarity * 100.
     """
+    threshold = float(threshold)
+    if not (0 < threshold <= 100):
+        raise ValueError(f"threshold must be in (0, 100], got {threshold}")
     similarity_threshold = threshold / 100.0
     # SET LOCAL влияет только на оператор % внутри текущей транзакции.
     # Параметры не поддерживаются в SET — значение вставляется напрямую.
-    # Безопасно: threshold валидируется роутером на диапазон (0, 100].
+    # repr(float) всегда даёт числовой литерал, SQL-инъекция невозможна.
     db.execute(text(f"SET LOCAL pg_trgm.similarity_threshold = {similarity_threshold!r}"))
     S1 = aliased(Supplier)
     S2 = aliased(Supplier)
