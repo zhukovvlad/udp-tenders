@@ -1,7 +1,7 @@
 from calendar import monthrange
 from datetime import date
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from models import Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice
@@ -62,6 +62,7 @@ def compute_calculations(
     period_start: date | None = None,
     period_end: date | None = None,
     material_class_id: int | None = None,
+    excluded_supplier_ids: set[int] | None = None,
 ) -> list[dict]:
     """Live-вычисление расчётов по проекту помесячно без записи в БД.
 
@@ -95,18 +96,23 @@ def compute_calculations(
 
     for month_start, month_end in months:
         # Все счета проекта за месяц
-        invoice_ids_month = [
-            row[0] for row in (
-                db.query(Invoice.id)
-                .join(Document, Invoice.document_id == Document.id)
-                .filter(
-                    Document.project_id == project_id,
-                    Invoice.date >= month_start,
-                    Invoice.date <= month_end,
-                )
-                .all()
+        invoice_ids_month_q = (
+            db.query(Invoice.id)
+            .join(Document, Invoice.document_id == Document.id)
+            .filter(
+                Document.project_id == project_id,
+                Invoice.date >= month_start,
+                Invoice.date <= month_end,
             )
-        ]
+        )
+        if excluded_supplier_ids:
+            invoice_ids_month_q = invoice_ids_month_q.filter(
+                or_(
+                    Invoice.supplier_id.is_(None),
+                    Invoice.supplier_id.notin_(excluded_supplier_ids),
+                )
+            )
+        invoice_ids_month = [row[0] for row in invoice_ids_month_q.all()]
         if not invoice_ids_month:
             continue
 
@@ -281,12 +287,16 @@ def compute_calculations(
 
 
 def compute_full_deviation(
-    db: Session, project_id: int, period_start: date, period_end: date
+    db: Session,
+    project_id: int,
+    period_start: date,
+    period_end: date,
+    excluded_supplier_ids: set[int] | None = None,
 ) -> float | None:
     """Compute total deviation_amount for a project over [period_start, period_end].
     Delegates to compute_calculations() — единый источник истины.
     Returns None if no reference prices are available for any class (not 0.0)."""
-    rows = compute_calculations(db, project_id, period_start, period_end)
+    rows = compute_calculations(db, project_id, period_start, period_end, excluded_supplier_ids=excluded_supplier_ids)
     amounts = [r["deviation_amount"] for r in rows if r["deviation_amount"] is not None]
     return round(sum(amounts), 2) if amounts else None
 
@@ -297,6 +307,7 @@ def compute_export_rows(
     period_start: date | None = None,
     period_end: date | None = None,
     material_class_id: int | None = None,
+    excluded_supplier_ids: set[int] | None = None,
 ) -> list[dict]:
     """Per-(invoice, material_class) rows for the detailed Excel report.
 
@@ -324,7 +335,7 @@ def compute_export_rows(
             period_end = max_d.replace(day=monthrange(max_d.year, max_d.month)[1])
 
     # ── All invoices for the project in the requested period ──
-    invoices_raw = (
+    invoices_raw_q = (
         db.query(Invoice.id, Invoice.date, Invoice.number, Invoice.supplier_name, Invoice.vat_rate)
         .join(Document, Invoice.document_id == Document.id)
         .filter(
@@ -333,8 +344,15 @@ def compute_export_rows(
             Invoice.date <= period_end,
         )
         .order_by(Invoice.date, Invoice.number)
-        .all()
     )
+    if excluded_supplier_ids:
+        invoices_raw_q = invoices_raw_q.filter(
+            or_(
+                Invoice.supplier_id.is_(None),
+                Invoice.supplier_id.notin_(excluded_supplier_ids),
+            )
+        )
+    invoices_raw = invoices_raw_q.all()
     if not invoices_raw:
         return []
 

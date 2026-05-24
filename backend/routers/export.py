@@ -11,6 +11,7 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy.orm import Session
 
 from crud.calculations import compute_export_rows
+from crud.supplier_exclusions import get_excluded_supplier_ids
 from database import get_db
 from models import Project
 
@@ -368,7 +369,11 @@ def export_excel(
     if not project:
         raise HTTPException(status_code=404, detail="Проект не найден")
 
-    rows = compute_export_rows(db, project_id, period_start, period_end, material_class_id)
+    excluded = get_excluded_supplier_ids(db, project_id)
+    rows = compute_export_rows(
+        db, project_id, period_start, period_end, material_class_id,
+        excluded_supplier_ids=excluded or None,
+    )
 
     # Actual displayed period from data
     if rows:

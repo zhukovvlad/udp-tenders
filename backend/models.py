@@ -194,6 +194,15 @@ class Supplier(Base):
     invoices = relationship("Invoice", back_populates="supplier")
 
 
+class ProjectSupplierExclusion(Base):
+    __tablename__ = "project_supplier_exclusions"
+
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id", ondelete="CASCADE"), primary_key=True)
+    reason = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
+
+
 class Invoice(Base):
     __tablename__ = "invoices"
 

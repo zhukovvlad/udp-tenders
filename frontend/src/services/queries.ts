@@ -359,3 +359,50 @@ export function useMergeSupplier() {
     },
   });
 }
+
+// ========== Project Suppliers & Exclusions ==========
+
+export function useProjectSuppliers(projectId: ID | null) {
+  return useQuery({
+    queryKey: projectId ? qk.projectSuppliers(projectId) : ["project-suppliers-disabled"],
+    queryFn: () => projectsApi.getSuppliers(projectId!),
+    enabled: projectId !== null,
+  });
+}
+
+export function useSupplierExclusions(projectId: ID | null) {
+  return useQuery({
+    queryKey: projectId ? qk.supplierExclusions(projectId) : ["supplier-exclusions-disabled"],
+    queryFn: async () => {
+      const ids = await projectsApi.getSupplierExclusions(projectId!);
+      return new Set(ids);
+    },
+    enabled: projectId !== null,
+  });
+}
+
+export function useToggleSupplierExclusion(projectId: ID | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      supplierId,
+      excluded,
+      reason,
+    }: {
+      supplierId: ID;
+      excluded: boolean;
+      reason?: string;
+    }) => {
+      if (!projectId) return Promise.resolve();
+      return excluded
+        ? projectsApi.addSupplierExclusion(projectId, supplierId, reason)
+        : projectsApi.removeSupplierExclusion(projectId, supplierId);
+    },
+    onSuccess: () => {
+      if (!projectId) return;
+      qc.invalidateQueries({ queryKey: qk.supplierExclusions(projectId) });
+      qc.invalidateQueries({ queryKey: qk.dashboard.calculations(projectId) });
+      qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
+    },
+  });
+}

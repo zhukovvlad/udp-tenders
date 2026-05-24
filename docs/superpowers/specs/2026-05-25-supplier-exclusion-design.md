@@ -17,12 +17,13 @@
 CREATE TABLE project_supplier_exclusions (
     project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+    reason      TEXT,
     created_at  TIMESTAMP DEFAULT now(),
     PRIMARY KEY (project_id, supplier_id)
 );
 ```
 
-Миграция Alembic. В будущем можно добавить `reason TEXT`, `excluded_by INTEGER FK users`.
+Миграция Alembic. `reason` — необязательное поле, поставщик может быть исключён без объяснения. В будущем можно добавить `excluded_by INTEGER FK users`.
 
 **Ограничение:** инвойсы с `supplier_id IS NULL` (парсер не смог извлечь имя поставщика) всегда участвуют в расчётах — их нельзя исключить через эту механику. Это намеренное ограничение: такие инвойсы считаются невалидными данными, пользователь должен их исправить вручную.
 
@@ -32,7 +33,7 @@ CREATE TABLE project_supplier_exclusions (
 
 ```python
 def get_excluded_supplier_ids(db: Session, project_id: int) -> set[int]
-def set_supplier_excluded(db: Session, project_id: int, supplier_id: int, excluded: bool) -> None
+def set_supplier_excluded(db: Session, project_id: int, supplier_id: int, excluded: bool, reason: str | None = None) -> None
 ```
 
 ### Новые эндпоинты
@@ -45,6 +46,7 @@ GET  /api/projects/{project_id}/suppliers
      Список поставщиков проекта с их supplier_id. Заменяет клиентскую агрегацию.
 
 POST   /api/projects/{project_id}/supplier-exclusions/{supplier_id}
+       Body: {"reason": "..."}  (необязательно)
        → 204 No Content. Добавить исключение (идемпотентно).
 
 DELETE /api/projects/{project_id}/supplier-exclusions/{supplier_id}
@@ -110,7 +112,8 @@ useToggleSupplierExclusion(projectId)   // mutation: POST / DELETE
 - Добавляется колонка «В расчётах» с чекбоксом:
   - ✓ (checked) = поставщик **включён**
   - ☐ (unchecked) = поставщик **исключён**
-- Тогл вызывает мутацию с оптимистичным обновлением (инвалидирует `supplier-exclusions`, `calculations`, `summary`).
+- **Включение** (☐ → ✓): DELETE без подтверждения, оптимистичное обновление.
+- **Исключение** (✓ → ☐): открывается небольшой Popover под строкой с полем «Причина исключения (необязательно)» и кнопками «Исключить» / «Отмена». POST отправляется только после подтверждения. Если поле пустое — `reason: null`. Оптимистичное обновление после подтверждения (инвалидирует `supplier-exclusions`, `calculations`, `summary`).
 - Строки без `supplier_id` — чекбокс `disabled` с тултипом «Назначьте поставщика для управления расчётами».
 
 ### Таб «Обзор» в `ProjectPage.tsx`
@@ -123,5 +126,5 @@ useToggleSupplierExclusion(projectId)   // mutation: POST / DELETE
 ## Что остаётся за рамками
 
 - Исключение конкретного счёта из расчётов — пока закрывается удалением счёта.
-- Поле `reason` для объяснения исключения — можно добавить позже в ту же таблицу.
+- Показ `reason` в таблице — поле сохраняется, но в строке поставщика пока не отображается (tooltip или отдельная колонка — backlog).
 - История изменений / audit log исключений — не MVP.

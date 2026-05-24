@@ -38,7 +38,7 @@ just test-backend         # all pytest (~22s)
 just test-backend-unit    # unit only, no DB, ~1s
 just test-backend-integration  # requires TEST_DATABASE_URL
 
-just test-frontend        # vitest (78 tests, ~10s)
+just test-frontend        # vitest (79 tests, ~10s)
 just lint                 # ruff + eslint
 just typecheck-frontend   # tsc -b --noEmit
 just coverage-backend     # HTML → backend/htmlcov/index.html
@@ -60,13 +60,14 @@ UDP/
 ├── backend/
 │   ├── main.py           — FastAPI app, CORS, routers, middleware, CSRF middleware
 │   ├── config.py         — pydantic-settings Settings (single source of truth for env vars)
-│   ├── models.py         — ORM models (Project, Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice, Supplier, Organization, User, ProjectOrganization, RefreshToken)
-│   ├── crud/             — DB operations split into 5 modules:
+│   ├── models.py         — ORM models (Project, Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice, Supplier, Organization, User, ProjectOrganization, RefreshToken, ProjectSupplierExclusion)
+│   ├── crud/             — DB operations split into 6 modules:
 │   │   ├── projects.py   — Project + ReferencePrice CRUD
 │   │   ├── materials.py  — MaterialClass CRUD + VALID_CALC_ROLES
 │   │   ├── documents.py  — Document + Invoice CRUD
 │   │   ├── calculations.py — avg_price, deviation, export row calculations
-│   │   └── suppliers.py  — Supplier CRUD + analytics aggregates
+│   │   ├── suppliers.py  — Supplier CRUD + analytics aggregates
+│   │   └── supplier_exclusions.py — get_excluded_supplier_ids, set_supplier_excluded
 │   ├── security.py       — pure crypto helpers: hash_password, JWT encode/decode, refresh token, CSRF
 │   ├── auth.py           — FastAPI auth dependencies: get_current_user, require_csrf, require_superuser, require_org_admin, require_org_admin_with_org, ProjectAccess
 │   ├── cli.py            — Click CLI: create-superuser, create-org, create-user
@@ -108,11 +109,14 @@ Organization → Users (org members via OrgRole)
 Organization → Projects (via ProjectOrganization — ProjectRole: customer/contractor)
 Project → Documents → Invoices → InvoiceItems → MaterialClass
 Project → ReferencePrices (project ↔ material_class ↔ period)
+Project → ProjectSupplierExclusion ← Supplier  (исключения поставщиков из расчётов)
 Supplier → Invoices (one supplier, many projects)
 User → RefreshTokens (many, revokable, 14 days)
 ```
 
 `GET /dashboard/calculations` вычисляет данные на лету (нет кеша) через `compute_calculations()` из `crud.calculations` — единый источник истины для аналитики цен. `compute_full_deviation()` делегирует в неё же.
+
+Все три функции расчёта (`compute_calculations`, `compute_full_deviation`, `compute_export_rows`) принимают параметр `excluded_supplier_ids: set[int] | None`. Если передан непустой set, инвойсы исключённых поставщиков фильтруются через `or_(Invoice.supplier_id.is_(None), Invoice.supplier_id.notin_(excluded))` — инвойсы без поставщика всегда включаются. `get_project_summary` в `dashboard.py` также применяет этот фильтр ко всем агрегатам (оборот, объём м³, кол-во счетов).
 
 `GET /api/export/excel?project_id=&period_start=&period_end=&material_class_id=` генерирует openpyxl-файл через `compute_export_rows()` из `crud.calculations` → `routers/export.py`. Возвращает `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`. **16 колонок (A–P):** дата, номер СФ, поставщик, объём м³, плановая цена, ставка НДС, материал/доставка/прочее без НДС, итого без НДС (формула), те же три с НДС (формулы), итого с НДС (формула), откл. % и откл. ₽ (формулы). Месячные строки с агрегатами через SUMPRODUCT-формулы, разделители между месяцами, grand total на класс. Кнопка «Экспорт» в `ProjectPage.tsx` использует `periodStart`/`periodEnd` напрямую (не debounced) — правильно для действия по кнопке.
 
@@ -229,6 +233,20 @@ Frontend URL: `http://localhost:5173`
 See `docs/TECH_DEBT.md` for the full list. Key items:
 - `GET /dashboard/calculations` without `project_id` has N+1 queries (dashboard router) — don't make it worse.
 - `Review.tsx` always uses `invoices[0]` — known bug, multi-invoice docs broken.
+
+---
+
+## Supplier exclusion — key design rules
+
+Пользователь может исключить поставщика из расчётов по конкретному проекту (например, субподрядчик, чьи цены не репрезентативны). Исключение хранится в таблице `project_supplier_exclusions(project_id PK, supplier_id PK, reason TEXT, created_at)`.
+
+- **Scope**: исключение per-project, не глобальное. Поставщик исключается из расчётов avg_price, deviation, export и всех KPI-карточек (оборот, объём м³, счетов) только в рамках этого проекта.
+- **Supplier-side stats** (`crud.suppliers`) — исключения **не применяются**: оборот и аналитика поставщика считаются по всем его инвойсам независимо от проектных исключений.
+- **Invoice.supplier_id IS NULL** — инвойсы без привязанного поставщика **всегда включаются** в расчёт (фильтр: `or_(supplier_id IS NULL, supplier_id NOT IN (excluded))`).
+- **API**: `GET /api/projects/{id}/suppliers` — список поставщиков проекта; `GET /api/projects/{id}/supplier-exclusions` — список исключённых; `POST/DELETE /api/projects/{id}/supplier-exclusions/{supplier_id}` — добавить/снять исключение (204). Тело POST: `{ reason?: string }`.
+- **Frontend**: вкладка «Поставщики» в ProjectPage — чекбоксы с инлайн-формой причины (Escape/Enter). Баннер в обзоре проекта, если есть активные исключения.
+- **Idempotent**: повторный POST не создаёт дублей; повторный DELETE не падает.
+- **Загрузка exclusions** в роутерах: `excluded = get_excluded_supplier_ids(db, project_id)` из `crud.supplier_exclusions`. Передавать `excluded or None` (пустой set → None, чтобы не добавлять лишний WHERE).
 
 ---
 

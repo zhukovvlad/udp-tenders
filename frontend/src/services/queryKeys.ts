@@ -33,4 +33,6 @@ export const qk = {
         : (["suppliers", id, "invoices"] as const),
   },
   settings: { current: ["settings"] as const },
+  projectSuppliers: (projectId: ID) => ["project-suppliers", projectId] as const,
+  supplierExclusions: (projectId: ID) => ["supplier-exclusions", projectId] as const,
 };

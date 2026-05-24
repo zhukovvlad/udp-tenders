@@ -2,10 +2,11 @@ from calendar import monthrange
 from datetime import date
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import distinct, extract, func
+from sqlalchemy import distinct, extract, func, or_
 from sqlalchemy.orm import Session
 
 from crud.calculations import compute_calculations, compute_full_deviation
+from crud.supplier_exclusions import get_excluded_supplier_ids
 from database import get_db
 from models import Document, Invoice, InvoiceItem, Project
 
@@ -15,14 +16,23 @@ router = APIRouter()
 @router.get("/summary")
 def get_project_summary(project_id: int, db: Session = Depends(get_db)):
     """Сводка по проекту: кол-во документов, СФ, позиций, общие суммы + отклонение за весь период."""
+    excluded = get_excluded_supplier_ids(db, project_id)
+
+    def _excl_filter(q):
+        """Добавить фильтр исключённых поставщиков к запросу по Invoice."""
+        if not excluded:
+            return q
+        return q.filter(
+            or_(Invoice.supplier_id.is_(None), Invoice.supplier_id.notin_(excluded))
+        )
+
     doc_count = db.query(func.count(Document.id)).filter(Document.project_id == project_id).scalar()
-    invoice_count = (
+    invoice_count = _excl_filter(
         db.query(func.count(Invoice.id))
         .join(Document, Invoice.document_id == Document.id)
         .filter(Document.project_id == project_id)
-        .scalar()
-    )
-    totals_by_type = (
+    ).scalar()
+    totals_by_type = _excl_filter(
         db.query(
             InvoiceItem.item_type,
             func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)).label("amount"),
@@ -30,21 +40,18 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db)):
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .join(Document, Invoice.document_id == Document.id)
         .filter(Document.project_id == project_id)
-        .group_by(InvoiceItem.item_type)
-        .all()
-    )
+    ).group_by(InvoiceItem.item_type).all()
     by_type = {row.item_type: float(row.amount or 0) for row in totals_by_type}
     total_all = sum(by_type.values())
 
-    total_qty = (
+    total_qty = _excl_filter(
         db.query(func.sum(InvoiceItem.quantity))
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .join(Document, Invoice.document_id == Document.id)
         .filter(Document.project_id == project_id, InvoiceItem.item_type == "material")
-        .scalar() or 0.0
-    )
+    ).scalar() or 0.0
 
-    # Full invoice date range for this project
+    # Full invoice date range for this project (по всем инвойсам, без фильтра — для отображения периода)
     date_bounds = (
         db.query(func.min(Invoice.date), func.max(Invoice.date))
         .join(Document, Invoice.document_id == Document.id)
@@ -62,7 +69,8 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db)):
         last_day = monthrange(last_invoice_date.year, last_invoice_date.month)[1]
         period_end = last_invoice_date.replace(day=last_day)
         full_deviation = compute_full_deviation(
-            db, project_id, period_start, period_end
+            db, project_id, period_start, period_end,
+            excluded_supplier_ids=excluded or None,
         )
 
     return {
@@ -145,7 +153,11 @@ def list_calculations(
         for p in projects:
             rows.extend(compute_calculations(db, p.id, period_start, period_end, material_class_id))
     else:
-        rows = compute_calculations(db, project_id, period_start, period_end, material_class_id)
+        excluded = get_excluded_supplier_ids(db, project_id)
+        rows = compute_calculations(
+            db, project_id, period_start, period_end, material_class_id,
+            excluded_supplier_ids=excluded or None,
+        )
 
     return [
         {
