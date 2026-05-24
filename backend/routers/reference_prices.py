@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
-import crud
+from crud.projects import create_reference_price, delete_reference_price, get_reference_prices, update_reference_price
 from database import get_db
 
 router = APIRouter()
@@ -19,7 +19,7 @@ class ReferencePriceCreate(BaseModel):
 
 @router.get("")
 def list_reference_prices(project_id: int | None = None, material_class_id: int | None = None, db: Session = Depends(get_db)):
-    prices = crud.get_reference_prices(db, project_id, material_class_id)
+    prices = get_reference_prices(db, project_id, material_class_id)
     return [
         {
             "id": rp.id,
@@ -37,8 +37,8 @@ def list_reference_prices(project_id: int | None = None, material_class_id: int 
     ]
 
 @router.post("")
-def create_reference_price(data: ReferencePriceCreate, db: Session = Depends(get_db)):
-    rp = crud.create_reference_price(db, data.project_id, data.material_class_id, data.price, data.period_start, data.period_end, data.source)
+def create_reference_price_route(data: ReferencePriceCreate, db: Session = Depends(get_db)):
+    rp = create_reference_price(db, data.project_id, data.material_class_id, data.price, data.period_start, data.period_end, data.source)
     return {"id": rp.id}
 
 class ReferencePriceUpdate(BaseModel):
@@ -55,10 +55,10 @@ class ReferencePriceUpdate(BaseModel):
         return v
 
 @router.patch("/{rp_id}")
-def update_reference_price(rp_id: int, data: ReferencePriceUpdate, db: Session = Depends(get_db)):
+def update_reference_price_route(rp_id: int, data: ReferencePriceUpdate, db: Session = Depends(get_db)):
     fields = data.model_fields_set
     kwargs = {k: getattr(data, k) for k in ("price", "period_start", "period_end", "source") if k in fields}
-    rp = crud.update_reference_price(db, rp_id, **kwargs)
+    rp = update_reference_price(db, rp_id, **kwargs)
     if not rp:
         raise HTTPException(status_code=404, detail="Эталон не найден")
     return {
@@ -75,8 +75,8 @@ def update_reference_price(rp_id: int, data: ReferencePriceUpdate, db: Session =
     }
 
 @router.delete("/{rp_id}")
-def delete_reference_price(rp_id: int, db: Session = Depends(get_db)):
-    rp = crud.delete_reference_price(db, rp_id)
+def delete_reference_price_route(rp_id: int, db: Session = Depends(get_db)):
+    rp = delete_reference_price(db, rp_id)
     if not rp:
         raise HTTPException(status_code=404, detail="Эталон не найден")
     return {"message": "Удалено"}

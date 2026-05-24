@@ -6,19 +6,22 @@ compute_calculations() является единственным источни�
 from datetime import date
 from unittest.mock import patch
 
-import crud
+import crud.materials as crud_materials
+from crud.calculations import compute_calculations
+from crud.materials import get_or_create_material_class
+from crud.suppliers import _compute_supplier_project_deviation
 
 
 def test_compute_calculations_no_items_returns_empty(factories, db_session):
     project = factories.ProjectFactory.create()
-    result = crud.compute_calculations(db_session, project.id)
+    result = compute_calculations(db_session, project.id)
     assert result == []
 
 
 def test_compute_calculations_no_invoices_returns_empty(factories, db_session):
     project = factories.ProjectFactory.create()
     # Нет инвойсов → авто-диапазон не определяется → []
-    result = crud.compute_calculations(db_session, project.id)
+    result = compute_calculations(db_session, project.id)
     assert result == []
 
 
@@ -31,7 +34,7 @@ def test_compute_calculations_simple_avg(factories, db_session):
         invoice=inv, material_class=mc, quantity=10.0, unit_price=8000.0, amount=80000.0,
     )
 
-    result = crud.compute_calculations(db_session, project.id)
+    result = compute_calculations(db_session, project.id)
 
     assert len(result) == 1
     row = result[0]
@@ -58,7 +61,7 @@ def test_compute_calculations_with_deviation(factories, db_session):
         invoice=inv, material_class=mc, quantity=10.0, unit_price=11000.0, amount=110000.0,
     )
 
-    result = crud.compute_calculations(db_session, project.id)
+    result = compute_calculations(db_session, project.id)
 
     assert len(result) == 1
     row = result[0]
@@ -91,7 +94,7 @@ def test_compute_calculations_delivery_allocation(factories, db_session):
         item_type="delivery", quantity=1.0, unit_price=40000.0, amount=40000.0, vat_amount=8000.0,
     )
 
-    result = crud.compute_calculations(db_session, project.id)
+    result = compute_calculations(db_session, project.id)
     assert len(result) == 2
 
     by_class = {r["material_class_id"]: r for r in result}
@@ -125,7 +128,7 @@ def test_compute_calculations_period_filter(factories, db_session):
     )
 
     # Фильтр только март
-    result = crud.compute_calculations(
+    result = compute_calculations(
         db_session, project.id,
         period_start=date(2026, 3, 1),
         period_end=date(2026, 3, 31),
@@ -149,7 +152,7 @@ def test_compute_calculations_multi_month(factories, db_session):
         invoice=inv_feb, material_class=mc, quantity=8.0, unit_price=8500.0, amount=68000.0,
     )
 
-    result = crud.compute_calculations(db_session, project.id)
+    result = compute_calculations(db_session, project.id)
     assert len(result) == 2
 
     periods = {r["period_start"].month for r in result}
@@ -186,7 +189,7 @@ def test_delivery_not_shared_across_invoices(factories, db_session):
         quantity=10.0, unit_price=7000.0, amount=70000.0, vat_amount=14000.0,
     )
 
-    result = crud.compute_calculations(db_session, project.id)
+    result = compute_calculations(db_session, project.id)
     assert len(result) == 2
 
     by_class = {r["material_class_id"]: r for r in result}
@@ -221,7 +224,7 @@ def test_additives_included_in_avg_price(factories, db_session):
         item_type="material", quantity=1.0, unit_price=5000.0, amount=5000.0, vat_amount=1000.0,
     )
 
-    result = crud.compute_calculations(db_session, project.id)
+    result = compute_calculations(db_session, project.id)
 
     # Только В40 — присадка не даёт отдельной строки в результате
     assert len(result) == 1
@@ -253,7 +256,7 @@ def test_exclude_items_not_in_avg_price(factories, db_session):
         item_type="material", quantity=5.0, unit_price=2000.0, amount=10000.0, vat_amount=2000.0,
     )
 
-    result = crud.compute_calculations(db_session, project.id)
+    result = compute_calculations(db_session, project.id)
 
     # Только В40 — exclude не даёт строки
     assert len(result) == 1
@@ -289,7 +292,7 @@ def test_exclude_items_not_in_denominator(factories, db_session):
         item_type="delivery", quantity=1.0, unit_price=50000.0, amount=50000.0, vat_amount=10000.0,
     )
 
-    result = crud.compute_calculations(db_session, project.id)
+    result = compute_calculations(db_session, project.id)
     assert len(result) == 1
     row = result[0]
 
@@ -321,7 +324,7 @@ def test_multiple_classes_in_one_invoice(factories, db_session):
         item_type="delivery", quantity=1.0, unit_price=120000.0, amount=120000.0, vat_amount=24000.0,
     )
 
-    result = crud.compute_calculations(db_session, project.id)
+    result = compute_calculations(db_session, project.id)
     assert len(result) == 2
 
     by_class = {r["material_class_id"]: r for r in result}
@@ -349,7 +352,7 @@ def test_invoice_without_base_material_does_not_crash(factories, db_session):
         item_type="delivery", quantity=1.0, unit_price=40000.0, amount=40000.0, vat_amount=8000.0,
     )
 
-    result = crud.compute_calculations(db_session, project.id)
+    result = compute_calculations(db_session, project.id)
     assert result == []
 
 
@@ -391,7 +394,7 @@ def test_supplier_deviation_uses_latest_ref_price_no_period_filter(factories, db
         period_start=date(2025, 1, 1), period_end=date(2025, 12, 31),
     )
 
-    deviation_pct, deviation_amount = crud._compute_supplier_project_deviation(
+    deviation_pct, deviation_amount = _compute_supplier_project_deviation(
         db_session, supplier.id, project.id
     )
 
@@ -430,7 +433,7 @@ def test_supplier_deviation_with_delivery_allocation(factories, db_session):
         amount=40000.0, vat_amount=8000.0,
     )
 
-    deviation_pct, deviation_amount = crud._compute_supplier_project_deviation(
+    deviation_pct, deviation_amount = _compute_supplier_project_deviation(
         db_session, supplier.id, project.id
     )
 
@@ -447,7 +450,7 @@ def test_supplier_deviation_returns_none_when_no_invoices(factories, db_session)
     project = factories.ProjectFactory.create()
     supplier = factories.SupplierFactory.create()
 
-    deviation_pct, deviation_amount = crud._compute_supplier_project_deviation(
+    deviation_pct, deviation_amount = _compute_supplier_project_deviation(
         db_session, supplier.id, project.id
     )
 
@@ -469,7 +472,7 @@ def test_supplier_deviation_returns_none_when_no_ref_prices(factories, db_sessio
         quantity=10.0, unit_price=8000.0, amount=80000.0, vat_amount=16000.0,
     )
 
-    deviation_pct, deviation_amount = crud._compute_supplier_project_deviation(
+    deviation_pct, deviation_amount = _compute_supplier_project_deviation(
         db_session, supplier.id, project.id
     )
 
@@ -481,7 +484,7 @@ def test_get_or_create_material_class_invalid_calc_role_raises(db_session):
     """Неизвестный calc_role вызывает ValueError ещё до обращения к БД."""
     import pytest
     with pytest.raises(ValueError, match="calc_role"):
-        crud.get_or_create_material_class(
+        get_or_create_material_class(
             db_session, name="Что-то", material_type="concrete", calc_role="bad_value",
         )
 
@@ -493,8 +496,8 @@ def test_get_or_create_material_class_calc_role_mismatch_logs_warning(factories,
         name="Цементное молоко", material_type="concrete", calc_role="base",
     )
 
-    with patch.object(crud.logger, "warning") as mock_warn:
-        mc_returned = crud.get_or_create_material_class(
+    with patch.object(crud_materials.logger, "warning") as mock_warn:
+        mc_returned = get_or_create_material_class(
             db_session, name="Цементное молоко", material_type="concrete", calc_role="exclude",
         )
 

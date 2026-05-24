@@ -5,7 +5,18 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-import crud
+from crud.suppliers import (
+    delete_supplier,
+    get_or_create_supplier,
+    get_supplier,
+    get_supplier_detail,
+    get_supplier_duplicates,
+    get_supplier_invoices_list,
+    get_supplier_project_stats,
+    get_suppliers_with_stats,
+    merge_suppliers,
+    update_supplier,
+)
 from database import get_db
 from models import Supplier as SupplierModel
 
@@ -30,16 +41,16 @@ class MergeRequest(BaseModel):
 
 @router.get("")
 def list_suppliers(db: Session = Depends(get_db)):
-    results = crud.get_suppliers_with_stats(db)
+    results = get_suppliers_with_stats(db)
     return results
 
 
 @router.get("/{supplier_id}/projects")
 def get_supplier_projects(supplier_id: int, db: Session = Depends(get_db)):
-    supplier = crud.get_supplier(db, supplier_id)
+    supplier = get_supplier(db, supplier_id)
     if not supplier:
         raise HTTPException(status_code=404, detail="Поставщик не найден")
-    return crud.get_supplier_project_stats(db, supplier_id)
+    return get_supplier_project_stats(db, supplier_id)
 
 
 @router.get("/{supplier_id}/invoices-list")
@@ -48,19 +59,19 @@ def get_supplier_invoices(
     project_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    supplier = crud.get_supplier(db, supplier_id)
+    supplier = get_supplier(db, supplier_id)
     if not supplier:
         raise HTTPException(status_code=404, detail="Поставщик не найден")
-    return crud.get_supplier_invoices_list(db, supplier_id, project_id=project_id)
+    return get_supplier_invoices_list(db, supplier_id, project_id=project_id)
 
 
 @router.post("")
-def create_supplier(data: SupplierCreate, db: Session = Depends(get_db)):
+def create_supplier_route(data: SupplierCreate, db: Session = Depends(get_db)):
     name = data.name.strip() if data.name else None
     inn = (data.inn.strip() or None) if data.inn else None
     if not name:
         raise HTTPException(status_code=422, detail="Название поставщика не может быть пустым")
-    supplier = crud.get_or_create_supplier(db, name=name, inn=inn)
+    supplier = get_or_create_supplier(db, name=name, inn=inn)
     try:
         db.commit()
     except IntegrityError as err:
@@ -75,7 +86,7 @@ def create_supplier(data: SupplierCreate, db: Session = Depends(get_db)):
 def list_supplier_duplicates(threshold: float = 85.0, db: Session = Depends(get_db)):
     if not (0 < threshold <= 100):
         raise HTTPException(status_code=422, detail="threshold должен быть в диапазоне (0, 100]")
-    pairs = crud.get_supplier_duplicates(db, threshold)
+    pairs = get_supplier_duplicates(db, threshold)
     return [
         {
             "supplier_a": {"id": a.id, "name": a.name},
@@ -87,21 +98,21 @@ def list_supplier_duplicates(threshold: float = 85.0, db: Session = Depends(get_
 
 
 @router.get("/{supplier_id}")
-def get_supplier(supplier_id: int, db: Session = Depends(get_db)):
-    detail = crud.get_supplier_detail(db, supplier_id)
+def get_supplier_route(supplier_id: int, db: Session = Depends(get_db)):
+    detail = get_supplier_detail(db, supplier_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Поставщик не найден")
     return detail
 
 
 @router.put("/{supplier_id}")
-def update_supplier(supplier_id: int, data: SupplierUpdate, db: Session = Depends(get_db)):
+def update_supplier_route(supplier_id: int, data: SupplierUpdate, db: Session = Depends(get_db)):
     name = data.name.strip() if data.name else None
     inn = (data.inn.strip() or None) if data.inn else None
     if not name:
         raise HTTPException(status_code=422, detail="Название поставщика не может быть пустым")
     try:
-        supplier = crud.update_supplier(db, supplier_id, name=name, inn=inn)
+        supplier = update_supplier(db, supplier_id, name=name, inn=inn)
     except IntegrityError as err:
         db.rollback()
         err_str = str(err.orig).lower() if err.orig else ""
@@ -134,7 +145,7 @@ def update_supplier(supplier_id: int, data: SupplierUpdate, db: Session = Depend
 
 
 @router.delete("/{supplier_id}")
-def delete_supplier(supplier_id: int, db: Session = Depends(get_db)):
+def delete_supplier_route(supplier_id: int, db: Session = Depends(get_db)):
     from models import Invoice
     linked = db.query(Invoice).filter(Invoice.supplier_id == supplier_id).count()
     if linked:
@@ -143,7 +154,7 @@ def delete_supplier(supplier_id: int, db: Session = Depends(get_db)):
             detail=f"Нельзя удалить: поставщик связан с {linked} инвойсами. Используйте merge.",
         )
     try:
-        supplier = crud.delete_supplier(db, supplier_id)
+        supplier = delete_supplier(db, supplier_id)
     except IntegrityError as err:
         db.rollback()
         raise HTTPException(
@@ -157,11 +168,12 @@ def delete_supplier(supplier_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{supplier_id}/merge")
-def merge_suppliers(supplier_id: int, data: MergeRequest, db: Session = Depends(get_db)):
+def merge_suppliers_route(supplier_id: int, data: MergeRequest, db: Session = Depends(get_db)):
     if data.source_id == supplier_id:
         raise HTTPException(status_code=422, detail="source_id и target_id совпадают")
-    result = crud.merge_suppliers(db, source_id=data.source_id, target_id=supplier_id)
+    result = merge_suppliers(db, source_id=data.source_id, target_id=supplier_id)
     if not result:
         raise HTTPException(status_code=404, detail="Поставщик не найден")
     logger.info("Merge: supplier %s absorbed into %s", data.source_id, supplier_id)
     return {"id": result.id, "name": result.name, "inn": result.inn}
+

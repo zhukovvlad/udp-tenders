@@ -7,7 +7,8 @@ from datetime import date
 import httpx
 from sqlalchemy.orm import Session
 
-import crud
+from crud.documents import create_invoice
+from crud.materials import VALID_CALC_ROLES, get_or_create_material_class
 
 logger = logging.getLogger(__name__)
 
@@ -238,7 +239,7 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
                     )
                 if item.get("item_type") == "material" and item.get("material_class"):
                     raw_role = str(item.get("calc_role") or "base").strip().lower()
-                    if raw_role not in crud.VALID_CALC_ROLES:
+                    if raw_role not in VALID_CALC_ROLES:
                         logger.warning(
                             "[doc=%d] СФ №%s поз.%d '%s': неизвестный calc_role=%r от модели, "
                             "используем 'base'",
@@ -246,7 +247,7 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
                             item.get("raw_name", "")[:40], raw_role,
                         )
                         raw_role = "base"
-                    mc = crud.get_or_create_material_class(
+                    mc = get_or_create_material_class(
                         db,
                         name=item["material_class"],
                         material_type=item.get("material_type", "other"),
@@ -285,7 +286,7 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
                 logger.error(f"[doc={document_id}] СФ №{inv_number}: некорректная дата '{inv_data.get('date')}': {e}")
                 continue
 
-            invoice = crud.create_invoice(
+            invoice = create_invoice(
                 db,
                 document_id=document_id,
                 number=inv_data.get("number", ""),
