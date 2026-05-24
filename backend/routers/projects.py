@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from crud.projects import create_project, delete_project, get_projects, update_project
 from crud.supplier_exclusions import get_excluded_supplier_ids, set_supplier_excluded
 from database import get_db
-from models import Document, Invoice, Supplier
+from models import Document, Invoice, Project, Supplier
 
 router = APIRouter()
 
@@ -81,8 +81,9 @@ def add_supplier_exclusion(
     data: ExclusionCreate,
     db: Session = Depends(get_db),
 ):
-    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
-    if not supplier:
+    if not db.query(Project).filter(Project.id == project_id).first():
+        raise HTTPException(status_code=404, detail="Проект не найден")
+    if not db.query(Supplier).filter(Supplier.id == supplier_id).first():
         raise HTTPException(status_code=404, detail="Поставщик не найден")
     set_supplier_excluded(db, project_id, supplier_id, excluded=True, reason=data.reason)
     return Response(status_code=204)
@@ -94,6 +95,8 @@ def remove_supplier_exclusion(
     supplier_id: int,
     db: Session = Depends(get_db),
 ):
+    if not db.query(Project).filter(Project.id == project_id).first():
+        raise HTTPException(status_code=404, detail="Проект не найден")
     set_supplier_excluded(db, project_id, supplier_id, excluded=False)
     return Response(status_code=204)
 

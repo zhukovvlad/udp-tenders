@@ -35,63 +35,48 @@ class TestGetExcludedSupplierIds:
 class TestSetSupplierExcluded:
     def test_adds_exclusion_when_excluded_true(self):
         from crud.supplier_exclusions import set_supplier_excluded
-        from models import ProjectSupplierExclusion
 
         db = MagicMock()
-        existing_q = MagicMock()
-        db.query.return_value = existing_q
-        existing_q.filter.return_value = existing_q
-        existing_q.first.return_value = None  # не существует
 
         set_supplier_excluded(db, project_id=1, supplier_id=7, excluded=True, reason="Аварийная закупка")
 
-        db.add.assert_called_once()
-        added = db.add.call_args[0][0]
-        assert isinstance(added, ProjectSupplierExclusion)
-        assert added.project_id == 1
-        assert added.supplier_id == 7
-        assert added.reason == "Аварийная закупка"
+        db.execute.assert_called_once()
         db.commit.assert_called_once()
 
     def test_noop_when_adding_already_existing_exclusion(self):
+        """ON CONFLICT DO NOTHING: always executes+commits; idempotency is DB-level."""
         from crud.supplier_exclusions import set_supplier_excluded
 
         db = MagicMock()
-        existing_q = MagicMock()
-        db.query.return_value = existing_q
-        existing_q.filter.return_value = existing_q
-        existing_q.first.return_value = MagicMock()  # уже существует
 
         set_supplier_excluded(db, project_id=1, supplier_id=7, excluded=True)
+        set_supplier_excluded(db, project_id=1, supplier_id=7, excluded=True)
 
-        db.add.assert_not_called()
-        db.commit.assert_not_called()
+        assert db.execute.call_count == 2
+        assert db.commit.call_count == 2
 
     def test_deletes_exclusion_when_excluded_false(self):
         from crud.supplier_exclusions import set_supplier_excluded
 
-        existing = MagicMock()
         db = MagicMock()
-        existing_q = MagicMock()
-        db.query.return_value = existing_q
-        existing_q.filter.return_value = existing_q
-        existing_q.first.return_value = existing
+        filter_q = MagicMock()
+        db.query.return_value.filter.return_value = filter_q
 
         set_supplier_excluded(db, project_id=1, supplier_id=7, excluded=False)
 
-        db.delete.assert_called_once_with(existing)
+        filter_q.delete.assert_called_once()
         db.commit.assert_called_once()
 
     def test_noop_when_removing_nonexistent_exclusion(self):
+        """Bulk DELETE with 0 rows affected is idempotent; commit is still called."""
         from crud.supplier_exclusions import set_supplier_excluded
 
         db = MagicMock()
-        existing_q = MagicMock()
-        db.query.return_value = existing_q
-        existing_q.filter.return_value = existing_q
-        existing_q.first.return_value = None  # нет записи
+        filter_q = MagicMock()
+        filter_q.delete.return_value = 0  # 0 rows deleted
+        db.query.return_value.filter.return_value = filter_q
 
         set_supplier_excluded(db, project_id=1, supplier_id=7, excluded=False)
 
-        db.delete.assert_not_called()
-        db.commit.assert_not_called()
+        filter_q.delete.assert_called_once()
+        db.commit.assert_called_once()

@@ -401,7 +401,8 @@ export function useToggleSupplierExclusion(projectId: ID | null) {
     onSuccess: () => {
       if (!projectId) return;
       qc.invalidateQueries({ queryKey: qk.supplierExclusions(projectId) });
-      qc.invalidateQueries({ queryKey: qk.dashboard.calculations(projectId) });
+      // invalidate by prefix so all period variants are matched
+      qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
       qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
     },
   });

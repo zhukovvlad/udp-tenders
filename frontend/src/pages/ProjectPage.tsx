@@ -1,7 +1,7 @@
 import { toast } from "sonner";
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Download, Plus, Trash2, Pencil } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Plus, Trash2, Pencil } from "lucide-react";
 
 import { Breadcrumbs } from "@/components/ui-domain/Breadcrumbs";
 import { PageHeader } from "@/components/ui-domain/PageHeader";
@@ -938,22 +938,29 @@ export default function ProjectPage() {
                     {(projectSuppliersQ.data ?? []).map((s) => {
                       const excluded = supplierExclusionsQ.data?.has(s.id) ?? false;
                       const isPopoverOpen = exclusionPopover?.supplierId === s.id;
+                      const isPending =
+                        toggleExclusion.isPending &&
+                        toggleExclusion.variables?.supplierId === s.id;
                       return (
                         <tr
                           key={s.id}
                           className="border-b border-border-subtle last:border-0 hover:bg-surface-hover"
                         >
                           <td className="px-4 py-2 text-center">
-                            <Checkbox
-                              checked={!excluded}
-                              onCheckedChange={(checked: boolean) => {
-                                if (checked) {
-                                  toggleExclusion.mutate({ supplierId: s.id, excluded: false });
-                                } else {
-                                  setExclusionPopover({ supplierId: s.id, reason: "" });
-                                }
-                              }}
-                            />
+                            {isPending ? (
+                              <Loader2 className="mx-auto size-4 animate-spin text-fg-tertiary" />
+                            ) : (
+                              <Checkbox
+                                checked={!excluded}
+                                onCheckedChange={(checked: boolean) => {
+                                  if (checked) {
+                                    toggleExclusion.mutate({ supplierId: s.id, excluded: false });
+                                  } else {
+                                    setExclusionPopover({ supplierId: s.id, reason: "" });
+                                  }
+                                }}
+                              />
+                            )}
                           </td>
                           <td className="px-4 py-2 text-fg">
                             <div>

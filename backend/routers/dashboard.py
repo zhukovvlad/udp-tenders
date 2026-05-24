@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from crud.calculations import compute_calculations, compute_full_deviation
 from crud.supplier_exclusions import get_excluded_supplier_ids
 from database import get_db
-from models import Document, Invoice, InvoiceItem, Project
+from models import Document, Invoice, InvoiceItem, Project, ProjectSupplierExclusion
 
 router = APIRouter()
 
@@ -149,9 +149,15 @@ def list_calculations(
     """Live-вычисление расчётов помесячно. Если project_id не задан — по всем проектам."""
     if project_id is None:
         projects = db.query(Project).all()
+        # Bulk-load all exclusions in a single query to avoid N+1
+        all_exclusions = db.query(ProjectSupplierExclusion).all()
+        exclusions_by_project: dict[int, set[int]] = {}
+        for exc in all_exclusions:
+            exclusions_by_project.setdefault(exc.project_id, set()).add(exc.supplier_id)
         rows: list[dict] = []
         for p in projects:
-            rows.extend(compute_calculations(db, p.id, period_start, period_end, material_class_id))
+            excl = exclusions_by_project.get(p.id) or None
+            rows.extend(compute_calculations(db, p.id, period_start, period_end, material_class_id, excluded_supplier_ids=excl))
     else:
         excluded = get_excluded_supplier_ids(db, project_id)
         rows = compute_calculations(

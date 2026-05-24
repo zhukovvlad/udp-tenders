@@ -1,3 +1,4 @@
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from models import ProjectSupplierExclusion
@@ -20,26 +21,18 @@ def set_supplier_excluded(
     excluded: bool,
     reason: str | None = None,
 ) -> None:
-    """Добавить или убрать исключение поставщика для проекта. Идемпотентно."""
-    existing = (
-        db.query(ProjectSupplierExclusion)
-        .filter(
+    """Добавить или убрать исключение поставщика для проекта. Идемпотентно и race-safe."""
+    if excluded:
+        stmt = (
+            pg_insert(ProjectSupplierExclusion)
+            .values(project_id=project_id, supplier_id=supplier_id, reason=reason)
+            .on_conflict_do_nothing(index_elements=["project_id", "supplier_id"])
+        )
+        db.execute(stmt)
+        db.commit()
+    else:
+        db.query(ProjectSupplierExclusion).filter(
             ProjectSupplierExclusion.project_id == project_id,
             ProjectSupplierExclusion.supplier_id == supplier_id,
-        )
-        .first()
-    )
-    if excluded:
-        if existing is None:
-            db.add(
-                ProjectSupplierExclusion(
-                    project_id=project_id,
-                    supplier_id=supplier_id,
-                    reason=reason,
-                )
-            )
-            db.commit()
-    else:
-        if existing is not None:
-            db.delete(existing)
-            db.commit()
+        ).delete()
+        db.commit()

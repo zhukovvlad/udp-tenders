@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy import (
@@ -199,7 +200,7 @@ class ProjectSupplierExclusion(Base):
 
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
     supplier_id = Column(Integer, ForeignKey("suppliers.id", ondelete="CASCADE"), primary_key=True)
-    reason = Column(String, nullable=True)
+    reason = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
 
 
