@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { Download, Lightbulb, Pencil } from "lucide-react";
 import axios from "axios";
@@ -80,21 +80,14 @@ function EditSupplierDialog({
   // second-step state: merge confirmation
   const [conflict, setConflict] = useState<InnConflict | null>(null);
 
-  // Сброс стейта при каждом открытии (иначе прошлые черновики остаются).
-  useEffect(() => {
-    if (open) {
-      setName(initialName);
-      setInn(initialInn ?? "");
-      setFieldError(null);
-      setConflict(null);
-    }
-  }, [open, initialName, initialInn]);
-
   const updateMut = useUpdateSupplier();
   const mergeMut = useMergeSupplier();
 
+  const isBusy = updateMut.isPending || mergeMut.isPending;
+
   function handleOpenChange(v: boolean) {
     if (!v) {
+      if (isBusy) return; // block close while mutation is in-flight
       setFieldError(null);
       setConflict(null);
       onClose();
@@ -144,8 +137,6 @@ function EditSupplierDialog({
       setConflict(null);
     }
   }
-
-  const isBusy = updateMut.isPending || mergeMut.isPending;
 
   // ── merge confirmation screen ──────────────────────────────────
   if (conflict) {
@@ -550,7 +541,7 @@ function TabSkeleton() {
 
 // ─── Main page ───────────────────────────────────────────────────
 
-export default function SupplierPage() {
+function SupplierPageContent() {
   const { id } = useParams<{ id: string }>();
   const supplierId = (() => {
     const parsed = Number(id);
@@ -660,6 +651,7 @@ export default function SupplierPage() {
 
       {supplierId && supplier && (
         <EditSupplierDialog
+          key={`${supplierId}-${editOpen}`}
           open={editOpen}
           onClose={() => setEditOpen(false)}
           supplierId={supplierId}
@@ -671,3 +663,11 @@ export default function SupplierPage() {
   );
 }
 
+/**
+ * key={id} пересоздаёт компонент при переходе между поставщиками,
+ * сбрасывая editOpen и активную вкладку автоматически.
+ */
+export default function SupplierPage() {
+  const { id } = useParams<{ id: string }>();
+  return <SupplierPageContent key={id} />;
+}
