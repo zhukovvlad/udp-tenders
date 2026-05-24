@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import distinct, extract, func
 from sqlalchemy.orm import Session
 
-import crud
+from crud.calculations import compute_calculations, compute_full_deviation
 from database import get_db
 from models import Document, Invoice, InvoiceItem, Project
 
@@ -61,7 +61,7 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db)):
         period_start = first_invoice_date.replace(day=1)
         last_day = monthrange(last_invoice_date.year, last_invoice_date.month)[1]
         period_end = last_invoice_date.replace(day=last_day)
-        full_deviation = crud.compute_full_deviation(
+        full_deviation = compute_full_deviation(
             db, project_id, period_start, period_end
         )
 
@@ -143,9 +143,9 @@ def list_calculations(
         projects = db.query(Project).all()
         rows: list[dict] = []
         for p in projects:
-            rows.extend(crud.compute_calculations(db, p.id, period_start, period_end, material_class_id))
+            rows.extend(compute_calculations(db, p.id, period_start, period_end, material_class_id))
     else:
-        rows = crud.compute_calculations(db, project_id, period_start, period_end, material_class_id)
+        rows = compute_calculations(db, project_id, period_start, period_end, material_class_id)
 
     return [
         {

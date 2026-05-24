@@ -7,7 +7,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-import crud
+from crud.documents import create_document, delete_document, get_document, get_documents
+from crud.suppliers import get_or_create_supplier
 from database import get_db
 from models import Invoice, InvoiceItem, MaterialClass
 from s3 import delete_file, download_file, ensure_bucket, upload_file
@@ -113,7 +114,7 @@ def _serialize_document(doc) -> dict:
 
 @router.get("/documents")
 def list_documents(project_id: int | None = None, db: Session = Depends(get_db)):
-    docs = crud.get_documents(db, project_id)
+    docs = get_documents(db, project_id)
     return [
         {
             "id": doc.id,
@@ -132,7 +133,7 @@ def list_documents(project_id: int | None = None, db: Session = Depends(get_db))
 
 @router.get("/documents/{doc_id}")
 def get_document_detail(doc_id: int, db: Session = Depends(get_db)):
-    doc = crud.get_document(db, doc_id)
+    doc = get_document(db, doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
     return _serialize_document(doc)
@@ -140,7 +141,7 @@ def get_document_detail(doc_id: int, db: Session = Depends(get_db)):
 
 @router.get("/documents/{doc_id}/pdf")
 def get_document_pdf(doc_id: int, db: Session = Depends(get_db)):
-    doc = crud.get_document(db, doc_id)
+    doc = get_document(db, doc_id)
     if not doc or not doc.s3_key:
         raise HTTPException(status_code=404, detail="PDF не найден")
     try:
@@ -154,7 +155,7 @@ def get_document_pdf(doc_id: int, db: Session = Depends(get_db)):
 async def reparse_document(doc_id: int, db: Session = Depends(get_db)):
     """Повторить парсинг документа. Удаляет ранее распознанные СФ и парсит заново из S3."""
     logger.info(f"Reparse документа id={doc_id}")
-    doc = crud.get_document(db, doc_id)
+    doc = get_document(db, doc_id)
     if not doc:
         logger.warning(f"Reparse: документ id={doc_id} не найден")
         raise HTTPException(status_code=404, detail="Документ не найден")
@@ -222,7 +223,7 @@ async def upload_pdf(
         logger.exception("Upload: ошибка загрузки в S3")
         raise HTTPException(status_code=500, detail="Не удалось сохранить файл в хранилище")
 
-    doc = crud.create_document(db, project_id, file.filename, object_name)
+    doc = create_document(db, project_id, file.filename, object_name)
     logger.info(f"Upload: создан документ id={doc.id}")
 
     from pdf_parser import parse_invoice_pdf
@@ -262,7 +263,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
         raise HTTPException(status_code=422, detail="supplier_name обязателен при указании supplier_inn")
     invoice.vat_rate = data.vat_rate
     if _name:
-        supplier = crud.get_or_create_supplier(db, name=_name, inn=_inn)
+        supplier = get_or_create_supplier(db, name=_name, inn=_inn)
         invoice.supplier_id = supplier.id
         invoice.supplier_name = supplier.name
         invoice.supplier_inn = supplier.inn
@@ -350,8 +351,8 @@ def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/documents/{doc_id}")
-def delete_document(doc_id: int, db: Session = Depends(get_db)):
-    doc = crud.get_document(db, doc_id)
+def delete_document_route(doc_id: int, db: Session = Depends(get_db)):
+    doc = get_document(db, doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
     if any(inv.verified for inv in doc.invoices):
@@ -361,5 +362,5 @@ def delete_document(doc_id: int, db: Session = Depends(get_db)):
             delete_file(doc.s3_key)
         except Exception:
             pass
-    crud.delete_document(db, doc_id)
+    delete_document(db, doc_id)
     return {"message": "Удалено"}

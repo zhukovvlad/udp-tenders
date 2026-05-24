@@ -1,5 +1,5 @@
 """Интеграционные тесты роутера /api/suppliers."""
-import crud
+from crud.suppliers import get_or_create_supplier
 
 # --- GET /api/suppliers ---
 
@@ -148,22 +148,22 @@ def test_duplicates_invalid_threshold(client):
 # --- CRUD: get_or_create_supplier ---
 
 def test_get_or_create_supplier_by_inn(db_session):
-    s1 = crud.get_or_create_supplier(db_session, name="ООО Бетон", inn="1112223334")
-    s2 = crud.get_or_create_supplier(db_session, name="ООО Бетон Другое", inn="1112223334")
+    s1 = get_or_create_supplier(db_session, name="ООО Бетон", inn="1112223334")
+    s2 = get_or_create_supplier(db_session, name="ООО Бетон Другое", inn="1112223334")
     # Тот же ИНН → тот же объект
     assert s1.id == s2.id
     assert s1.name == "ООО Бетон"
 
 
 def test_get_or_create_supplier_by_name_no_inn(db_session):
-    s1 = crud.get_or_create_supplier(db_session, name="ООО Ромашка", inn=None)
-    s2 = crud.get_or_create_supplier(db_session, name="ООО Ромашка", inn=None)
+    s1 = get_or_create_supplier(db_session, name="ООО Ромашка", inn=None)
+    s2 = get_or_create_supplier(db_session, name="ООО Ромашка", inn=None)
     assert s1.id == s2.id
 
 
 def test_get_or_create_supplier_different_names_no_inn(db_session):
-    s1 = crud.get_or_create_supplier(db_session, name="ООО Ромашка", inn=None)
-    s2 = crud.get_or_create_supplier(db_session, name="ООО Лютик", inn=None)
+    s1 = get_or_create_supplier(db_session, name="ООО Ромашка", inn=None)
+    s2 = get_or_create_supplier(db_session, name="ООО Лютик", inn=None)
     assert s1.id != s2.id
 
 

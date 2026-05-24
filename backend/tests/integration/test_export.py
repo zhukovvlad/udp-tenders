@@ -14,7 +14,7 @@ from io import BytesIO
 import pytest
 from openpyxl import load_workbook
 
-import crud
+from crud.calculations import compute_export_rows
 
 # ---------------------------------------------------------------------------
 # Sheet-scanning helpers
@@ -47,7 +47,7 @@ class TestComputeExportRows:
 
     def test_empty_when_no_invoices(self, db_session, factories):
         project = factories.ProjectFactory.create()
-        assert crud.compute_export_rows(db_session, project.id) == []
+        assert compute_export_rows(db_session, project.id) == []
 
     def test_empty_when_period_excludes_all_invoices(self, db_session, factories):
         project = factories.ProjectFactory.create()
@@ -56,7 +56,7 @@ class TestComputeExportRows:
         inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 1, 15))
         factories.InvoiceItemFactory.create(invoice=inv, material_class=mc, quantity=10.0)
 
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -73,7 +73,7 @@ class TestComputeExportRows:
             quantity=1.0, unit_price=50_000.0,
             amount=50_000.0, vat_amount=10_000.0,
         )
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -91,7 +91,7 @@ class TestComputeExportRows:
             quantity=100.0, unit_price=5000.0,
             amount=500_000.0, vat_amount=100_000.0,
         )
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -119,7 +119,7 @@ class TestComputeExportRows:
             quantity=100.0, unit_price=5000.0,
             amount=500_000.0, vat_amount=100_000.0,
         )
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -140,7 +140,7 @@ class TestComputeExportRows:
             quantity=10.0, unit_price=6000.0,
             amount=60_000.0, vat_amount=None,
         )
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -160,7 +160,7 @@ class TestComputeExportRows:
             quantity=10.0, unit_price=6000.0,
             amount=60_000.0, vat_amount=None,
         )
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -179,7 +179,7 @@ class TestComputeExportRows:
             invoice=inv, item_type="delivery",
             quantity=1.0, unit_price=10_000.0, amount=10_000.0, vat_amount=2_000.0,
         )
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -196,7 +196,7 @@ class TestComputeExportRows:
         doc = factories.DocumentFactory.create(project=project)
         inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10))
         factories.InvoiceItemFactory.create(invoice=inv, material_class=mc, quantity=10.0)
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -223,7 +223,7 @@ class TestComputeExportRows:
             invoice=inv, item_type="delivery",
             quantity=1.0, unit_price=100_000.0, amount=100_000.0, vat_amount=20_000.0,
         )
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -246,7 +246,7 @@ class TestComputeExportRows:
         doc = factories.DocumentFactory.create(project=project)
         inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10))
         factories.InvoiceItemFactory.create(invoice=inv, material_class=mc, quantity=10.0)
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -269,7 +269,7 @@ class TestComputeExportRows:
             invoice=inv, material_class=mc_add, item_type="material",
             quantity=1.0, unit_price=20_000.0, amount=20_000.0, vat_amount=4_000.0,
         )
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -289,7 +289,7 @@ class TestComputeExportRows:
         doc = factories.DocumentFactory.create(project=project)
         inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10))
         factories.InvoiceItemFactory.create(invoice=inv, material_class=mc, quantity=10.0)
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -309,7 +309,7 @@ class TestComputeExportRows:
         doc = factories.DocumentFactory.create(project=project)
         inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10))
         factories.InvoiceItemFactory.create(invoice=inv, material_class=mc, quantity=10.0)
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -330,7 +330,7 @@ class TestComputeExportRows:
             invoice=inv, material_class=mc,
             quantity=10.0, unit_price=5000.0, amount=50_000.0, vat_amount=10_000.0,
         )
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -353,7 +353,7 @@ class TestComputeExportRows:
             invoice=inv, material_class=mc,
             quantity=10.0, unit_price=6000.0, amount=60_000.0, vat_amount=12_000.0,
         )
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -376,7 +376,7 @@ class TestComputeExportRows:
             invoice=inv, material_class=mc,
             quantity=10.0, unit_price=4000.0, amount=40_000.0, vat_amount=8_000.0,
         )
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -394,7 +394,7 @@ class TestComputeExportRows:
         inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10))
         factories.InvoiceItemFactory.create(invoice=inv, material_class=mc1, quantity=10.0)
         factories.InvoiceItemFactory.create(invoice=inv, material_class=mc2, quantity=5.0)
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
             material_class_id=mc1.id,
@@ -413,7 +413,7 @@ class TestComputeExportRows:
             factories.InvoiceItemFactory.create(invoice=inv, material_class=mc_b25, quantity=10.0)
             factories.InvoiceItemFactory.create(invoice=inv, material_class=mc_b30, quantity=10.0)
 
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
@@ -430,7 +430,7 @@ class TestComputeExportRows:
         inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 4, 15))
         factories.InvoiceItemFactory.create(invoice=inv, material_class=mc, quantity=10.0)
 
-        rows = crud.compute_export_rows(db_session, project.id)
+        rows = compute_export_rows(db_session, project.id)
         assert len(rows) == 1
         assert rows[0]["invoice_date"] == date(2026, 4, 15)
 
@@ -444,7 +444,7 @@ class TestComputeExportRows:
         factories.InvoiceItemFactory.create(invoice=inv1, material_class=mc, quantity=50.0)
         factories.InvoiceItemFactory.create(invoice=inv2, material_class=mc, quantity=80.0)
 
-        rows = crud.compute_export_rows(
+        rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )

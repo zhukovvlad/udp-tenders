@@ -10,7 +10,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from sqlalchemy.orm import Session
 
-import crud
+from crud.calculations import compute_export_rows
 from database import get_db
 from models import Project
 
@@ -368,7 +368,7 @@ def export_excel(
     if not project:
         raise HTTPException(status_code=404, detail="Проект не найден")
 
-    rows = crud.compute_export_rows(db, project_id, period_start, period_end, material_class_id)
+    rows = compute_export_rows(db, project_id, period_start, period_end, material_class_id)
 
     # Actual displayed period from data
     if rows:
