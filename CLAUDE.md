@@ -175,7 +175,7 @@ deviation_amount = (avg_price − ref_price) × qty
 ## Testing conventions
 
 ### Backend
-- **Unit tests** (`tests/unit/`): no DB, pure functions. Includes `test_security.py` (14 tests) and `test_auth_deps.py` (20 tests).
+- **Unit tests** (`tests/unit/`): no DB, pure functions. **78 tests total.** Includes `test_security.py` (14 tests), `test_auth_deps.py` (20 tests), `test_supplier_exclusions.py` (10 tests).
 - **Integration tests** (`tests/integration/`): require `TEST_DATABASE_URL` (separate Neon branch). Each test runs in a transaction + savepoint → full isolation, automatic rollback.
 - **Fixtures**: `factory_boy` factories in `tests/factories.py`. AI responses mocked via `respx` + JSON fixtures in `tests/fixtures/openrouter/`.
 - `block_real_openrouter` autouse fixture — any accidental real call fails loudly.
@@ -183,7 +183,7 @@ deviation_amount = (avg_price − ref_price) × qty
 - **Auth in tests**: the `client` fixture in `conftest.py` overrides `get_current_user` with a mock superuser and sets the CSRF cookie + header (`X-CSRF-Token: test-csrf-token`). Integration tests are auth-transparent.
 
 ### Frontend
-- All API calls via MSW v2 (`src/test/server.ts` + `src/test/handlers.ts`). `onUnhandledRequest: "error"` — add a handler for every new endpoint.
+- All API calls via MSW v2 (`src/test/server.ts` + `src/test/handlers.ts`). `onUnhandledRequest: "error"` — add a handler for every new endpoint. **89 tests total** across 11 test files.
 - `renderWithProviders` from `src/test/utils.tsx` — wraps in QueryClient (retries=0), MemoryRouter, ThemeProvider. Accepts `initialUser` param (default: `DEFAULT_TEST_USER`); pass `null` for unauthenticated scenarios.
 - New endpoint? Add to `handlers.ts` before writing the test.
 - Binary endpoints (blob/arraybuffer) must return `HttpResponse.arrayBuffer(...)` in MSW handlers, not `HttpResponse.json(...)`.
@@ -243,7 +243,7 @@ See `docs/TECH_DEBT.md` for the full list. Key items:
 - **Scope**: исключение per-project, не глобальное. Поставщик исключается из расчётов avg_price, deviation, export и всех KPI-карточек (оборот, объём м³, счетов) только в рамках этого проекта.
 - **Supplier-side stats** (`crud.suppliers`) — исключения **не применяются**: оборот и аналитика поставщика считаются по всем его инвойсам независимо от проектных исключений.
 - **Invoice.supplier_id IS NULL** — инвойсы без привязанного поставщика **всегда включаются** в расчёт (фильтр: `or_(supplier_id IS NULL, supplier_id NOT IN (excluded))`).
-- **API**: `GET /api/projects/{id}/suppliers` — список поставщиков проекта; `GET /api/projects/{id}/supplier-exclusions` — список исключённых; `POST/DELETE /api/projects/{id}/supplier-exclusions/{supplier_id}` — добавить/снять исключение (204). Тело POST: `{ reason?: string }`.
+- **API**: `GET /api/projects/{id}/suppliers` → `[{ id, name, inn, invoice_count }]`; `GET /api/projects/{id}/supplier-exclusions` → `list[int]` (sorted supplier_ids, not objects); `POST/DELETE /api/projects/{id}/supplier-exclusions/{supplier_id}` — добавить/снять исключение (204). Тело POST: `{ reason?: string }`.
 - **Frontend**: вкладка «Поставщики» в ProjectPage — чекбоксы с инлайн-формой причины (Escape/Enter). Баннер в обзоре проекта, если есть активные исключения.
 - **Idempotent**: повторный POST не создаёт дублей; повторный DELETE не падает.
 - **Загрузка exclusions** в роутерах: `excluded = get_excluded_supplier_ids(db, project_id)` из `crud.supplier_exclusions`. Передавать `excluded or None` (пустой set → None, чтобы не добавлять лишний WHERE).

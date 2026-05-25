@@ -160,7 +160,12 @@ def list_calculations(
         rows: list[dict] = []
         for p in projects:
             excl = exclusions_by_project.get(p.id) or None
-            rows.extend(compute_calculations(db, p.id, period_start, period_end, material_class_id, excluded_supplier_ids=excl))
+            rows.extend(
+                compute_calculations(
+                    db, p.id, period_start, period_end, material_class_id,
+                    excluded_supplier_ids=excl,
+                )
+            )
     else:
         excluded = get_excluded_supplier_ids(db, project_id)
         rows = compute_calculations(
