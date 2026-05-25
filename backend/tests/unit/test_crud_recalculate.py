@@ -362,10 +362,10 @@ def test_invoice_without_base_material_does_not_crash(factories, db_session):
 
 
 def test_supplier_deviation_uses_latest_ref_price_no_period_filter(factories, db_session):
-    """_compute_supplier_project_deviation использует самую свежую плановую цену по классу
+    """_compute_supplier_project_deviation использует самую свежую базовую цену по классу
     без привязки к периоду — в отличие от compute_calculations, которая фильтрует по периоду.
 
-    Сценарий: счёт за 2025, есть две плановые цены — старая (2025) и новая (2026).
+    Сценарий: счёт за 2025, есть две базовые цены — старая (2025) и новая (2026).
     Функция должна взять 2026 (более поздний period_start), а не 2025 (совпадает с датой счёта).
     """
     project = factories.ProjectFactory.create()
@@ -381,14 +381,14 @@ def test_supplier_deviation_uses_latest_ref_price_no_period_filter(factories, db
         quantity=10.0, unit_price=8000.0, amount=80000.0, vat_amount=16000.0,
     )
 
-    # Новая плановая цена — период не совпадает с датой счёта
+    # Новая базовая цена — период не совпадает с датой счёта
     # Создаётся первой, чтобы тест не мог пройти случайно из-за порядка вставки;
     # функция обязана явно сортировать по period_start DESC, а не по insertion order.
     factories.ReferencePriceFactory.create(
         project=project, material_class=mc, price=10000.0,
         period_start=date(2026, 1, 1), period_end=date(2026, 12, 31),
     )
-    # Старая плановая цена — период совпадает с датой счёта
+    # Старая базовая цена — период совпадает с датой счёта
     factories.ReferencePriceFactory.create(
         project=project, material_class=mc, price=9000.0,
         period_start=date(2025, 1, 1), period_end=date(2025, 12, 31),
@@ -459,7 +459,7 @@ def test_supplier_deviation_returns_none_when_no_invoices(factories, db_session)
 
 
 def test_supplier_deviation_returns_none_when_no_ref_prices(factories, db_session):
-    """Нет плановых цен → функция возвращает (None, None), не 0."""
+    """Нет базовых цен → функция возвращает (None, None), не 0."""
     project = factories.ProjectFactory.create()
     supplier = factories.SupplierFactory.create()
     mc = factories.MaterialClassFactory.create()

@@ -452,6 +452,69 @@ class TestComputeExportRows:
         qtys = {r["qty"] for r in rows}
         assert qtys == {50.0, 80.0}
 
+    # ── Supplier exclusion ───────────────────────────────────────────────────
+
+    def test_excluded_supplier_rows_omitted(self, db_session, factories):
+        """compute_export_rows не включает инвойсы исключённых поставщиков.
+
+        Инвойсы без supplier_id (supplier_id IS NULL) при этом остаются —
+        фильтр «OR supplier_id IS NULL» в excluded_supplier_ids.
+        """
+        from models import ProjectSupplierExclusion
+
+        project = factories.ProjectFactory.create()
+        mc = factories.MaterialClassFactory.create(calc_role="base")
+        included_supplier = factories.SupplierFactory.create()
+        excluded_supplier = factories.SupplierFactory.create()
+
+        doc = factories.DocumentFactory.create(project=project)
+
+        # Инвойс включённого поставщика
+        inv_inc = factories.InvoiceFactory.create(
+            document=doc, date=date(2026, 3, 5), supplier_id=included_supplier.id,
+        )
+        factories.InvoiceItemFactory.create(
+            invoice=inv_inc, material_class=mc, item_type="material",
+            quantity=10.0, unit_price=5000.0, amount=50000.0, vat_amount=10000.0,
+        )
+
+        # Инвойс исключённого поставщика
+        inv_exc = factories.InvoiceFactory.create(
+            document=doc, date=date(2026, 3, 10), supplier_id=excluded_supplier.id,
+        )
+        factories.InvoiceItemFactory.create(
+            invoice=inv_exc, material_class=mc, item_type="material",
+            quantity=20.0, unit_price=8000.0, amount=160000.0, vat_amount=32000.0,
+        )
+
+        # Инвойс без supplier_id — должен остаться в результате
+        inv_null = factories.InvoiceFactory.create(
+            document=doc, date=date(2026, 3, 15), supplier_id=None,
+        )
+        factories.InvoiceItemFactory.create(
+            invoice=inv_null, material_class=mc, item_type="material",
+            quantity=5.0, unit_price=6000.0, amount=30000.0, vat_amount=6000.0,
+        )
+
+        # Добавляем исключение напрямую в БД
+        db_session.add(
+            ProjectSupplierExclusion(project_id=project.id, supplier_id=excluded_supplier.id)
+        )
+        db_session.flush()
+
+        rows = compute_export_rows(
+            db_session, project.id,
+            period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
+            excluded_supplier_ids={excluded_supplier.id},
+        )
+
+        # Должны быть только 2 инвойса (включённый + без поставщика)
+        assert len(rows) == 2
+        invoice_ids = {r["invoice_id"] for r in rows}
+        assert inv_inc.id in invoice_ids
+        assert inv_null.id in invoice_ids
+        assert inv_exc.id not in invoice_ids
+
 
 # ---------------------------------------------------------------------------
 # Section 2: Excel endpoint — HTTP + workbook structure

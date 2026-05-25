@@ -256,6 +256,6 @@ for month in months:
 - `invoice_items` — схема и `item_type` без изменений
 - `material_type` в `material_classes` — значения не меняются, используется в UI
 - Фронтенд и API-контракт `compute_calculations()`
-- Логика выбора плановой цены (period overlap)
+- Логика выбора базовой цены (period overlap)
 - `compute_full_deviation()` — делегирует в `compute_calculations()`,
   автоматически получит исправление

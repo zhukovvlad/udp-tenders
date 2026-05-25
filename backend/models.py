@@ -36,7 +36,7 @@ class OrgRole(str, enum.Enum):
 
 class ProjectRole(str, enum.Enum):
     """Роль организации на проекте."""
-    customer = "customer"      # заказчик — видит все данные, управляет плановыми ценами
+    customer = "customer"      # заказчик — видит все данные, управляет базовыми ценами
     contractor = "contractor"  # подрядчик — видит только свои загрузки
 
 

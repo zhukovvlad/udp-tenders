@@ -97,7 +97,7 @@ UDP/
 - **Three data axes**: any data point is reachable via Project, Supplier, or Material.
 - **Upload is a slide-over panel** inside Project page (`Sheet` from shadcn), not a separate route. `/upload` redirects to `/projects`.
 - **No `/documents` list in nav** — invoices are accessed through their parent entity or Reports.
-- **Reference prices** (плановые цены) live inside Project card (tab) and Material card — no separate route.
+- **Reference prices** (базовые цены) live inside Project card (tab) and Material card — no separate route.
 - **Progressive disclosure** — AI confidence percentages are hidden in tooltips; the document card is where the technical layer fully surfaces.
 
 ---
@@ -118,11 +118,11 @@ User → RefreshTokens (many, revokable, 14 days)
 
 Все три функции расчёта (`compute_calculations`, `compute_full_deviation`, `compute_export_rows`) принимают параметр `excluded_supplier_ids: set[int] | None`. Если передан непустой set, инвойсы исключённых поставщиков фильтруются через `or_(Invoice.supplier_id.is_(None), Invoice.supplier_id.notin_(excluded))` — инвойсы без поставщика всегда включаются. `get_project_summary` в `dashboard.py` также применяет этот фильтр ко всем агрегатам (оборот, объём м³, кол-во счетов).
 
-`GET /api/export/excel?project_id=&period_start=&period_end=&material_class_id=` генерирует openpyxl-файл через `compute_export_rows()` из `crud.calculations` → `routers/export.py`. Возвращает `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`. **16 колонок (A–P):** дата, номер СФ, поставщик, объём м³, плановая цена, ставка НДС, материал/доставка/прочее без НДС, итого без НДС (формула), те же три с НДС (формулы), итого с НДС (формула), откл. % и откл. ₽ (формулы). Месячные строки с агрегатами через SUMPRODUCT-формулы, разделители между месяцами, grand total на класс. Кнопка «Экспорт» в `ProjectPage.tsx` использует `periodStart`/`periodEnd` напрямую (не debounced) — правильно для действия по кнопке.
+`GET /api/export/excel?project_id=&period_start=&period_end=&material_class_id=` генерирует openpyxl-файл через `compute_export_rows()` из `crud.calculations` → `routers/export.py`. Возвращает `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`. **16 колонок (A–P):** дата, номер СФ, поставщик, объём м³, базовая цена, ставка НДС, материал/доставка/прочее без НДС, итого без НДС (формула), те же три с НДС (формулы), итого с НДС (формула), откл. % и откл. ₽ (формулы). Месячные строки с агрегатами через SUMPRODUCT-формулы, разделители между месяцами, grand total на класс. Кнопка «Экспорт» в `ProjectPage.tsx` использует `periodStart`/`periodEnd` напрямую (не debounced) — правильно для действия по кнопке.
 
 ### Методология расчёта avg_price
 
-Средняя цена (`avg_price`) вычисляется **с НДС** — чтобы сравнение с плановыми ценами было корректным (плановые цены вводятся пользователем тоже с НДС).
+Средняя цена (`avg_price`) вычисляется **с НДС** — чтобы сравнение с базовыми ценами было корректным (базовые цены вводятся пользователем тоже с НДС).
 
 ```
 avg_price = (mat_total + mat_vat + delivery_for_class + delivery_vat_for_class) / qty

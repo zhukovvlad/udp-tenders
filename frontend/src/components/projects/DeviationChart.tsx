@@ -146,7 +146,7 @@ function FilterHeader({
     <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border-subtle">
       <div>
         <div className="text-sm font-medium">Отклонения по классам бетона</div>
-        <div className="text-xs text-fg-tertiary mt-0.5">относительно плановой цены</div>
+        <div className="text-xs text-fg-tertiary mt-0.5">относительно базовой цены</div>
       </div>
       <div className="flex flex-col items-end gap-2">
         <div className="flex items-center gap-2">
@@ -335,7 +335,7 @@ export function DeviationChart({
         <div className="flex flex-wrap items-center gap-3 px-5 py-4 border-b border-border-subtle">
           <div>
             <div className="text-sm font-medium">Отклонения по классам бетона</div>
-            <div className="text-xs text-fg-tertiary mt-0.5">относительно плановой цены</div>
+            <div className="text-xs text-fg-tertiary mt-0.5">относительно базовой цены</div>
           </div>
         </div>
       )}
@@ -435,7 +435,7 @@ export function DeviationChart({
         <div className="flex items-center justify-between gap-4 px-5 py-3 border-t border-border-subtle bg-surface-sunken">
           <span className="text-xs text-fg-tertiary">
             {withoutPrice.length} класс{pluralRu(withoutPrice.length)}{" "}
-            ({withoutPrice.map((c) => c.material_class_name).join(", ")}) без плановой цены —{" "}
+            ({withoutPrice.map((c) => c.material_class_name).join(", ")}) без базовой цены —{" "}
             {withoutPrice.length % 10 === 1 && withoutPrice.length % 100 !== 11
               ? "не учтён в расчёте"
               : "не учтены в расчёте"}
@@ -447,7 +447,7 @@ export function DeviationChart({
               onClick={onConfigurePrice}
               className="shrink-0 text-xs text-accent-text hover:underline"
             >
-              Настроить плановые цены →
+              Настроить базовые цены →
             </Button>
           )}
         </div>

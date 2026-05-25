@@ -110,7 +110,7 @@ export function useCreateReferencePrice() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      toast.success("Плановая цена сохранена");
+      toast.success("Базовая цена сохранена");
     },
   });
 }
@@ -123,7 +123,7 @@ export function useUpdateReferencePrice() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      toast.success("Плановая цена обновлена");
+      toast.success("Базовая цена обновлена");
     },
   });
 }
@@ -135,7 +135,7 @@ export function useDeleteReferencePrice() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      toast.success("Плановая цена удалена");
+      toast.success("Базовая цена удалена");
     },
   });
 }

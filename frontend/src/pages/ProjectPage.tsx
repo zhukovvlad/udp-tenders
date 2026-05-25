@@ -381,7 +381,7 @@ export default function ProjectPage() {
             <TabsTrigger value="invoices" data-testid="project-tab-invoices">
               Счета{invoices.length > 0 ? ` · ${invoices.length}` : ""}
             </TabsTrigger>
-            <TabsTrigger value="prices" data-testid="project-tab-prices">Плановые цены</TabsTrigger>
+            <TabsTrigger value="prices" data-testid="project-tab-prices">Базовые цены</TabsTrigger>
             <TabsTrigger value="suppliers" data-testid="project-tab-suppliers">
               Поставщики{(projectSuppliersQ.data?.length ?? 0) > 0 ? ` · ${projectSuppliersQ.data!.length}` : ""}
             </TabsTrigger>
@@ -515,7 +515,7 @@ export default function ProjectPage() {
                         <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
                       </TableHead>
                       <TableHead className="font-medium text-right">
-                        <div>Плановая цена</div>
+                        <div>Базовая цена</div>
                         <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
                       </TableHead>
                       <TableHead className="font-medium text-right">Откл.%</TableHead>
@@ -630,7 +630,7 @@ export default function ProjectPage() {
             )}
           </TabsContent>
 
-          {/* ────────── TAB: Плановые цены ────────── */}
+          {/* ────────── TAB: Базовые цены ────────── */}
           <TabsContent value="prices" className="mt-6 space-y-4">
             <div className="flex justify-end">
               <Button
@@ -645,8 +645,8 @@ export default function ProjectPage() {
               <Skeleton className="h-32" />
             ) : referencePrices.length === 0 ? (
               <EmptyState
-                title="Нет плановых цен"
-                description="Добавьте плановые цены для расчёта отклонений."
+                title="Нет базовых цен"
+                description="Добавьте базовые цены для расчёта отклонений."
               />
             ) : (
               <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface">
@@ -714,7 +714,7 @@ export default function ProjectPage() {
             <Dialog open={priceDialogOpen} onOpenChange={setPriceDialogOpen}>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Добавить плановую цену</DialogTitle>
+                  <DialogTitle>Добавить базовую цену</DialogTitle>
                 </DialogHeader>
 
                 <div className="space-y-3 py-2">
@@ -807,7 +807,7 @@ export default function ProjectPage() {
             <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Редактировать плановую цену</DialogTitle>
+                  <DialogTitle>Редактировать базовую цену</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-3 py-2">
                   <div className="flex flex-col gap-1">
@@ -863,7 +863,7 @@ export default function ProjectPage() {
             <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Удалить плановую цену?</DialogTitle>
+                  <DialogTitle>Удалить базовую цену?</DialogTitle>
                 </DialogHeader>
                 <p className="text-sm text-fg-secondary py-2">
                   Это действие нельзя отменить.

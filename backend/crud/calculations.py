@@ -237,7 +237,7 @@ def compute_calculations(
             for mc in db.query(MaterialClass).filter(MaterialClass.id.in_(missing_ids)).all():
                 class_name_map[mc.id] = mc.name
 
-        # Плановые цены, перекрывающие месяц, последняя по классу
+        # Базовые цены, перекрывающие месяц, последняя по классу
         ref_rows = (
             db.query(ReferencePrice)
             .filter(
@@ -263,7 +263,7 @@ def compute_calculations(
             qty = contrib["qty"]
             if qty <= 0:
                 continue
-            # avg_price с НДС — корректно для сравнения с плановыми ценами (тоже с НДС)
+            # avg_price с НДС — корректно для сравнения с базовыми ценами (тоже с НДС)
             avg_price = (contrib["mat_with_vat"] + contrib["shared_with_vat"]) / qty
 
             ref = ref_by_class.get(cid)

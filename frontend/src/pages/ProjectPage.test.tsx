@@ -52,13 +52,13 @@ describe("ProjectPage", () => {
     });
   });
 
-  it("switches to Плановые цены tab", async () => {
+  it("switches to Базовые цены tab", async () => {
     const user = userEvent.setup();
     renderProject();
     const tab = await screen.findByTestId("project-tab-prices");
     await user.click(tab);
     await waitFor(() => {
-      expect(screen.getByText(/Плановые цены/)).toBeInTheDocument();
+      expect(screen.getByText(/Базовые цены/)).toBeInTheDocument();
     });
   });
 
@@ -100,7 +100,7 @@ describe("ProjectPage", () => {
     await user.click(configureBtn);
 
     await waitFor(() => {
-      expect(screen.getByText("Нет плановых цен")).toBeInTheDocument();
+      expect(screen.getByText("Нет базовых цен")).toBeInTheDocument();
     });
   });
 
@@ -139,7 +139,7 @@ describe("ProjectPage", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText("Редактировать плановую цену")
+        screen.getByText("Редактировать базовую цену")
       ).toBeInTheDocument();
     });
   });

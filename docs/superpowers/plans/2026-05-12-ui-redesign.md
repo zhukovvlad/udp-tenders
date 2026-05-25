@@ -441,7 +441,7 @@ export default function Dashboard() {
           <><Skeleton className="h-[88px]" /><Skeleton className="h-[88px]" /><Skeleton className="h-[88px]" /></>
         ) : (
           <>
-            <KpiCard label="Переплата к плановым" value={totalOverpay ? formatMoney(totalOverpay) : "—"} />
+            <KpiCard label="Переплата к базовым" value={totalOverpay ? formatMoney(totalOverpay) : "—"} />
             <KpiCard label="Оборот" value={totalTurnover ? formatMoney(totalTurnover) : "—"} />
             <KpiCard label="Требуют внимания" value={String(issueCount)} />
           </>
@@ -762,7 +762,7 @@ export default function ProjectPage() {
           <TabsTrigger value="invoices">
             Счета{invoicesQ.data ? ` · ${invoicesQ.data.length}` : ""}
           </TabsTrigger>
-          <TabsTrigger value="prices">Плановые цены</TabsTrigger>
+          <TabsTrigger value="prices">Базовые цены</TabsTrigger>
           <TabsTrigger value="suppliers">
             Поставщики{suppliers.length ? ` · ${suppliers.length}` : ""}
           </TabsTrigger>
@@ -866,13 +866,13 @@ export default function ProjectPage() {
           )}
         </TabsContent>
 
-        {/* ── Плановые цены ── */}
+        {/* ── Базовые цены ── */}
         <TabsContent value="prices" className="pt-4">
           <div className="mb-4 flex justify-end">
             <Dialog open={rpOpen} onOpenChange={setRpOpen}>
               <DialogTrigger render={<Button leftIcon={<Plus size={14} />}>Добавить</Button>} />
               <DialogContent>
-                <DialogHeader><DialogTitle>Новая плановая цена</DialogTitle></DialogHeader>
+                <DialogHeader><DialogTitle>Новая базовая цена</DialogTitle></DialogHeader>
                 <div className="space-y-4">
                   <div className="space-y-1.5">
                     <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">Класс материала *</Label>
@@ -921,7 +921,7 @@ export default function ProjectPage() {
             </Dialog>
           </div>
           {rpQ.isLoading ? <Skeleton className="h-40" /> : (rpQ.data ?? []).length === 0 ? (
-            <EmptyState title="Нет плановых цен" description="Добавьте первую плановую цену для расчёта отклонений." />
+            <EmptyState title="Нет базовых цен" description="Добавьте первую базовую цену для расчёта отклонений." />
           ) : (
             <Surface padding="none">
               <Table>
@@ -1268,7 +1268,7 @@ export default function MaterialPage() {
 
   const classesQ = useMaterialClasses();
   const material = classesQ.data?.find((c) => c.id === materialId) ?? null;
-  const rpQ = useReferencePrices(); // все плановые цены — фильтруем на фронтенде
+  const rpQ = useReferencePrices(); // все базовые цены — фильтруем на фронтенде
 
   const materialPrices = (rpQ.data ?? []).filter((rp) => rp.material_class_id === materialId);
 
@@ -1287,7 +1287,7 @@ export default function MaterialPage() {
         <TabsList>
           <TabsTrigger value="overview">Обзор</TabsTrigger>
           <TabsTrigger value="suppliers">Поставщики</TabsTrigger>
-          <TabsTrigger value="prices">Плановые цены{materialPrices.length ? ` · ${materialPrices.length}` : ""}</TabsTrigger>
+          <TabsTrigger value="prices">Базовые цены{materialPrices.length ? ` · ${materialPrices.length}` : ""}</TabsTrigger>
           <TabsTrigger value="projects">Объекты</TabsTrigger>
         </TabsList>
 
@@ -1301,7 +1301,7 @@ export default function MaterialPage() {
 
         <TabsContent value="prices" className="pt-6">
           {rpQ.isLoading ? <Skeleton className="h-40" /> : materialPrices.length === 0 ? (
-            <EmptyState title="Нет плановых цен" description="Плановые цены настраиваются в карточке объекта." />
+            <EmptyState title="Нет базовых цен" description="Базовые цены настраиваются в карточке объекта." />
           ) : (
             <Surface padding="none">
               <Table>
@@ -1309,7 +1309,7 @@ export default function MaterialPage() {
                   <TableRow>
                     <TableHead>Объект</TableHead>
                     <TableHead>Период</TableHead>
-                    <TableHead className="text-right">Плановая цена</TableHead>
+                    <TableHead className="text-right">Базовая цена</TableHead>
                     <TableHead>Источник</TableHead>
                   </TableRow>
                 </TableHeader>

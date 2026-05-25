@@ -31,7 +31,7 @@ export default function Dashboard() {
         ) : (
           <>
             <KpiCard label="Оборот" value={calcsQ.data?.length ? formatMoney(totalTurnover) : "—"} />
-            <KpiCard label="Переплата к плановым" value={calcsQ.data?.length ? formatMoney(totalOverpay) : "—"} />
+            <KpiCard label="Переплата к базовым" value={calcsQ.data?.length ? formatMoney(totalOverpay) : "—"} />
             <KpiCard label="Требуют внимания" value={String(issueCount)} />
           </>
         )}
