@@ -460,7 +460,7 @@ class TestComputeExportRows:
         Инвойсы без supplier_id (supplier_id IS NULL) при этом остаются —
         фильтр «OR supplier_id IS NULL» в excluded_supplier_ids.
         """
-        from models import ProjectSupplierExclusion
+        from crud.supplier_exclusions import get_excluded_supplier_ids, set_supplier_excluded
 
         project = factories.ProjectFactory.create()
         mc = factories.MaterialClassFactory.create(calc_role="base")
@@ -496,16 +496,14 @@ class TestComputeExportRows:
             quantity=5.0, unit_price=6000.0, amount=30000.0, vat_amount=6000.0,
         )
 
-        # Добавляем исключение напрямую в БД
-        db_session.add(
-            ProjectSupplierExclusion(project_id=project.id, supplier_id=excluded_supplier.id)
-        )
-        db_session.flush()
+        # Регистрируем исключение через CRUD — проверяем реальный путь получения excluded_supplier_ids
+        set_supplier_excluded(db_session, project.id, excluded_supplier.id, excluded=True)
+        excluded = get_excluded_supplier_ids(db_session, project.id)
 
         rows = compute_export_rows(
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
-            excluded_supplier_ids={excluded_supplier.id},
+            excluded_supplier_ids=excluded or None,
         )
 
         # Должны быть только 2 инвойса (включённый + без поставщика)

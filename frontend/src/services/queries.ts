@@ -373,10 +373,8 @@ export function useProjectSuppliers(projectId: ID | null) {
 export function useSupplierExclusions(projectId: ID | null) {
   return useQuery({
     queryKey: projectId ? qk.supplierExclusions(projectId) : ["supplier-exclusions-disabled"],
-    queryFn: async () => {
-      const ids = await projectsApi.getSupplierExclusions(projectId!);
-      return new Set(ids);
-    },
+    queryFn: () => projectsApi.getSupplierExclusions(projectId!),
+    select: (ids) => new Set(ids),
     enabled: projectId !== null,
   });
 }
