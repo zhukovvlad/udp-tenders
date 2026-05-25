@@ -82,14 +82,14 @@ def list_supplier_exclusions(project_id: int, db: Session = Depends(get_db)):
 def add_supplier_exclusion(
     project_id: int,
     supplier_id: int,
-    data: ExclusionCreate,
+    data: ExclusionCreate | None = None,
     db: Session = Depends(get_db),
 ):
     if not db.query(Project).filter(Project.id == project_id).first():
         raise HTTPException(status_code=404, detail="Проект не найден")
     if not db.query(Supplier).filter(Supplier.id == supplier_id).first():
         raise HTTPException(status_code=404, detail="Поставщик не найден")
-    set_supplier_excluded(db, project_id, supplier_id, excluded=True, reason=data.reason)
+    set_supplier_excluded(db, project_id, supplier_id, excluded=True, reason=data.reason if data else None)
     return Response(status_code=204)
 
 

@@ -223,24 +223,6 @@ export default function ProjectPage() {
     });
   }, [invoices, invoiceMonthFilter]);
 
-  // Aggregate suppliers from invoices
-  const supplierMap = new Map<string, { displayName: string; count: number }>();
-  for (const inv of invoices) {
-    const key = inv.supplier_inn
-      ? `inn:${inv.supplier_inn}`
-      : inv.supplier_name
-        ? `name:${inv.supplier_name}`
-        : "unknown";
-    const displayName = inv.supplier_name ?? inv.supplier_inn ?? "(без названия)";
-    const existing = supplierMap.get(key);
-    supplierMap.set(key, { displayName, count: (existing?.count ?? 0) + 1 });
-  }
-  const suppliers = Array.from(supplierMap.entries()).map(([key, { displayName, count }]) => ({
-    key,
-    name: displayName,
-    count,
-  }));
-
   // ── loading / not found ──
   if (projectsQ.isLoading) {
     return (
@@ -475,11 +457,11 @@ export default function ProjectPage() {
                     <span className="text-fg-secondary font-medium">
                       {last_invoice_date ? formatDate(last_invoice_date) : "—"}
                     </span>
-                    {suppliers.length > 0 && (
+                    {(projectSuppliersQ.data?.length ?? 0) > 0 && (
                       <>
                         {" · "}
-                        <span className="text-fg-secondary font-medium">{formatNumber(suppliers.length)}</span>
-                        {` поставщик${pluralRu(suppliers.length)}`}
+                        <span className="text-fg-secondary font-medium">{formatNumber(projectSuppliersQ.data!.length)}</span>
+                        {` поставщик${pluralRu(projectSuppliersQ.data!.length)}`}
                       </>
                     )}
                   </p>
@@ -914,7 +896,7 @@ export default function ProjectPage() {
           </TabsContent>
 
           <TabsContent value="suppliers" className="mt-6">
-            {projectSuppliersQ.isLoading ? (
+            {projectSuppliersQ.isLoading || supplierExclusionsQ.isLoading ? (
               <Skeleton className="h-32" />
             ) : (projectSuppliersQ.data ?? []).length === 0 ? (
               <EmptyState

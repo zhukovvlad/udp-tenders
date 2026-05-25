@@ -403,6 +403,7 @@ export function useToggleSupplierExclusion(projectId: ID | null) {
       qc.invalidateQueries({ queryKey: qk.supplierExclusions(projectId) });
       // invalidate by prefix so all period variants are matched
       qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
+      qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
       qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
       qc.invalidateQueries({ queryKey: qk.dashboard.monthly(projectId) });
     },
