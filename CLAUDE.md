@@ -38,7 +38,7 @@ just test-backend         # all pytest (~22s)
 just test-backend-unit    # unit only, no DB, ~1s
 just test-backend-integration  # requires TEST_DATABASE_URL
 
-just test-frontend        # vitest (79 tests, ~10s)
+just test-frontend        # vitest (~10s)
 just lint                 # ruff + eslint
 just typecheck-frontend   # tsc -b --noEmit
 just coverage-backend     # HTML → backend/htmlcov/index.html
@@ -175,7 +175,7 @@ deviation_amount = (avg_price − ref_price) × qty
 ## Testing conventions
 
 ### Backend
-- **Unit tests** (`tests/unit/`): no DB, pure functions. **78 tests total.** Includes `test_security.py` (14 tests), `test_auth_deps.py` (20 tests), `test_supplier_exclusions.py` (10 tests).
+- **Unit tests** (`tests/unit/`): no DB, pure functions. Representative coverage includes `test_security.py`, `test_auth_deps.py`, and `test_supplier_exclusions.py`.
 - **Integration tests** (`tests/integration/`): require `TEST_DATABASE_URL` (separate Neon branch). Each test runs in a transaction + savepoint → full isolation, automatic rollback.
 - **Fixtures**: `factory_boy` factories in `tests/factories.py`. AI responses mocked via `respx` + JSON fixtures in `tests/fixtures/openrouter/`.
 - `block_real_openrouter` autouse fixture — any accidental real call fails loudly.
@@ -183,7 +183,7 @@ deviation_amount = (avg_price − ref_price) × qty
 - **Auth in tests**: the `client` fixture in `conftest.py` overrides `get_current_user` with a mock superuser and sets the CSRF cookie + header (`X-CSRF-Token: test-csrf-token`). Integration tests are auth-transparent.
 
 ### Frontend
-- All API calls via MSW v2 (`src/test/server.ts` + `src/test/handlers.ts`). `onUnhandledRequest: "error"` — add a handler for every new endpoint. **89 tests total** across 11 test files.
+- All API calls via MSW v2 (`src/test/server.ts` + `src/test/handlers.ts`). `onUnhandledRequest: "error"` — add a handler for every new endpoint.
 - `renderWithProviders` from `src/test/utils.tsx` — wraps in QueryClient (retries=0), MemoryRouter, ThemeProvider. Accepts `initialUser` param (default: `DEFAULT_TEST_USER`); pass `null` for unauthenticated scenarios.
 - New endpoint? Add to `handlers.ts` before writing the test.
 - Binary endpoints (blob/arraybuffer) must return `HttpResponse.arrayBuffer(...)` in MSW handlers, not `HttpResponse.json(...)`.

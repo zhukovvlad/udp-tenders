@@ -18,7 +18,7 @@ CREATE TABLE project_supplier_exclusions (
     project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
     reason      TEXT,
-    created_at  TIMESTAMP DEFAULT now(),
+    created_at  TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc'),
     PRIMARY KEY (project_id, supplier_id)
 );
 ```
