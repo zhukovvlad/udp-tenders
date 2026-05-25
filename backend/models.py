@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy import (
@@ -35,7 +36,7 @@ class OrgRole(str, enum.Enum):
 
 class ProjectRole(str, enum.Enum):
     """Роль организации на проекте."""
-    customer = "customer"      # заказчик — видит все данные, управляет плановыми ценами
+    customer = "customer"      # заказчик — видит все данные, управляет базовыми ценами
     contractor = "contractor"  # подрядчик — видит только свои загрузки
 
 
@@ -192,6 +193,15 @@ class Supplier(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
 
     invoices = relationship("Invoice", back_populates="supplier")
+
+
+class ProjectSupplierExclusion(Base):
+    __tablename__ = "project_supplier_exclusions"
+
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id", ondelete="CASCADE"), primary_key=True)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
 
 
 class Invoice(Base):

@@ -52,13 +52,13 @@ describe("ProjectPage", () => {
     });
   });
 
-  it("switches to Плановые цены tab", async () => {
+  it("switches to Базовые цены tab", async () => {
     const user = userEvent.setup();
     renderProject();
     const tab = await screen.findByTestId("project-tab-prices");
     await user.click(tab);
     await waitFor(() => {
-      expect(screen.getByText(/Плановые цены/)).toBeInTheDocument();
+      expect(screen.getByText(/Базовые цены/)).toBeInTheDocument();
     });
   });
 
@@ -100,7 +100,7 @@ describe("ProjectPage", () => {
     await user.click(configureBtn);
 
     await waitFor(() => {
-      expect(screen.getByText("Нет плановых цен")).toBeInTheDocument();
+      expect(screen.getByText("Нет базовых цен")).toBeInTheDocument();
     });
   });
 
@@ -139,7 +139,7 @@ describe("ProjectPage", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText("Редактировать плановую цену")
+        screen.getByText("Редактировать базовую цену")
       ).toBeInTheDocument();
     });
   });
@@ -711,6 +711,208 @@ describe("ProjectPage", () => {
     // Overview tab must be active — useState("overview") re-initialised on remount
     await waitFor(() => {
       expect(screen.getByTestId("project-tab-overview")).toHaveAttribute("aria-selected", "true");
+    });
+  });
+
+  // ── Supplier exclusions ─────────────────────────────────────────────────
+
+  describe("Поставщики tab — supplier exclusions", () => {
+    const sampleSupplierRow = { id: 10, name: "ООО Бетон-Строй", inn: "7700000001", invoice_count: 3 };
+    const sampleSupplierRow2 = { id: 11, name: "ИП Иванов", inn: null, invoice_count: 1 };
+
+    it("renders supplier rows from /projects/:id/suppliers", async () => {
+      server.use(
+        http.get("/api/projects/:projectId/suppliers", () =>
+          HttpResponse.json([sampleSupplierRow, sampleSupplierRow2])
+        )
+      );
+      const user = userEvent.setup();
+      renderProject();
+      await user.click(await screen.findByTestId("project-tab-suppliers"));
+      await waitFor(() => {
+        expect(screen.getByText("ООО Бетон-Строй")).toBeInTheDocument();
+        expect(screen.getByText("ИП Иванов")).toBeInTheDocument();
+      });
+    });
+
+    it("shows empty state when no suppliers", async () => {
+      // Default handler already returns [] — no override needed
+      const user = userEvent.setup();
+      renderProject();
+      await user.click(await screen.findByTestId("project-tab-suppliers"));
+      await waitFor(() => {
+        expect(screen.getByText("Нет поставщиков")).toBeInTheDocument();
+      });
+    });
+
+    it("excluded supplier checkbox is unchecked and name is struck through", async () => {
+      server.use(
+        http.get("/api/projects/:projectId/suppliers", () =>
+          HttpResponse.json([sampleSupplierRow])
+        ),
+        http.get("/api/projects/:projectId/supplier-exclusions", () =>
+          HttpResponse.json([sampleSupplierRow.id])
+        )
+      );
+      const user = userEvent.setup();
+      renderProject();
+      await user.click(await screen.findByTestId("project-tab-suppliers"));
+      await waitFor(() => {
+        const nameEl = screen.getByText(sampleSupplierRow.name);
+        expect(nameEl).toHaveClass("line-through");
+        const checkbox = screen.getByRole("checkbox", { name: /включить/i });
+        expect(checkbox).not.toBeChecked();
+      });
+    });
+
+    it("unchecking an included supplier opens the reason popover", async () => {
+      server.use(
+        http.get("/api/projects/:projectId/suppliers", () =>
+          HttpResponse.json([sampleSupplierRow])
+        )
+      );
+      const user = userEvent.setup();
+      renderProject();
+      await user.click(await screen.findByTestId("project-tab-suppliers"));
+
+      const checkbox = await screen.findByRole("checkbox", { name: /исключить/i });
+      await user.click(checkbox);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/Причина исключения/i)).toBeInTheDocument();
+      });
+    });
+
+    it("confirming exclusion via button triggers POST and closes popover", async () => {
+      let postCalled = false;
+      server.use(
+        http.get("/api/projects/:projectId/suppliers", () =>
+          HttpResponse.json([sampleSupplierRow])
+        ),
+        http.post("/api/projects/:projectId/supplier-exclusions/:supplierId", () => {
+          postCalled = true;
+          return new HttpResponse(null, { status: 204 });
+        })
+      );
+      const user = userEvent.setup();
+      renderProject();
+      await user.click(await screen.findByTestId("project-tab-suppliers"));
+
+      const checkbox = await screen.findByRole("checkbox", { name: /исключить/i });
+      await user.click(checkbox);
+
+      const reasonInput = await screen.findByLabelText(/Причина исключения/i);
+      await user.type(reasonInput, "Нерепрезентативная цена");
+
+      const confirmBtn = screen.getByRole("button", { name: /^Исключить$/i });
+      await user.click(confirmBtn);
+
+      await waitFor(() => {
+        expect(postCalled).toBe(true);
+        expect(screen.queryByLabelText(/Причина исключения/i)).not.toBeInTheDocument();
+      });
+    });
+
+    it("pressing Escape closes the reason popover without POST", async () => {
+      let postCalled = false;
+      server.use(
+        http.get("/api/projects/:projectId/suppliers", () =>
+          HttpResponse.json([sampleSupplierRow])
+        ),
+        http.post("/api/projects/:projectId/supplier-exclusions/:supplierId", () => {
+          postCalled = true;
+          return new HttpResponse(null, { status: 204 });
+        })
+      );
+      const user = userEvent.setup();
+      renderProject();
+      await user.click(await screen.findByTestId("project-tab-suppliers"));
+
+      const checkbox = await screen.findByRole("checkbox", { name: /исключить/i });
+      await user.click(checkbox);
+
+      await screen.findByLabelText(/Причина исключения/i);
+      await user.keyboard("{Escape}");
+
+      await waitFor(() => {
+        expect(screen.queryByLabelText(/Причина исключения/i)).not.toBeInTheDocument();
+      });
+      expect(postCalled).toBe(false);
+    });
+
+    it("re-including an excluded supplier triggers DELETE without popover", async () => {
+      let deleteCalled = false;
+      server.use(
+        http.get("/api/projects/:projectId/suppliers", () =>
+          HttpResponse.json([sampleSupplierRow])
+        ),
+        http.get("/api/projects/:projectId/supplier-exclusions", () =>
+          HttpResponse.json([sampleSupplierRow.id])
+        ),
+        http.delete("/api/projects/:projectId/supplier-exclusions/:supplierId", () => {
+          deleteCalled = true;
+          return new HttpResponse(null, { status: 204 });
+        })
+      );
+      const user = userEvent.setup();
+      renderProject();
+      await user.click(await screen.findByTestId("project-tab-suppliers"));
+
+      const checkbox = await screen.findByRole("checkbox", { name: /включить/i });
+      await user.click(checkbox);
+
+      await waitFor(() => expect(deleteCalled).toBe(true));
+      // Reason popover must NOT appear (DELETE is immediate)
+      expect(screen.queryByLabelText(/Причина исключения/i)).not.toBeInTheDocument();
+    });
+
+    it("overview banner appears when exclusions are present", async () => {
+      server.use(
+        http.get("/api/projects/:projectId/suppliers", () =>
+          HttpResponse.json([sampleSupplierRow])
+        ),
+        http.get("/api/projects/:projectId/supplier-exclusions", () =>
+          HttpResponse.json([sampleSupplierRow.id])
+        )
+      );
+      renderProject();
+      await waitFor(() => {
+        expect(
+          screen.getByText(/исключ.*поставщик.*из расчётов/i)
+        ).toBeInTheDocument();
+      });
+    });
+
+    it("overview banner Управление link switches to suppliers tab", async () => {
+      server.use(
+        http.get("/api/projects/:projectId/suppliers", () =>
+          HttpResponse.json([sampleSupplierRow])
+        ),
+        http.get("/api/projects/:projectId/supplier-exclusions", () =>
+          HttpResponse.json([sampleSupplierRow.id])
+        )
+      );
+      const user = userEvent.setup();
+      renderProject();
+
+      const mgmtLink = await screen.findByRole("button", { name: /управление/i });
+      await user.click(mgmtLink);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("project-tab-suppliers")).toHaveAttribute("aria-selected", "true");
+      });
+    });
+
+    it("tab counter increments with supplier count", async () => {
+      server.use(
+        http.get("/api/projects/:projectId/suppliers", () =>
+          HttpResponse.json([sampleSupplierRow, sampleSupplierRow2])
+        )
+      );
+      renderProject();
+      await waitFor(() => {
+        expect(screen.getByTestId("project-tab-suppliers")).toHaveTextContent("Поставщики · 2");
+      });
     });
   });
 });

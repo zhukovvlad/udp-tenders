@@ -110,7 +110,7 @@ export function useCreateReferencePrice() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      toast.success("Плановая цена сохранена");
+      toast.success("Базовая цена сохранена");
     },
   });
 }
@@ -123,7 +123,7 @@ export function useUpdateReferencePrice() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      toast.success("Плановая цена обновлена");
+      toast.success("Базовая цена обновлена");
     },
   });
 }
@@ -135,7 +135,7 @@ export function useDeleteReferencePrice() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.referencePrices.all() });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      toast.success("Плановая цена удалена");
+      toast.success("Базовая цена удалена");
     },
   });
 }
@@ -356,6 +356,54 @@ export function useMergeSupplier() {
       qc.removeQueries({ queryKey: qk.suppliers.detail(sourceId) });
       qc.removeQueries({ queryKey: qk.suppliers.projects(sourceId) });
       toast.success("Поставщики объединены");
+    },
+  });
+}
+
+// ========== Project Suppliers & Exclusions ==========
+
+export function useProjectSuppliers(projectId: ID | null) {
+  return useQuery({
+    queryKey: projectId ? qk.projectSuppliers(projectId) : ["project-suppliers-disabled"],
+    queryFn: () => projectsApi.getSuppliers(projectId!),
+    enabled: projectId !== null,
+  });
+}
+
+export function useSupplierExclusions(projectId: ID | null) {
+  return useQuery({
+    queryKey: projectId ? qk.supplierExclusions(projectId) : ["supplier-exclusions-disabled"],
+    queryFn: () => projectsApi.getSupplierExclusions(projectId!),
+    select: (ids) => new Set(ids),
+    enabled: projectId !== null,
+  });
+}
+
+export function useToggleSupplierExclusion(projectId: ID | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      supplierId,
+      excluded,
+      reason,
+    }: {
+      supplierId: ID;
+      excluded: boolean;
+      reason?: string;
+    }) => {
+      if (!projectId) return Promise.resolve();
+      return excluded
+        ? projectsApi.addSupplierExclusion(projectId, supplierId, reason)
+        : projectsApi.removeSupplierExclusion(projectId, supplierId);
+    },
+    onSuccess: () => {
+      if (!projectId) return;
+      qc.invalidateQueries({ queryKey: qk.supplierExclusions(projectId) });
+      // invalidate by prefix so all period variants are matched
+      qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
+      qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
+      qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
+      qc.invalidateQueries({ queryKey: qk.dashboard.monthly(projectId) });
     },
   });
 }

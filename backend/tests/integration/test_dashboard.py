@@ -239,3 +239,94 @@ def test_monthly_summary_isolated_between_projects(client, factories):
     response = client.get(f"/api/dashboard/monthly-summary?project_id={p2.id}")
     assert response.status_code == 200
     assert response.json() == []
+
+
+# ── Supplier exclusion filtering ──────────────────────────────────────────────
+
+def test_summary_excludes_supplier_invoices(client, factories):
+    """Исключённый поставщик не попадает в invoice_count и total_amount."""
+    project = factories.ProjectFactory.create()
+    included_supplier = factories.SupplierFactory.create()
+    excluded_supplier = factories.SupplierFactory.create()
+
+    doc = factories.DocumentFactory.create(project=project)
+    inv_included = factories.InvoiceFactory.create(document=doc, supplier_id=included_supplier.id)
+    factories.InvoiceItemFactory.create(invoice=inv_included, item_type="material", quantity=5.0, amount=40000.0)
+
+    inv_excluded = factories.InvoiceFactory.create(document=doc, supplier_id=excluded_supplier.id)
+    factories.InvoiceItemFactory.create(invoice=inv_excluded, item_type="material", quantity=3.0, amount=24000.0)
+
+    # Без исключений — оба инвойса в сводке
+    resp = client.get(f"/api/dashboard/summary?project_id={project.id}")
+    assert resp.json()["invoice_count"] == 2
+
+    # Исключаем второго поставщика
+    resp_excl = client.post(f"/api/projects/{project.id}/supplier-exclusions/{excluded_supplier.id}")
+    assert resp_excl.status_code == 204
+
+    resp = client.get(f"/api/dashboard/summary?project_id={project.id}")
+    body = resp.json()
+    assert body["invoice_count"] == 1
+    # total_amount: только included invoice: 40000 + 20% VAT = 48000
+    assert body["total_amount"] == 48000.0
+    assert body["total_qty"] == 5.0
+
+
+def test_calculations_excludes_supplier_invoices(client, factories):
+    """Расчёт avg_price не учитывает инвойсы исключённого поставщика."""
+    project = factories.ProjectFactory.create()
+    mc = factories.MaterialClassFactory.create(calc_role="base")
+    included_supplier = factories.SupplierFactory.create()
+    excluded_supplier = factories.SupplierFactory.create()
+
+    doc = factories.DocumentFactory.create(project=project)
+
+    # included: qty=10, amount=80000 → avg_price with VAT = 96000/10 = 9600
+    inv_inc = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 1), supplier_id=included_supplier.id)
+    factories.InvoiceItemFactory.create(invoice=inv_inc, material_class=mc, item_type="material", quantity=10.0, unit_price=8000.0, amount=80000.0)
+
+    # excluded: qty=20, amount=200000 → would pull avg_price down if included
+    inv_exc = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 5), supplier_id=excluded_supplier.id)
+    factories.InvoiceItemFactory.create(invoice=inv_exc, material_class=mc, item_type="material", quantity=20.0, unit_price=10000.0, amount=200000.0)
+
+    # Без исключений — агрегат по обоим инвойсам
+    resp = client.get(f"/api/dashboard/calculations?project_id={project.id}")
+    rows_all = resp.json()
+    assert len(rows_all) == 1
+    assert rows_all[0]["total_qty"] == 30.0
+
+    # Исключаем второго поставщика
+    client.post(f"/api/projects/{project.id}/supplier-exclusions/{excluded_supplier.id}")
+
+    resp = client.get(f"/api/dashboard/calculations?project_id={project.id}")
+    rows = resp.json()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["total_qty"] == 10.0
+    assert row["avg_price"] == 9600.0  # (80000 + 16000) / 10
+
+
+def test_monthly_summary_excludes_supplier_invoices(client, factories):
+    """Исключённый поставщик не учитывается в monthly-summary."""
+    project = factories.ProjectFactory.create()
+    included_supplier = factories.SupplierFactory.create()
+    excluded_supplier = factories.SupplierFactory.create()
+
+    doc = factories.DocumentFactory.create(project=project)
+    inv_inc = factories.InvoiceFactory.create(document=doc, date=date(2026, 1, 10), supplier_id=included_supplier.id)
+    factories.InvoiceItemFactory.create(invoice=inv_inc, item_type="material", quantity=5.0, amount=40000.0)
+
+    inv_exc = factories.InvoiceFactory.create(document=doc, date=date(2026, 1, 20), supplier_id=excluded_supplier.id)
+    factories.InvoiceItemFactory.create(invoice=inv_exc, item_type="material", quantity=3.0, amount=24000.0)
+
+    # Исключаем
+    client.post(f"/api/projects/{project.id}/supplier-exclusions/{excluded_supplier.id}")
+
+    resp = client.get(f"/api/dashboard/monthly-summary?project_id={project.id}")
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert len(rows) == 1
+    jan = rows[0]
+    assert jan["invoice_count"] == 1
+    assert jan["total_qty"] == 5.0
+    assert jan["total_amount"] == 48000.0  # 40000 + 20% VAT

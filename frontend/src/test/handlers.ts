@@ -106,6 +106,16 @@ export const handlers = [
   http.get("/api/suppliers/:id/projects", () => HttpResponse.json(sampleSupplierProjectRows)),
   http.get("/api/suppliers/:id/invoices-list", () => HttpResponse.json(sampleSupplierInvoices)),
 
+  // Project suppliers & exclusions
+  http.get("/api/projects/:projectId/suppliers", () => HttpResponse.json([])),
+  http.get("/api/projects/:projectId/supplier-exclusions", () => HttpResponse.json([])),
+  http.post("/api/projects/:projectId/supplier-exclusions/:supplierId", () =>
+    new HttpResponse(null, { status: 204 })
+  ),
+  http.delete("/api/projects/:projectId/supplier-exclusions/:supplierId", () =>
+    new HttpResponse(null, { status: 204 })
+  ),
+
   // Export
   http.get("/api/export/excel", () =>
     HttpResponse.arrayBuffer(new ArrayBuffer(8), {

@@ -1,7 +1,7 @@
 import { toast } from "sonner";
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Download, Plus, Trash2, Pencil } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Plus, Trash2, Pencil } from "lucide-react";
 
 import { Breadcrumbs } from "@/components/ui-domain/Breadcrumbs";
 import { PageHeader } from "@/components/ui-domain/PageHeader";
@@ -43,6 +43,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 
 import {
   useProjects,
@@ -54,6 +55,9 @@ import {
   useUpdateReferencePrice,
   useDeleteReferencePrice,
   useMaterialClasses,
+  useProjectSuppliers,
+  useSupplierExclusions,
+  useToggleSupplierExclusion,
 } from "@/services/queries";
 import { reportsApi } from "@/services/api/reports";
 import { useDebounce } from "@/lib/useDebounce";
@@ -149,6 +153,12 @@ export default function ProjectPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteRpId, setDeleteRpId] = useState<number | null>(null);
 
+  // ── exclusion inline form ──
+  const [exclusionPopover, setExclusionPopover] = useState<{
+    supplierId: number;
+    reason: string;
+  } | null>(null);
+
   // ── queries ──
   const projectsQ = useProjects();
   const project = projectsQ.data?.find((p) => p.id === projectId) ?? null;
@@ -166,6 +176,11 @@ export default function ProjectPage() {
     { enabled: hasValidProjectId },
   );
   const materialClassesQ = useMaterialClasses();
+
+  // ── project suppliers ──
+  const projectSuppliersQ = useProjectSuppliers(projectId);
+  const supplierExclusionsQ = useSupplierExclusions(projectId);
+  const toggleExclusion = useToggleSupplierExclusion(projectId);
 
   // ── mutations ──
   const createRefPrice = useCreateReferencePrice();
@@ -207,24 +222,6 @@ export default function ProjectPage() {
       );
     });
   }, [invoices, invoiceMonthFilter]);
-
-  // Aggregate suppliers from invoices
-  const supplierMap = new Map<string, { displayName: string; count: number }>();
-  for (const inv of invoices) {
-    const key = inv.supplier_inn
-      ? `inn:${inv.supplier_inn}`
-      : inv.supplier_name
-        ? `name:${inv.supplier_name}`
-        : "unknown";
-    const displayName = inv.supplier_name ?? inv.supplier_inn ?? "(без названия)";
-    const existing = supplierMap.get(key);
-    supplierMap.set(key, { displayName, count: (existing?.count ?? 0) + 1 });
-  }
-  const suppliers = Array.from(supplierMap.entries()).map(([key, { displayName, count }]) => ({
-    key,
-    name: displayName,
-    count,
-  }));
 
   // ── loading / not found ──
   if (projectsQ.isLoading) {
@@ -384,9 +381,9 @@ export default function ProjectPage() {
             <TabsTrigger value="invoices" data-testid="project-tab-invoices">
               Счета{invoices.length > 0 ? ` · ${invoices.length}` : ""}
             </TabsTrigger>
-            <TabsTrigger value="prices" data-testid="project-tab-prices">Плановые цены</TabsTrigger>
+            <TabsTrigger value="prices" data-testid="project-tab-prices">Базовые цены</TabsTrigger>
             <TabsTrigger value="suppliers" data-testid="project-tab-suppliers">
-              Поставщики{suppliers.length > 0 ? ` · ${suppliers.length}` : ""}
+              Поставщики{(projectSuppliersQ.data?.length ?? 0) > 0 ? ` · ${projectSuppliersQ.data!.length}` : ""}
             </TabsTrigger>
             <TabsTrigger value="monthly" data-testid="project-tab-monthly">По месяцам</TabsTrigger>
           </TabsList>
@@ -460,17 +457,32 @@ export default function ProjectPage() {
                     <span className="text-fg-secondary font-medium">
                       {last_invoice_date ? formatDate(last_invoice_date) : "—"}
                     </span>
-                    {suppliers.length > 0 && (
+                    {(projectSuppliersQ.data?.length ?? 0) > 0 && (
                       <>
                         {" · "}
-                        <span className="text-fg-secondary font-medium">{formatNumber(suppliers.length)}</span>
-                        {` поставщик${pluralRu(suppliers.length)}`}
+                        <span className="text-fg-secondary font-medium">{formatNumber(projectSuppliersQ.data!.length)}</span>
+                        {` поставщик${pluralRu(projectSuppliersQ.data!.length)}`}
                       </>
                     )}
                   </p>
                 </>
               );
             })()}
+
+            {/* Exclusion banner */}
+            {(supplierExclusionsQ.data?.size ?? 0) > 0 && (
+              <div className="flex items-center gap-2 rounded-lg border border-border-subtle bg-surface px-4 py-2 text-sm text-fg-secondary -mt-2">
+                <span>
+                  {`Исключено ${supplierExclusionsQ.data!.size} поставщик${pluralRu(supplierExclusionsQ.data!.size)} из расчётов`}
+                </span>
+                <button
+                  className="ml-auto text-xs underline hover:text-fg"
+                  onClick={() => setActiveTab("suppliers")}
+                >
+                  Управление
+                </button>
+              </div>
+            )}
 
             {/* Deviation chart (includes period filter in header) */}
             {summaryQ.data && (
@@ -503,7 +515,7 @@ export default function ProjectPage() {
                         <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
                       </TableHead>
                       <TableHead className="font-medium text-right">
-                        <div>Плановая цена</div>
+                        <div>Базовая цена</div>
                         <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
                       </TableHead>
                       <TableHead className="font-medium text-right">Откл.%</TableHead>
@@ -618,7 +630,7 @@ export default function ProjectPage() {
             )}
           </TabsContent>
 
-          {/* ────────── TAB: Плановые цены ────────── */}
+          {/* ────────── TAB: Базовые цены ────────── */}
           <TabsContent value="prices" className="mt-6 space-y-4">
             <div className="flex justify-end">
               <Button
@@ -633,8 +645,8 @@ export default function ProjectPage() {
               <Skeleton className="h-32" />
             ) : referencePrices.length === 0 ? (
               <EmptyState
-                title="Нет плановых цен"
-                description="Добавьте плановые цены для расчёта отклонений."
+                title="Нет базовых цен"
+                description="Добавьте базовые цены для расчёта отклонений."
               />
             ) : (
               <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface">
@@ -702,7 +714,7 @@ export default function ProjectPage() {
             <Dialog open={priceDialogOpen} onOpenChange={setPriceDialogOpen}>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Добавить плановую цену</DialogTitle>
+                  <DialogTitle>Добавить базовую цену</DialogTitle>
                 </DialogHeader>
 
                 <div className="space-y-3 py-2">
@@ -795,7 +807,7 @@ export default function ProjectPage() {
             <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Редактировать плановую цену</DialogTitle>
+                  <DialogTitle>Редактировать базовую цену</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-3 py-2">
                   <div className="flex flex-col gap-1">
@@ -851,7 +863,7 @@ export default function ProjectPage() {
             <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Удалить плановую цену?</DialogTitle>
+                  <DialogTitle>Удалить базовую цену?</DialogTitle>
                 </DialogHeader>
                 <p className="text-sm text-fg-secondary py-2">
                   Это действие нельзя отменить.
@@ -884,9 +896,9 @@ export default function ProjectPage() {
           </TabsContent>
 
           <TabsContent value="suppliers" className="mt-6">
-            {invoicesQ.isLoading ? (
+            {projectSuppliersQ.isLoading || supplierExclusionsQ.isLoading ? (
               <Skeleton className="h-32" />
-            ) : suppliers.length === 0 ? (
+            ) : (projectSuppliersQ.data ?? []).length === 0 ? (
               <EmptyState
                 title="Нет поставщиков"
                 description="Загрузите счета-фактуры, чтобы увидеть поставщиков."
@@ -899,22 +911,116 @@ export default function ProjectPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border-subtle text-left text-xs text-fg-tertiary">
+                      <th className="px-4 py-2 font-medium w-12 text-center" title="Снимите чекбокс, чтобы исключить поставщика из расчётов">В расчётах</th>
                       <th className="px-4 py-2 font-medium">Поставщик</th>
                       <th className="px-4 py-2 font-medium text-right">Счетов</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {suppliers.map((s) => (
-                      <tr
-                        key={s.key}
-                        className="border-b border-border-subtle last:border-0 hover:bg-surface-hover"
-                      >
-                        <td className="px-4 py-2 text-fg">{s.name}</td>
-                        <td className="px-4 py-2 text-right font-mono text-fg-secondary">
-                          {s.count}
-                        </td>
-                      </tr>
-                    ))}
+                    {(projectSuppliersQ.data ?? []).map((s) => {
+                      const excluded = supplierExclusionsQ.data?.has(s.id) ?? false;
+                      const isPopoverOpen = exclusionPopover?.supplierId === s.id;
+                      const isThisRowPending =
+                        toggleExclusion.isPending &&
+                        toggleExclusion.variables?.supplierId === s.id;
+                      // Disable all checkboxes while any toggle is in flight to prevent race conditions
+                      const isAnyPending = toggleExclusion.isPending;
+                      return (
+                        <tr
+                          key={s.id}
+                          className="border-b border-border-subtle last:border-0 hover:bg-surface-hover"
+                        >
+                          <td className="px-4 py-2 text-center">
+                            {isThisRowPending ? (
+                              <Loader2 className="mx-auto size-4 animate-spin text-fg-tertiary" />
+                            ) : (
+                              <Checkbox
+                                checked={!excluded}
+                                disabled={isAnyPending}
+                                aria-label={excluded ? `Включить ${s.name} в расчёты` : `Исключить ${s.name} из расчётов`}
+                                onCheckedChange={(checked: boolean) => {
+                                  if (checked) {
+                                    toggleExclusion.mutate({ supplierId: s.id, excluded: false });
+                                  } else {
+                                    setExclusionPopover({ supplierId: s.id, reason: "" });
+                                  }
+                                }}
+                              />
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-fg">
+                            <div>
+                              <span className={excluded ? "text-fg-tertiary line-through" : ""}>
+                                {s.name}
+                              </span>
+                              {s.inn && (
+                                <span className="ml-2 text-xs text-fg-tertiary">
+                                  ИНН {s.inn}
+                                </span>
+                              )}
+                            </div>
+                            {isPopoverOpen && (
+                              <div className="mt-2 p-3 rounded-lg border border-border-subtle bg-surface shadow-md space-y-2">
+                                <label
+                                  htmlFor={`exclusion-reason-${s.id}`}
+                                  className="text-xs text-fg-secondary"
+                                >
+                                  Причина исключения (необязательно)
+                                </label>
+                                <input
+                                  id={`exclusion-reason-${s.id}`}
+                                  autoFocus
+                                  className="w-full rounded border border-border-subtle px-2 py-1 text-sm bg-bg text-fg focus:outline-none focus:ring-1 focus:ring-accent"
+                                  placeholder="Аварийная закупка, нерепрезентативная цена..."
+                                  value={exclusionPopover.reason}
+                                  onChange={(e) =>
+                                    setExclusionPopover((prev) =>
+                                      prev ? { ...prev, reason: e.target.value } : null
+                                    )
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Escape") setExclusionPopover(null);
+                                    if (e.key === "Enter") {
+                                      toggleExclusion.mutate({
+                                        supplierId: s.id,
+                                        excluded: true,
+                                        reason: exclusionPopover.reason || undefined,
+                                      });
+                                      setExclusionPopover(null);
+                                    }
+                                  }}
+                                />
+                                <div className="flex gap-2 justify-end">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setExclusionPopover(null)}
+                                  >
+                                    Отмена
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => {
+                                      toggleExclusion.mutate({
+                                        supplierId: s.id,
+                                        excluded: true,
+                                        reason: exclusionPopover.reason || undefined,
+                                      });
+                                      setExclusionPopover(null);
+                                    }}
+                                  >
+                                    Исключить
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-right font-mono text-fg-secondary">
+                            {s.invoice_count}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

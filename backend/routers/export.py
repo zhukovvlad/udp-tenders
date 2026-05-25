@@ -11,6 +11,7 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy.orm import Session
 
 from crud.calculations import compute_export_rows
+from crud.supplier_exclusions import get_excluded_supplier_ids
 from database import get_db
 from models import Project
 
@@ -73,7 +74,7 @@ _FMT_PCT_RATE = "0%"  # for vat_rate stored as decimal (0.20 → 20%)
 _FMT_QTY = "#,##0.000"
 
 # Column definitions: (header label, width, number_format, alignment)
-# Col  1=A Дата,  2=B Номер,  3=C Поставщик,  4=D Объём,  5=E Плановая цена
+# Col  1=A Дата,  2=B Номер,  3=C Поставщик,  4=D Объём,  5=E Базовая цена
 # Col  6=F Ставка НДС
 # Col  7=G Бетон без НДС,  8=H Доставка без НДС,  9=I Прочее без НДС,  10=J Итого без НДС (=G+H+I)
 # Col 11=K Бетон с НДС (=G*(1+F)), 12=L Доставка с НДС (=H*(1+F)), 13=M Прочее с НДС (=I*(1+F))
@@ -83,7 +84,7 @@ _COLUMNS = [
     ("Номер УПД",                    14, "@",             "left"),    # B  2
     ("Поставщик",                    30, "@",             "left"),    # C  3
     ("Объём, м³",                    11, _FMT_QTY,        "right"),   # D  4
-    ("Плановая цена, ₽/м³",         18, _FMT_MONEY,      "right"),   # E  5
+    ("Базовая цена, ₽/м³",           18, _FMT_MONEY,      "right"),   # E  5
     ("Ставка НДС, %",                10, _FMT_PCT_RATE,  "center"),  # F  6  static
     ("Бетон без НДС, ₽/м³",         18, _FMT_MONEY,      "right"),   # G  7  static
     ("Доставка без НДС, ₽/м³",      18, _FMT_MONEY,      "right"),   # H  8  static
@@ -136,7 +137,7 @@ def _write_grand_total_row(
 
     sum_d = ",".join(f"D{s}:D{e}" for s, e in data_ranges)
     _c(4, f"=SUM({sum_d})", fmt=_FMT_QTY)
-    _c(5, None)   # Плановая — not averaged
+    _c(5, None)   # Базовая — not averaged
     _c(6, None)   # Ставка НДС — not averaged
 
     # G, H, I, K, L, M: weighted average = (Σ SUMPRODUCT(col, D)) / SUM(all D)
@@ -250,7 +251,7 @@ def _write_class_section(
                 cell.number_format = fmt
 
         _hc(4,  f"=SUM(D{s}:D{e})", fmt=_FMT_QTY)
-        _hc(5,  None)   # Плановая — not averaged
+        _hc(5,  None)   # Базовая — not averaged
         _hc(6,  None)   # Ставка НДС — not averaged
         _hc(7,  f'=IFERROR(SUMPRODUCT(G{s}:G{e},D{s}:D{e})/SUM(D{s}:D{e}),"")', fmt=_FMT_MONEY)
         _hc(8,  f'=IFERROR(SUMPRODUCT(H{s}:H{e},D{s}:D{e})/SUM(D{s}:D{e}),"")', fmt=_FMT_MONEY)
@@ -368,7 +369,11 @@ def export_excel(
     if not project:
         raise HTTPException(status_code=404, detail="Проект не найден")
 
-    rows = compute_export_rows(db, project_id, period_start, period_end, material_class_id)
+    excluded = get_excluded_supplier_ids(db, project_id)
+    rows = compute_export_rows(
+        db, project_id, period_start, period_end, material_class_id,
+        excluded_supplier_ids=excluded or None,
+    )
 
     # Actual displayed period from data
     if rows:

@@ -23,7 +23,7 @@
 - **БД / ORM** — новая строка в `material_classes`, ни одной миграции.
 - **API** — `GET /material-classes`, `POST /material-classes`, фильтрация по `?material_type=` работают для любой строки.
 - **CRUD** — `recalculate_prices`, агрегации поставщиков, отклонения считаются по `material_class_id` без проверки типа.
-- **Плановые цены** — `ReferencePrice` привязана к `material_class_id`, тип не важен.
+- **Базовые цены** — `ReferencePrice` привязана к `material_class_id`, тип не важен.
 
 ---
 

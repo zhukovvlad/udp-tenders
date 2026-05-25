@@ -44,7 +44,7 @@ export default function MaterialPage() {
           <TabsTrigger value="overview">Обзор</TabsTrigger>
           <TabsTrigger value="suppliers">Поставщики</TabsTrigger>
           <TabsTrigger value="prices">
-            Плановые цены{materialPrices.length ? ` · ${materialPrices.length}` : ""}
+            Базовые цены{materialPrices.length ? ` · ${materialPrices.length}` : ""}
           </TabsTrigger>
           <TabsTrigger value="projects">Объекты</TabsTrigger>
         </TabsList>
@@ -59,7 +59,7 @@ export default function MaterialPage() {
 
         <TabsContent value="prices" className="pt-6">
           {rpQ.isLoading ? <Skeleton className="h-40" /> : materialPrices.length === 0 ? (
-            <EmptyState title="Нет плановых цен" description="Плановые цены настраиваются в карточке объекта." />
+            <EmptyState title="Нет базовых цен" description="Базовые цены настраиваются в карточке объекта." />
           ) : (
             <Surface padding="none">
               <Table>
@@ -67,7 +67,7 @@ export default function MaterialPage() {
                   <TableRow>
                     <TableHead>Объект</TableHead>
                     <TableHead>Период</TableHead>
-                    <TableHead className="text-right">Плановая цена</TableHead>
+                    <TableHead className="text-right">Базовая цена</TableHead>
                     <TableHead>Источник</TableHead>
                   </TableRow>
                 </TableHeader>
