@@ -7,7 +7,7 @@ import type {
 import type { ID } from "@/types/common";
 
 export interface ProjectSupplier {
-  id: number;
+  id: ID;
   name: string;
   inn: string | null;
   invoice_count: number;
@@ -33,8 +33,8 @@ export const projectsApi = {
     const { data } = await api.get<ProjectSupplier[]>(`/projects/${projectId}/suppliers`);
     return data;
   },
-  async getSupplierExclusions(projectId: ID): Promise<number[]> {
-    const { data } = await api.get<number[]>(`/projects/${projectId}/supplier-exclusions`);
+  async getSupplierExclusions(projectId: ID): Promise<ID[]> {
+    const { data } = await api.get<ID[]>(`/projects/${projectId}/supplier-exclusions`);
     return data;
   },
   async addSupplierExclusion(projectId: ID, supplierId: ID, reason?: string): Promise<void> {
