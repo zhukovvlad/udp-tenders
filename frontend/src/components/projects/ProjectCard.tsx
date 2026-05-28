@@ -54,7 +54,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
   }
 
   function handleSaveEdit() {
-    if (!editName.trim()) return;
+    if (!editName.trim() || updateProject.isPending) return;
     updateProject.mutate(
       {
         id: project.id,
