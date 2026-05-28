@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui-domain/Button";
 import { AlertTriangle } from "lucide-react";
 import type { DashboardCalculation } from "@/types/dashboard";
-import { formatDate, formatMoney, pluralRu } from "@/lib/format";
+import { formatDate, formatMoney, formatNumber, pluralRu } from "@/lib/format";
 
 
 interface Props {
@@ -245,34 +245,41 @@ export function DeviationChart({
 
   // When a period filter is active — aggregate all months by material class.
   // Otherwise — show only the latest calendar month in the data.
-  const displayCalcs: DashboardCalculation[] = periodFilterActive
+  type AggregatedCalc = DashboardCalculation & { covered_qty: number | null };
+  const displayCalcs: AggregatedCalc[] = periodFilterActive
     ? (() => {
         const byClass = new Map<number, DashboardCalculation[]>();
         for (const c of calculations) {
           if (!byClass.has(c.material_class_id)) byClass.set(c.material_class_id, []);
           byClass.get(c.material_class_id)!.push(c);
         }
-        return Array.from(byClass.values()).map((rows) => {
+        return Array.from(byClass.values()).map((rows): AggregatedCalc => {
+          const coveredRows = rows.filter(r => r.reference_price !== null && r.reference_price > 0);
+
           const totalQty = rows.reduce((s, r) => s + (r.total_qty ?? 0), 0);
-          const deviationAmount = rows.every((r) => r.deviation_amount === null)
+          const coveredQty = coveredRows.reduce((s, r) => s + (r.total_qty ?? 0), 0);
+
+          const deviationAmount = coveredRows.length === 0
             ? null
-            : rows.reduce((s, r) => s + (r.deviation_amount ?? 0), 0);
-          // Derive % from totals to avoid double-counting when reference prices vary across months.
-          // Null when any included row lacks a usable reference price (null or <= 0).
-          const refQtyTotal = rows.every((r) => r.reference_price !== null && r.reference_price > 0)
-            ? rows.reduce((s, r) => s + (r.reference_price! * (r.total_qty ?? 0)), 0)
-            : null;
+            : coveredRows.reduce((s, r) => s + (r.deviation_amount ?? 0), 0);
+
+          const refQtyTotal = coveredRows.length === 0
+            ? null
+            : coveredRows.reduce((s, r) => s + r.reference_price! * (r.total_qty ?? 0), 0);
+
           const deviationPct =
             deviationAmount !== null && refQtyTotal !== null && refQtyTotal > 0
               ? (deviationAmount / refQtyTotal) * 100
               : null;
+
           const totalMaterial = rows.reduce((s, r) => s + (r.material_total ?? 0), 0);
           const totalDelivery = rows.reduce((s, r) => s + (r.delivery_total ?? 0), 0);
           const avgPrice = totalQty > 0 ? (totalMaterial + totalDelivery) / totalQty : 0;
-          // reference_price: weighted average when all months have a usable price, else null.
-          const referencePrice = rows.every((r) => r.reference_price !== null && r.reference_price > 0)
-            ? refQtyTotal! / totalQty
-            : null;
+
+          const referencePrice = (coveredRows.length === 0 || coveredQty <= 0)
+            ? null
+            : refQtyTotal! / coveredQty;
+
           return {
             ...rows[0],
             period_start: rows.reduce((m, r) => (r.period_start < m ? r.period_start : m), rows[0].period_start),
@@ -284,6 +291,7 @@ export function DeviationChart({
             reference_price: referencePrice,
             deviation_amount: deviationAmount,
             deviation_pct: deviationPct,
+            covered_qty: coveredRows.length === 0 ? null : coveredQty,
           };
         });
       })()
@@ -292,7 +300,9 @@ export function DeviationChart({
           (max, c) => (c.period_end > max ? c.period_end : max),
           calculations[0].period_end,
         );
-        return calculations.filter((c) => c.period_end === latestPeriodEnd);
+        return calculations
+          .filter((c) => c.period_end === latestPeriodEnd)
+          .map((c): AggregatedCalc => ({ ...c, covered_qty: null }));
       })();
 
   // deviation_pct is null when reference_price is null or <= 0
@@ -314,6 +324,8 @@ export function DeviationChart({
     value: c.deviation_pct!,
     amount: c.deviation_amount,
     fill: fillFor(c.deviation_pct!),
+    covered_qty: c.covered_qty,
+    total_qty: c.total_qty,
   }));
 
   const chartHeight = withPrice.length * 36 + 8;
@@ -408,7 +420,14 @@ export function DeviationChart({
                         item.payload?.amount != null
                           ? `  (${formatMoney(item.payload.amount)})`
                           : "";
-                      return pctStr + amtStr;
+                      const p = item.payload as { covered_qty?: number | null; total_qty?: number };
+                      const coveredQty = p?.covered_qty ?? null;
+                      const totalQty = p?.total_qty ?? null;
+                      const coverageNote =
+                        coveredQty !== null && totalQty !== null && coveredQty < totalQty
+                          ? `\nПосчитано по ${formatNumber(coveredQty)} м³ из ${formatNumber(totalQty)} м³`
+                          : "";
+                      return pctStr + amtStr + coverageNote;
                     }}
                     hideLabel
                   />
@@ -417,6 +436,32 @@ export function DeviationChart({
               <Bar
                 dataKey="value"
                 radius={4}
+                shape={(shapeProps: {
+                  x?: number; y?: number; width?: number; height?: number;
+                  fill?: string; index?: number;
+                }) => {
+                  const idx = shapeProps.index ?? -1;
+                  const entry = data[idx];
+                  const isPartial =
+                    entry != null &&
+                    entry.covered_qty !== null &&
+                    entry.covered_qty !== undefined &&
+                    entry.covered_qty < entry.total_qty;
+                  const w = shapeProps.width ?? 0;
+                  const rectX = w < 0 ? (shapeProps.x ?? 0) + w : (shapeProps.x ?? 0);
+                  return (
+                    <rect
+                      x={rectX}
+                      y={shapeProps.y ?? 0}
+                      width={Math.abs(w)}
+                      height={Math.max(0, shapeProps.height ?? 0)}
+                      fill={shapeProps.fill ?? "currentColor"}
+                      rx={4}
+                      ry={4}
+                      {...(isPartial ? { "data-partial-coverage": "true" } : {})}
+                    />
+                  );
+                }}
                 label={(lp: LabelProps & { index?: number }) => (
                   <BarLabel {...lp} amount={lp.index != null ? (data[lp.index]?.amount ?? null) : null} />
                 )}
