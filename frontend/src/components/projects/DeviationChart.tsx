@@ -425,9 +425,14 @@ export function DeviationChart({
                       const totalQty = p?.total_qty ?? null;
                       const coverageNote =
                         coveredQty !== null && totalQty !== null && coveredQty < totalQty
-                          ? `\nПосчитано по ${formatNumber(coveredQty)} м³ из ${formatNumber(totalQty)} м³`
-                          : "";
-                      return pctStr + amtStr + coverageNote;
+                          ? `Посчитано по ${formatNumber(coveredQty)} м³ из ${formatNumber(totalQty)} м³`
+                          : null;
+                      return (
+                        <>
+                          <span>{pctStr + amtStr}</span>
+                          {coverageNote && <div className="text-fg-tertiary mt-0.5">{coverageNote}</div>}
+                        </>
+                      );
                     }}
                     hideLabel
                   />
