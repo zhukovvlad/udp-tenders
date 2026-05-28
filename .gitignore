@@ -42,3 +42,6 @@ e2e/playwright-report/
 
 # Сохраняем .gitkeep в real/, но не сами PDF
 !backend/tests/fixtures/pdf/real/.gitkeep
+
+# Всякое локальное
+/backend/scripts/check_prostoy.py
