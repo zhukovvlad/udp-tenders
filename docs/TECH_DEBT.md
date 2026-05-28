@@ -6,6 +6,17 @@
 
 ## Backend
 
+- [ ] **`GET /api/projects` не возвращает `created_at`**
+  Роутер `routers/projects.py:list_projects` отдаёт `{id, name, contract_number, doc_count}`, но
+  фронтенд (`Project` тип в `frontend/src/types/project.ts`) объявляет `created_at` обязательным
+  и читает его в `ProjectCard.tsx` («Создан {formatDate(project.created_at)}») и `ProjectPage.tsx`
+  («создан {formatDate(project.created_at)}»). В живой UI отображается «Создан Invalid Date» / «—».
+  Расхождение всплыло при правке фикстуры `sampleProject` для типобезопасных тестов карточки.
+  **Решение:** добавить `"created_at": p.created_at.isoformat() if p.created_at else None` в dict
+  ответа `list_projects` (и аналогично в `create_project_route` / `update_project_route` для
+  консистентности). Альтернатива — определить Pydantic `ProjectOut` с `model_config = ConfigDict(from_attributes=True)`
+  и навесить `response_model=ProjectOut` на все три endpoint'а.
+
 - [ ] **`Invoice.vat_rate` допускает NULL в БД**
   Колонка объявлена без `nullable=False` и без `NOT NULL` в миграции. ORM-дефолт `20.0`
   применяется только при создании через ORM-объект, старые/мигрированные строки могут иметь `NULL`.

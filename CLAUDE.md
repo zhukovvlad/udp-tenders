@@ -188,6 +188,10 @@ deviation_amount = (avg_price − ref_price) × qty
 - New endpoint? Add to `handlers.ts` before writing the test.
 - Binary endpoints (blob/arraybuffer) must return `HttpResponse.arrayBuffer(...)` in MSW handlers, not `HttpResponse.json(...)`.
 - Auth endpoints already handled in `handlers.ts` (`GET /api/auth/me`, `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/refresh`).
+- **Asserting request payloads**: override the default MSW handler per-test with `server.use(http.put(..., async ({ request, params }) => { onUpdate({ id: params.id, body: await request.json() }); return HttpResponse.json(...); }))` and assert on a `vi.fn()` spy. The default handlers in `handlers.ts` echo `sampleProject` and similar fixtures — they're enough for happy-path GETs but don't capture request bodies.
+- **Destructive UI flows must test the confirmation step**, not just the API call. For `AlertDialog`-based confirmations: assert that the API mock is NOT called on first click, only after clicking the explicit confirm button. Verifies that the dialog can't be bypassed by Escape/overlay-click (base-ui `AlertDialog` blocks both).
+- **Component-level tests live next to the component** (e.g. `ProjectCard.test.tsx` next to `ProjectCard.tsx`). Page-level tests live in `src/pages/*.test.tsx`. Prefer component-level tests when the logic is isolated to a single component — they're faster and survive page refactors.
+- **Interacting with shadcn DropdownMenu / AlertDialog (base-ui under the hood)**: trigger via `getByRole("button", { name: "<aria-label>" })`, then `findByText(...)` for menu items (they render in a Portal but are reachable via `screen`). AlertDialog confirm/cancel buttons are reachable as `getByRole("button", { name: "Удалить" | "Отмена" })`.
 
 ---
 

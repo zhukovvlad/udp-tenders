@@ -2,6 +2,7 @@ export const sampleProject = {
   id: 1,
   name: "ЖК Радуга",
   contract_number: "Д-001",
+  created_at: "2026-01-15T10:00:00",
   doc_count: 0,
 };
 
