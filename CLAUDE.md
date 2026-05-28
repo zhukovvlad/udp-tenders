@@ -192,6 +192,10 @@ deviation_amount = (avg_price − ref_price) × qty
 - **Destructive UI flows must test the confirmation step**, not just the API call. For `AlertDialog`-based confirmations: assert that the API mock is NOT called on first click, only after clicking the explicit confirm button. Verifies that the dialog can't be bypassed by Escape/overlay-click (base-ui `AlertDialog` blocks both).
 - **Component-level tests live next to the component** (e.g. `ProjectCard.test.tsx` next to `ProjectCard.tsx`). Page-level tests live in `src/pages/*.test.tsx`. Prefer component-level tests when the logic is isolated to a single component — they're faster and survive page refactors.
 - **Interacting with shadcn DropdownMenu / AlertDialog (base-ui under the hood)**: trigger via `getByRole("button", { name: "<aria-label>" })`, then `findByText(...)` for menu items (they render in a Portal but are reachable via `screen`). AlertDialog confirm/cancel buttons are reachable as `getByRole("button", { name: "Удалить" | "Отмена" })`.
+- **recharts дублирует текст в служебном span** (для измерений размеров). `getByText("B25")` упадёт с «Found multiple elements». Используй `getAllByText("B25")[0]` или вынеси хелпер `findAxisLabel(name) { return screen.getAllByText(name)[0]; }`.
+- **`Cell` в recharts нельзя обернуть в `Tooltip`** — `Cell` не рендерит DOM-элемент сам по себе (потребляется `Bar`). Для аттрибутов на SVG-прямоугольниках баров используй кастомный `shape` prop на `Bar`, возвращающий `<rect ... data-*="..." />`. Recharts `ChartTooltip` через `formatter` — единственный способ показать доп. инфо при наведении внутри SVG-чарта.
+- **`TooltipProvider`** из `@/components/ui/tooltip` должен оборачивать всё дерево: добавлен в `App.tsx` и в `AllProviders` в `src/test/utils.tsx`. При добавлении shadcn tooltip — проверяй оба места.
+- **base-ui `Tooltip.Trigger` не поддерживает `asChild`** (это паттерн Radix). Не пытайся передать `asChild` в компоненты из `@base-ui/react`.
 
 ---
 

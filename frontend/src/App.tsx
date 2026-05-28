@@ -4,6 +4,7 @@ import { Toaster, toast } from "sonner";
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useParams } from "react-router-dom";
 
 import { AppShell } from "@/components/layout/AppShell";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/hooks/useAuth";
 import Dashboard from "@/pages/Dashboard";
 import LoginPage from "@/pages/LoginPage";
@@ -52,6 +53,7 @@ function ProjectPageWrapper() {
 export default function App() {
   return (
     <ThemeProvider attribute="data-theme" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
+      <TooltipProvider>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <Routes>
@@ -79,6 +81,7 @@ export default function App() {
         </BrowserRouter>
         <Toaster richColors position="top-right" />
       </QueryClientProvider>
+      </TooltipProvider>
     </ThemeProvider>
   );
 }

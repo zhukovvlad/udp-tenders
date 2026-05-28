@@ -3,6 +3,7 @@ import { render, type RenderOptions } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { CURRENT_USER_QUERY_KEY } from "@/hooks/useAuth";
 import type { User } from "@/types/auth";
 
@@ -35,9 +36,11 @@ export function AllProviders({ children, queryClient, initialRoute = "/" }: Wrap
   const client = queryClient ?? createTestQueryClient();
   return (
     <ThemeProvider attribute="data-theme" defaultTheme="light" enableSystem={false}>
-      <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={[initialRoute]}>{children}</MemoryRouter>
-      </QueryClientProvider>
+      <TooltipProvider>
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={[initialRoute]}>{children}</MemoryRouter>
+        </QueryClientProvider>
+      </TooltipProvider>
     </ThemeProvider>
   );
 }
