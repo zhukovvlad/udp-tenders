@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from crud.documents import create_document, delete_document, get_document, get_documents
@@ -335,6 +335,29 @@ def unverify_invoice(invoice_id: int, db: Session = Depends(get_db)):
     db.commit()
     logger.info(f"Invoice id={invoice_id}: отметка о проверке снята")
     return {"message": "Отметка снята", "invoice_id": invoice.id}
+
+
+class BulkDeleteRequest(BaseModel):
+    ids: list[int] = Field(..., max_length=1000)
+
+
+@router.delete("/bulk", status_code=200)
+def bulk_delete_invoices(body: BulkDeleteRequest, db: Session = Depends(get_db)):
+    """Удалить несколько СФ за раз. Подтверждённые пропускаются (не удаляются)."""
+    if not body.ids:
+        return {"deleted": 0, "skipped": []}
+
+    invoices = db.query(Invoice).filter(Invoice.id.in_(body.ids)).all()
+    deleted = 0
+    skipped: list[int] = []
+    for inv in invoices:
+        if inv.verified:
+            skipped.append(inv.id)
+        else:
+            db.delete(inv)
+            deleted += 1
+    db.commit()
+    return {"deleted": deleted, "skipped": skipped}
 
 
 @router.delete("/{invoice_id}")

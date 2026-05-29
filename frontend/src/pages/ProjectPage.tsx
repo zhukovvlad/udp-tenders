@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui-domain/EmptyState";
 import { Skeleton } from "@/components/ui-domain/Skeleton";
 import { Button } from "@/components/ui-domain/Button";
 import { KpiCard } from "@/components/ui-domain/KpiCard";
+import { InvoiceKpiBar } from "@/components/invoices/InvoiceKpiBar";
 import { InvoiceTable } from "@/components/invoices/InvoiceTable";
 import { UploadSheet } from "@/components/projects/UploadSheet";
 import { DeviationChart } from "@/components/projects/DeviationChart";
@@ -621,10 +622,15 @@ export default function ProjectPage() {
                     </button>
                   </div>
                 )}
-                <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
-                  <InvoiceTable
-                    invoices={filteredInvoices}
-                  />
+                <div className="space-y-6">
+                  {projectId && (
+                    <InvoiceKpiBar invoices={filteredInvoices} projectId={projectId} />
+                  )}
+                  <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
+                    <InvoiceTable
+                      invoices={filteredInvoices}
+                    />
+                  </div>
                 </div>
               </>
             )}

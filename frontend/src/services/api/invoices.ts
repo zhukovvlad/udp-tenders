@@ -34,6 +34,10 @@ export const invoicesApi = {
   async removeInvoice(invoiceId: ID): Promise<void> {
     await api.delete(`/invoices/${invoiceId}`);
   },
+  async bulkDeleteInvoices(ids: ID[]): Promise<{ deleted: number; skipped: ID[] }> {
+    const { data } = await api.delete<{ deleted: number; skipped: ID[] }>("/invoices/bulk", { data: { ids } });
+    return data;
+  },
   async removeDocument(docId: ID): Promise<void> {
     await api.delete(`/invoices/documents/${docId}`);
   },
