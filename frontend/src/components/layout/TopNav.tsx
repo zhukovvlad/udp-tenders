@@ -21,12 +21,13 @@ const NAV: { to: string; icon: LucideIcon; label: string; end?: boolean }[] = [
 ];
 
 function getInitials(email: string): string {
-  const local = email.split("@")[0];
-  const parts = local.split(/[._-]/);
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase();
-  }
-  return local.slice(0, 2).toUpperCase();
+  const local = (email.split("@")[0] ?? "").trim();
+  const parts = local.split(/[._-]/).filter(Boolean);
+  const letters =
+    parts.length >= 2
+      ? `${parts[0].charAt(0)}${parts[1].charAt(0)}`
+      : local.replace(/[._-]/g, "").slice(0, 2);
+  return (letters || "??").toUpperCase();
 }
 
 export function TopNav() {
