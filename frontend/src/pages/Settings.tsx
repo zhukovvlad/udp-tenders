@@ -11,21 +11,31 @@ import { Button } from "@/components/ui-domain/Button";
 import { Skeleton } from "@/components/ui-domain/Skeleton";
 
 import { useSettings, useUpdateSettings } from "@/services/queries";
+import { useCurrentUser } from "@/hooks/useAuth";
 import type { AppSettings } from "@/services/api/settings";
+import type { OrgRole } from "@/types/auth";
 
-type SectionKey = "general" | "parsing" | "about";
+type SectionKey = "profile" | "general" | "parsing" | "about";
 
 const SECTIONS: Array<{ key: SectionKey; label: string }> = [
+  { key: "profile", label: "Профиль" },
   { key: "general", label: "Общие" },
   { key: "parsing", label: "Парсинг" },
   { key: "about", label: "О приложении" },
 ];
 
+const ORG_ROLE_LABELS: Record<OrgRole, string> = {
+  superadmin: "Суперадмин",
+  admin: "Администратор",
+  member: "Участник",
+};
+
 export default function SettingsPage() {
   const settingsQ = useSettings();
   const update = useUpdateSettings();
+  const { data: user } = useCurrentUser();
 
-  const [active, setActive] = useState<SectionKey>("general");
+  const [active, setActive] = useState<SectionKey>("profile");
   // Local edits — null means "no overrides yet, show server data"
   const [overrides, setOverrides] = useState<AppSettings | null>(null);
   const draft = overrides ?? settingsQ.data ?? null;
@@ -72,6 +82,55 @@ export default function SettingsPage() {
 
         {/* Контент */}
         <section className="col-span-12 md:col-span-9">
+          {active === "profile" && (
+            <Surface>
+              <h3 className="text-md font-medium">Профиль</h3>
+              <p className="mt-1 text-xs text-fg-tertiary">Данные вашей учётной записи и организации.</p>
+              {!user ? (
+                <div className="mt-4 space-y-3">
+                  <Skeleton className="h-5 w-1/2" />
+                  <Skeleton className="h-5 w-1/3" />
+                </div>
+              ) : (
+                <dl className="mt-4 divide-y divide-border-subtle">
+                  <div className="flex items-center gap-4 py-3">
+                    <dt className="w-40 shrink-0 text-xs uppercase tracking-wider text-fg-tertiary">Email</dt>
+                    <dd className="text-sm text-fg">{user.email}</dd>
+                  </div>
+                  <div className="flex items-center gap-4 py-3">
+                    <dt className="w-40 shrink-0 text-xs uppercase tracking-wider text-fg-tertiary">Роль</dt>
+                    <dd className="text-sm text-fg">
+                      {user.is_superuser
+                        ? "Суперпользователь системы"
+                        : user.org_role
+                          ? ORG_ROLE_LABELS[user.org_role]
+                          : "—"}
+                    </dd>
+                  </div>
+                  {user.organization ? (
+                    <>
+                      <div className="flex items-center gap-4 py-3">
+                        <dt className="w-40 shrink-0 text-xs uppercase tracking-wider text-fg-tertiary">Организация</dt>
+                        <dd className="text-sm text-fg">{user.organization.name}</dd>
+                      </div>
+                      {user.organization.inn && (
+                        <div className="flex items-center gap-4 py-3">
+                          <dt className="w-40 shrink-0 text-xs uppercase tracking-wider text-fg-tertiary">ИНН</dt>
+                          <dd className="text-sm text-fg font-mono">{user.organization.inn}</dd>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-4 py-3">
+                      <dt className="w-40 shrink-0 text-xs uppercase tracking-wider text-fg-tertiary">Организация</dt>
+                      <dd className="text-sm text-fg-tertiary">Не привязан к организации</dd>
+                    </div>
+                  )}
+                </dl>
+              )}
+            </Surface>
+          )}
+
           {active === "general" && (
             <Surface>
               <h3 className="text-md font-medium">Общие</h3>
