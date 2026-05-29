@@ -95,8 +95,9 @@ describe("InvoiceTable", () => {
     await user.click(screen.getByRole("checkbox", { name: /Выбрать СФ СФ-PENDING/i }));
     await user.click(await screen.findByRole("button", { name: /Удалить выбранные/i }));
 
-    await screen.findByText(/Удалить 2 СФ/);
-    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    const dialog = await screen.findByText(/Удалить 2 СФ/);
+    const alertDialog = dialog.closest('[role="alertdialog"]')!;
+    await user.click(alertDialog.querySelector('[data-slot="alert-dialog-action"]')!);
 
     await waitFor(() => {
       expect(onBulkDelete).toHaveBeenCalledWith(
@@ -117,13 +118,18 @@ describe("InvoiceTable", () => {
     const user = userEvent.setup();
     renderWithProviders(<InvoiceTable invoices={invoices} />);
 
-    const deleteButtons = screen.getAllByRole("button", { name: "Удалить" });
-    await user.click(deleteButtons[0]);
+    // Click the first enabled (non-confirmed) delete button
+    const enabledDeletes = screen
+      .getAllByRole("button", { name: "Удалить" })
+      .filter((b) => !b.hasAttribute("disabled"));
+    await user.click(enabledDeletes[0]);
 
-    expect(await screen.findByText(/Удалить СФ «/)).toBeInTheDocument();
+    const dialog = await screen.findByText(/Удалить СФ «/);
+    expect(dialog).toBeInTheDocument();
     expect(onDelete).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    const alertDialog = dialog.closest('[role="alertdialog"]')!;
+    await user.click(alertDialog.querySelector('[data-slot="alert-dialog-action"]')!);
 
     await waitFor(() => {
       expect(onDelete).toHaveBeenCalledTimes(1);
