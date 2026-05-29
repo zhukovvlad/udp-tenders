@@ -337,6 +337,29 @@ def unverify_invoice(invoice_id: int, db: Session = Depends(get_db)):
     return {"message": "Отметка снята", "invoice_id": invoice.id}
 
 
+class BulkDeleteRequest(BaseModel):
+    ids: list[int]
+
+
+@router.delete("/bulk", status_code=200)
+def bulk_delete_invoices(body: BulkDeleteRequest, db: Session = Depends(get_db)):
+    """Удалить несколько СФ за раз. Подтверждённые пропускаются (не удаляются)."""
+    if not body.ids:
+        return {"deleted": 0, "skipped": []}
+
+    invoices = db.query(Invoice).filter(Invoice.id.in_(body.ids)).all()
+    deleted = 0
+    skipped: list[int] = []
+    for inv in invoices:
+        if inv.verified:
+            skipped.append(inv.id)
+        else:
+            db.delete(inv)
+            deleted += 1
+    db.commit()
+    return {"deleted": deleted, "skipped": skipped}
+
+
 @router.delete("/{invoice_id}")
 def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
     """Удалить одну СФ из документа (PDF документ остаётся)."""

@@ -58,6 +58,9 @@ export const handlers = [
   http.put("/api/invoices/:id", ({ params }) =>
     HttpResponse.json({ message: "Сохранено", invoice_id: Number(params.id) })
   ),
+  http.delete("/api/invoices/bulk", () =>
+    HttpResponse.json({ deleted: 1, skipped: [] })
+  ),
   http.delete("/api/invoices/:id", () => HttpResponse.json({ message: "СФ удалена" })),
   http.delete("/api/invoices/documents/:id", () =>
     HttpResponse.json({ message: "Удалено" })

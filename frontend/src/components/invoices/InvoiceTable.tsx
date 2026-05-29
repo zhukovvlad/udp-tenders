@@ -1,5 +1,41 @@
+import { useMemo, useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { FileEdit } from "lucide-react";
+import {
+  ArrowDown, ArrowUp, Check, ChevronsUpDown, EyeOff,
+  FileEdit, LayoutList, PlusCircle, Search, Trash2,
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import {
+  Command,
+  CommandGroup,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/components/ui/command";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Separator } from "@/components/ui/separator";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -8,22 +44,47 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui-domain/Button";
 import { StatusPill } from "@/components/ui-domain/StatusPill";
 import { MoneyCell } from "@/components/ui-domain/MoneyCell";
 import { formatDate } from "@/lib/format";
-import { useSettings } from "@/services/queries";
+import { useSettings, useDeleteInvoice, useDeleteInvoicesBulk } from "@/services/queries";
 import { DEFAULT_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import type { DashboardInvoiceRow } from "@/types/invoice";
+import type { ID } from "@/types/common";
 
 interface InvoiceTableProps {
   invoices: DashboardInvoiceRow[];
 }
 
 type Stage = "confirmed" | "review" | "pending";
+type SortColumn = "date" | "supplier" | "total" | "number";
+type SortDir = "asc" | "desc";
+type PageSize = 10 | 20 | 50;
+type ColKey = "number" | "date" | "supplier" | "items" | "total" | "status";
 
-// Фоллбэк-порог, если настройка ещё не загрузилась.
+const PAGE_SIZE_OPTIONS: PageSize[] = [10, 20, 50];
 const REVIEW_CONFIDENCE_THRESHOLD = DEFAULT_CONFIDENCE_THRESHOLD;
+
+const COL_LABELS: Record<ColKey, string> = {
+  number:   "Номер",
+  date:     "Дата",
+  supplier: "Поставщик",
+  items:    "Позиции",
+  total:    "Сумма",
+  status:   "Статус",
+};
 
 function getStage(inv: DashboardInvoiceRow, threshold: number): Stage {
   if (inv.verified) return "confirmed";
@@ -43,105 +104,539 @@ const STAGE_CONFIG: Record<Stage, { tone: "success" | "danger" | "neutral"; labe
   pending:   { tone: "neutral", label: "Ожидает" },
 };
 
+const STAGE_FILTER_OPTIONS: { stage: Stage; dotClass: string }[] = [
+  { stage: "confirmed", dotClass: "bg-accent" },
+  { stage: "pending",   dotClass: "bg-neutral-dot" },
+  { stage: "review",    dotClass: "bg-danger" },
+];
+
+function invoiceTotal(inv: DashboardInvoiceRow): number {
+  return inv.items.reduce(
+    (s, it) => s + it.amount + (it.vat_amount ?? it.amount * ((inv.vat_rate ?? 20) / 100)),
+    0,
+  );
+}
+
 export function InvoiceTable({ invoices }: InvoiceTableProps) {
   const settingsQ = useSettings();
   const threshold = settingsQ.data?.confidence_threshold ?? REVIEW_CONFIDENCE_THRESHOLD;
+  const deleteInvoice = useDeleteInvoice();
+  const deleteBulk = useDeleteInvoicesBulk();
+
+  const [sortCol, setSortCol]       = useState<SortColumn>("date");
+  const [sortDir, setSortDir]       = useState<SortDir>("desc");
+  const [hiddenCols, setHiddenCols] = useState<Set<ColKey>>(new Set());
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedStages, setSelectedStages] = useState<Set<Stage>>(new Set());
+  const [pendingDelete, setPendingDelete]   = useState<DashboardInvoiceRow | null>(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [page, setPage]         = useState(1);
+  const [pageSize, setPageSize] = useState<PageSize>(20);
+  const [selectedIds, setSelectedIds] = useState<Set<ID>>(new Set());
+
+  useEffect(() => {
+    setPage(1);
+    setSelectedIds(new Set());
+  }, [invoices]);
+
+  useEffect(() => { setPage(1); }, [searchQuery]);
+  useEffect(() => { setPage(1); }, [selectedStages]);
+
+  // ── derived ───────────────────────────────────────────────────────────────
+
+  const filtered = useMemo(() => {
+    let result = invoices;
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      result = result.filter(
+        (inv) =>
+          inv.number?.toLowerCase().includes(q) ||
+          inv.supplier_name?.toLowerCase().includes(q),
+      );
+    }
+    if (selectedStages.size > 0) {
+      result = result.filter((inv) => selectedStages.has(getStage(inv, threshold)));
+    }
+    return result;
+  }, [invoices, searchQuery, selectedStages, threshold]);
+
+  const sorted = useMemo(() => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      switch (sortCol) {
+        case "date":     return dir * a.date.localeCompare(b.date);
+        case "supplier": return dir * (a.supplier_name ?? "").localeCompare(b.supplier_name ?? "", "ru");
+        case "total":    return dir * (invoiceTotal(a) - invoiceTotal(b));
+        case "number":   return dir * (a.number ?? "").localeCompare(b.number ?? "", "ru", { numeric: true });
+        default:         return 0;
+      }
+    });
+  }, [filtered, sortCol, sortDir]);
+
+  const totalPages  = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const paged       = sorted.slice((page - 1) * (pageSize as number), page * (pageSize as number));
+  const fromIdx     = sorted.length === 0 ? 0 : (page - 1) * (pageSize as number) + 1;
+  const toIdx       = Math.min(page * (pageSize as number), sorted.length);
+  const allSelected = sorted.length > 0 && sorted.every((inv) => selectedIds.has(inv.id));
+  const someSelected = selectedIds.size > 0;
+
+  // ── helpers ───────────────────────────────────────────────────────────────
+
+  function setSort(col: SortColumn, dir: SortDir) {
+    setSortCol(col); setSortDir(dir); setPage(1);
+  }
+
+  function toggleHide(col: ColKey) {
+    setHiddenCols((prev) => {
+      const next = new Set(prev);
+      next.has(col) ? next.delete(col) : next.add(col);
+      return next;
+    });
+  }
+
+  function toggleStage(stage: Stage) {
+    setSelectedStages((prev) => {
+      const next = new Set(prev);
+      next.has(stage) ? next.delete(stage) : next.add(stage);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds(allSelected ? new Set() : new Set(sorted.map((inv) => inv.id)));
+  }
+
+  function toggleRow(id: ID) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  // ── sub-components ────────────────────────────────────────────────────────
+
+  function SortHead({
+    col,
+    sortKey,
+    className,
+    children,
+  }: {
+    col: ColKey;
+    sortKey: SortColumn;
+    className?: string;
+    children: React.ReactNode;
+  }) {
+    if (hiddenCols.has(col)) return null;
+    const isActive = sortCol === sortKey;
+
+    return (
+      <TableHead className={className}>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            type="button"
+            className={`inline-flex items-center gap-1.5 rounded px-1 -ml-1 hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 select-none${isActive ? " text-fg" : ""}`}
+          >
+            {children}
+            <ChevronsUpDown size={14} className={isActive ? "text-accent" : "text-fg-muted"} />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" sideOffset={4} className="min-w-36">
+            <DropdownMenuItem
+              className="flex items-center gap-2"
+              onClick={() => setSort(sortKey, "asc")}
+            >
+              <ArrowUp size={13} className="text-fg-tertiary" />
+              По возрастанию
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="flex items-center gap-2"
+              onClick={() => setSort(sortKey, "desc")}
+            >
+              <ArrowDown size={13} className="text-fg-tertiary" />
+              По убыванию
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="flex items-center gap-2 text-fg-secondary"
+              onClick={() => toggleHide(col)}
+            >
+              <EyeOff size={13} className="text-fg-tertiary" />
+              Скрыть
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </TableHead>
+    );
+  }
+
+  function PlainHead({ col, children, className }: { col: ColKey; children?: React.ReactNode; className?: string }) {
+    if (hiddenCols.has(col)) return null;
+    return <TableHead className={className}>{children}</TableHead>;
+  }
+
+  // ── render ────────────────────────────────────────────────────────────────
+
   return (
-    <div className="overflow-x-auto">
-      <Table className="min-w-[860px] table-fixed">
-        <colgroup>
-          <col className="w-[5rem]" />
-          <col className="w-[6.5rem]" />
-          <col className="w-[13rem]" />
-          <col />
-          <col className="w-[9.5rem]" />
-          <col className="w-[7.5rem]" />
-          <col className="w-[3.5rem]" />
-        </colgroup>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Номер</TableHead>
-            <TableHead>Дата</TableHead>
-            <TableHead>Поставщик</TableHead>
-            <TableHead>Позиции</TableHead>
-            <TableHead className="text-right">
-              <div>Сумма</div>
-              <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
-            </TableHead>
-            <TableHead>Статус</TableHead>
-            <TableHead></TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {invoices.map((inv) => {
-            const total = inv.items.reduce(
-              (s, it) => s + it.amount + (it.vat_amount ?? it.amount * ((inv.vat_rate ?? 20) / 100)),
-              0,
-            );
-            const stage = getStage(inv, threshold);
-            const { tone, label } = STAGE_CONFIG[stage];
-            const confidencePct =
-              inv.ai_confidence !== null && inv.ai_confidence !== undefined
-                ? `ИИ: ${Math.round(inv.ai_confidence * 100)}%`
-                : null;
-            const verifiedPart =
-              stage === "confirmed" && inv.verified_at
-                ? `Проверен ${formatDate(inv.verified_at)}`
-                : null;
-            const tooltip = [label, confidencePct, verifiedPart].filter(Boolean).join(" · ");
-            return (
-              <TableRow key={inv.id} className="hover:bg-surface-hover">
-                <TableCell className={`font-medium overflow-hidden border-l-2 ${stage === "review" ? "border-danger" : "border-transparent"}`}>
-                  <span className="block whitespace-normal break-all" title={inv.number || "—"}>{inv.number || "—"}</span>
-                </TableCell>
-                <TableCell className="text-fg-secondary tabular-nums">
-                  {formatDate(inv.date)}
-                </TableCell>
-                <TableCell className="truncate" title={inv.supplier_name ?? ""}>
-                  {inv.supplier_name || "—"}
-                </TableCell>
-                <TableCell>
-                  <div className="space-y-0.5">
-                    {inv.items.slice(0, 3).map((it, i) => (
-                      <div
-                        key={i}
-                        className="truncate text-xs text-fg-secondary"
-                        title={it.raw_name ?? ""}
+    <>
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 border-b border-border-subtle px-3 py-2">
+        <div className="relative flex-1 max-w-xs">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-tertiary pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Номер, поставщик…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-8 w-full rounded-md border border-input bg-transparent pl-7 pr-3 text-sm outline-none placeholder:text-fg-tertiary focus:border-ring focus:ring-2 focus:ring-ring/30"
+          />
+        </div>
+
+        {/* Status facet filter */}
+        <Popover>
+          <PopoverTrigger className="inline-flex items-center gap-1.5 rounded-md border border-input px-2.5 py-1.5 text-sm text-fg-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30">
+            <PlusCircle size={13} />
+            Статус
+            {selectedStages.size > 0 && (
+              <>
+                <Separator orientation="vertical" className="mx-0.5 h-4" />
+                {[...selectedStages].map((stage) => (
+                  <Badge key={stage} variant="secondary" className="rounded px-1.5 py-0 text-xs font-normal">
+                    {STAGE_CONFIG[stage].label}
+                  </Badge>
+                ))}
+              </>
+            )}
+          </PopoverTrigger>
+          <PopoverContent className="w-48 p-0" align="start" sideOffset={4}>
+            <Command>
+              <CommandList>
+                <CommandGroup>
+                  {STAGE_FILTER_OPTIONS.map(({ stage, dotClass }) => {
+                    const isSelected = selectedStages.has(stage);
+                    return (
+                      <CommandItem key={stage} onSelect={() => toggleStage(stage)} className="gap-2">
+                        <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${isSelected ? "border-primary bg-primary text-primary-foreground" : "border-border-default"}`}>
+                          {isSelected && <Check size={11} strokeWidth={3} />}
+                        </div>
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} />
+                        {STAGE_CONFIG[stage].label}
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+                {selectedStages.size > 0 && (
+                  <>
+                    <CommandSeparator />
+                    <CommandGroup>
+                      <CommandItem
+                        onSelect={() => setSelectedStages(new Set())}
+                        className="justify-center text-xs text-fg-tertiary"
                       >
-                        <span className="text-fg-tertiary">
-                          {it.material_class || it.item_type}
-                        </span>
-                        {" · "}
-                        {it.raw_name}
+                        Сбросить фильтр
+                      </CommandItem>
+                    </CommandGroup>
+                  </>
+                )}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+
+        <div className="ml-auto">
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              type="button"
+              className="inline-flex items-center gap-1.5 rounded-md border border-input px-2.5 py-1.5 text-sm text-fg-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+            >
+              <LayoutList size={14} />
+              Вид
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" sideOffset={4} className="min-w-40">
+              {(Object.keys(COL_LABELS) as ColKey[]).map((col) => (
+                <DropdownMenuCheckboxItem
+                  key={col}
+                  checked={!hiddenCols.has(col)}
+                  onCheckedChange={() => toggleHide(col)}
+                >
+                  {COL_LABELS[col]}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
+      {/* Bulk action bar */}
+      {someSelected && (
+        <div className="flex items-center gap-3 border-b border-border-subtle bg-surface-hover px-3 py-2 text-sm">
+          <span className="text-fg-secondary">
+            Выбрано: <span className="font-medium text-fg">{selectedIds.size}</span>
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-danger hover:text-danger"
+            leftIcon={<Trash2 size={14} />}
+            onClick={() => setBulkDeleteOpen(true)}
+          >
+            Удалить выбранные
+          </Button>
+          <button
+            className="ml-auto text-xs text-fg-tertiary hover:text-fg"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            Снять выделение
+          </button>
+        </div>
+      )}
+
+      {/* Table */}
+      <div className="overflow-x-auto">
+        <Table className="min-w-[860px] table-fixed">
+          <colgroup>
+            <col className="w-8" />
+            {!hiddenCols.has("number")   && <col className="w-[5rem]" />}
+            {!hiddenCols.has("date")     && <col className="w-[6.5rem]" />}
+            {!hiddenCols.has("supplier") && <col className="w-[13rem]" />}
+            {!hiddenCols.has("items")    && <col />}
+            {!hiddenCols.has("total")    && <col className="w-[9.5rem]" />}
+            {!hiddenCols.has("status")   && <col className="w-[7.5rem]" />}
+            <col className="w-[7rem]" />
+          </colgroup>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="pl-3">
+                <Checkbox
+                  checked={allSelected}
+                  onCheckedChange={toggleSelectAll}
+                  aria-label="Выбрать все"
+                />
+              </TableHead>
+              <SortHead col="number"   sortKey="number">Номер</SortHead>
+              <SortHead col="date"     sortKey="date">Дата</SortHead>
+              <SortHead col="supplier" sortKey="supplier">Поставщик</SortHead>
+              <PlainHead col="items">Позиции</PlainHead>
+              <SortHead col="total"    sortKey="total" className="text-right">
+                <div className="text-right leading-tight">
+                  <div>Сумма</div>
+                  <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
+                </div>
+              </SortHead>
+              <PlainHead col="status">Статус</PlainHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {paged.map((inv) => {
+              const total = invoiceTotal(inv);
+              const stage = getStage(inv, threshold);
+              const { tone, label } = STAGE_CONFIG[stage];
+              const confidencePct =
+                inv.ai_confidence != null
+                  ? `ИИ: ${Math.round(inv.ai_confidence * 100)}%`
+                  : null;
+              const verifiedPart =
+                stage === "confirmed" && inv.verified_at
+                  ? `Проверен ${formatDate(inv.verified_at)}`
+                  : null;
+              const tooltip = [label, confidencePct, verifiedPart].filter(Boolean).join(" · ");
+              const isSelected = selectedIds.has(inv.id);
+              return (
+                <TableRow
+                  key={inv.id}
+                  className={`hover:bg-surface-hover ${isSelected ? "bg-surface-hover" : ""}`}
+                >
+                  <TableCell className="pl-3">
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={() => toggleRow(inv.id)}
+                      aria-label={`Выбрать СФ ${inv.number || inv.id}`}
+                    />
+                  </TableCell>
+                  {!hiddenCols.has("number") && (
+                    <TableCell className={`font-medium overflow-hidden border-l-2 ${stage === "review" ? "border-danger" : "border-transparent"}`}>
+                      <span className="block whitespace-normal break-all" title={inv.number || "—"}>
+                        {inv.number || "—"}
+                      </span>
+                    </TableCell>
+                  )}
+                  {!hiddenCols.has("date") && (
+                    <TableCell className="text-fg-secondary tabular-nums">
+                      {formatDate(inv.date)}
+                    </TableCell>
+                  )}
+                  {!hiddenCols.has("supplier") && (
+                    <TableCell className="truncate" title={inv.supplier_name ?? ""}>
+                      {inv.supplier_name || "—"}
+                    </TableCell>
+                  )}
+                  {!hiddenCols.has("items") && (
+                    <TableCell>
+                      <div className="space-y-0.5">
+                        {inv.items.slice(0, 3).map((it, i) => (
+                          <div key={i} className="truncate text-xs text-fg-secondary" title={it.raw_name ?? ""}>
+                            <span className="text-fg-tertiary">{it.material_class || it.item_type}</span>
+                            {" · "}
+                            {it.raw_name}
+                          </div>
+                        ))}
+                        {inv.items.length > 3 && (
+                          <div className="text-xs text-fg-tertiary">и ещё {inv.items.length - 3}</div>
+                        )}
                       </div>
-                    ))}
-                    {inv.items.length > 3 && (
-                      <div className="text-xs text-fg-tertiary">
-                        и ещё {inv.items.length - 3}
-                      </div>
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell className="text-right whitespace-nowrap">
-                  <MoneyCell value={total} />
-                </TableCell>
-                <TableCell>
-                  <span title={tooltip} aria-label={tooltip} tabIndex={0}>
-                    <StatusPill tone={tone} label={label} dot />
-                  </span>
-                </TableCell>
-                <TableCell>
-                  <Link to={`/documents/${inv.document_id}`}>
-                    <Button variant="ghost" size="sm" aria-label="Редактировать">
-                      <FileEdit size={14} />
-                    </Button>
-                  </Link>
+                    </TableCell>
+                  )}
+                  {!hiddenCols.has("total") && (
+                    <TableCell className="text-right whitespace-nowrap">
+                      <MoneyCell value={total} />
+                    </TableCell>
+                  )}
+                  {!hiddenCols.has("status") && (
+                    <TableCell>
+                      <span title={tooltip} aria-label={tooltip} tabIndex={0}>
+                        <StatusPill tone={tone} label={label} dot />
+                      </span>
+                    </TableCell>
+                  )}
+                  <TableCell className="pr-3">
+                    <div className="flex items-center justify-end gap-2">
+                      <Link to={`/documents/${inv.document_id}`}>
+                        <Button variant="ghost" size="sm" aria-label="Редактировать">
+                          <FileEdit size={14} />
+                        </Button>
+                      </Link>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label="Удалить"
+                        className="text-fg-tertiary hover:text-danger"
+                        onClick={() => setPendingDelete(inv)}
+                      >
+                        <Trash2 size={14} />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+            {sorted.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={8} className="py-8 text-center text-sm text-fg-tertiary">
+                  Ничего не найдено
                 </TableCell>
               </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </div>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Pagination footer */}
+      {sorted.length > 0 && (
+        <div className="flex items-center justify-between border-t border-border-subtle px-3 py-2 text-xs text-fg-secondary">
+          <span className="tabular-nums">{fromIdx}–{toIdx} из {sorted.length}</span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-fg-tertiary">Показывать по</span>
+              <Select
+                value={String(pageSize)}
+                onValueChange={(v) => { setPageSize(Number(v) as PageSize); setPage(1); }}
+              >
+                <SelectTrigger className="h-7 w-16 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAGE_SIZE_OPTIONS.map((n) => (
+                    <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Pagination className="w-auto mx-0">
+              <PaginationContent className="gap-0">
+                <PaginationItem>
+                  <PaginationPrevious
+                    href="#"
+                    text="Назад"
+                    onClick={(e) => { e.preventDefault(); setPage((p) => Math.max(1, p - 1)); }}
+                    className={page === 1 ? "pointer-events-none opacity-40" : ""}
+                    aria-disabled={page === 1}
+                  />
+                </PaginationItem>
+                <PaginationItem>
+                  <span className="px-3 tabular-nums text-xs">{page} / {totalPages}</span>
+                </PaginationItem>
+                <PaginationItem>
+                  <PaginationNext
+                    href="#"
+                    text="Вперёд"
+                    onClick={(e) => { e.preventDefault(); setPage((p) => Math.min(totalPages, p + 1)); }}
+                    className={page === totalPages ? "pointer-events-none opacity-40" : ""}
+                    aria-disabled={page === totalPages}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+          </div>
+        </div>
+      )}
+
+      {/* Single delete */}
+      <AlertDialog open={!!pendingDelete} onOpenChange={(open) => { if (!open) setPendingDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить СФ «{pendingDelete?.number || "—"}»?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Счёт-фактура и все её позиции будут удалены без возможности восстановления.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleteInvoice.isPending}
+              onClick={() => {
+                if (pendingDelete) {
+                  deleteInvoice.mutate(pendingDelete.id, {
+                    onSuccess: () => setPendingDelete(null),
+                  });
+                }
+              }}
+            >
+              {deleteInvoice.isPending ? "Удаление…" : "Удалить"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk delete */}
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить {selectedIds.size} СФ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Выбранные счета-фактуры и все их позиции будут удалены без возможности
+              восстановления. Подтверждённые СФ будут пропущены.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleteBulk.isPending}
+              onClick={() => {
+                deleteBulk.mutate([...selectedIds], {
+                  onSuccess: () => {
+                    setBulkDeleteOpen(false);
+                    setSelectedIds(new Set());
+                  },
+                });
+              }}
+            >
+              {deleteBulk.isPending ? "Удаление…" : "Удалить"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
