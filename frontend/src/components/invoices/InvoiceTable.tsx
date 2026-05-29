@@ -160,13 +160,25 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
     return result;
   }, [invoices, searchQuery, selectedStages, threshold]);
 
+  // Trim selectedIds to visible rows when filter/search changes
+  useEffect(() => {
+    const allowed = new Set(filtered.map((inv) => inv.id));
+    setSelectedIds((prev) => {
+      const next = new Set<ID>();
+      for (const id of prev) if (allowed.has(id)) next.add(id);
+      return next.size === prev.size ? prev : next;
+    });
+  }, [filtered]);
+
   const sorted = useMemo(() => {
     const dir = sortDir === "asc" ? 1 : -1;
+    // Pre-compute totals once so the comparator doesn't re-reduce on every comparison
+    const totals = new Map(filtered.map((inv) => [inv.id, invoiceTotal(inv)]));
     return [...filtered].sort((a, b) => {
       switch (sortCol) {
         case "date":     return dir * a.date.localeCompare(b.date);
         case "supplier": return dir * (a.supplier_name ?? "").localeCompare(b.supplier_name ?? "", "ru");
-        case "total":    return dir * (invoiceTotal(a) - invoiceTotal(b));
+        case "total":    return dir * ((totals.get(a.id) ?? 0) - (totals.get(b.id) ?? 0));
         case "number":   return dir * (a.number ?? "").localeCompare(b.number ?? "", "ru", { numeric: true });
         default:         return 0;
       }
@@ -174,9 +186,9 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
   }, [filtered, sortCol, sortDir]);
 
   const totalPages  = Math.max(1, Math.ceil(sorted.length / pageSize));
-  const paged       = sorted.slice((page - 1) * (pageSize as number), page * (pageSize as number));
-  const fromIdx     = sorted.length === 0 ? 0 : (page - 1) * (pageSize as number) + 1;
-  const toIdx       = Math.min(page * (pageSize as number), sorted.length);
+  const paged       = sorted.slice((page - 1) * pageSize, page * pageSize);
+  const fromIdx     = sorted.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  const toIdx       = Math.min(page * pageSize, sorted.length);
   const allSelected = sorted.length > 0 && sorted.every((inv) => selectedIds.has(inv.id));
   const someSelected = selectedIds.size > 0;
 

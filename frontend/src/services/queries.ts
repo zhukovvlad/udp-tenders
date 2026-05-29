@@ -191,7 +191,8 @@ export function useDeleteInvoice() {
     mutationFn: (invoiceId: ID) => invoicesApi.removeInvoice(invoiceId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      toast.success("СФ удалён");
+      qc.invalidateQueries({ queryKey: ["document"] });
+      toast.success("СФ удалена");
     },
   });
 }
@@ -202,6 +203,7 @@ export function useDeleteInvoicesBulk() {
     mutationFn: (ids: ID[]) => invoicesApi.bulkDeleteInvoices(ids),
     onSuccess: ({ deleted, skipped }) => {
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["document"] });
       if (skipped.length > 0) {
         toast.success(`Удалено ${deleted}, пропущено ${skipped.length} (подтверждены)`);
       } else {

@@ -1,8 +1,6 @@
 """Unit-тесты для bulk_delete_invoices (DELETE /api/invoices/bulk)."""
 from unittest.mock import MagicMock, call
 
-import pytest
-
 from routers.invoices import BulkDeleteRequest, bulk_delete_invoices
 
 

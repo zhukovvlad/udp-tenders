@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from crud.documents import create_document, delete_document, get_document, get_documents
@@ -338,7 +338,7 @@ def unverify_invoice(invoice_id: int, db: Session = Depends(get_db)):
 
 
 class BulkDeleteRequest(BaseModel):
-    ids: list[int]
+    ids: list[int] = Field(..., max_length=1000)
 
 
 @router.delete("/bulk", status_code=200)

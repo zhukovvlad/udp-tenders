@@ -58,9 +58,11 @@ export const handlers = [
   http.put("/api/invoices/:id", ({ params }) =>
     HttpResponse.json({ message: "Сохранено", invoice_id: Number(params.id) })
   ),
-  http.delete("/api/invoices/bulk", () =>
-    HttpResponse.json({ deleted: 1, skipped: [] })
-  ),
+  http.delete("/api/invoices/bulk", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { ids?: number[] };
+    const ids = Array.isArray(body.ids) ? body.ids : [];
+    return HttpResponse.json({ deleted: ids.length, skipped: [] });
+  }),
   http.delete("/api/invoices/:id", () => HttpResponse.json({ message: "СФ удалена" })),
   http.delete("/api/invoices/documents/:id", () =>
     HttpResponse.json({ message: "Удалено" })
