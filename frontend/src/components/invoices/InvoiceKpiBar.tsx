@@ -4,22 +4,9 @@ import { KpiCard } from "@/components/ui-domain/KpiCard";
 import { DEFAULT_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import { pluralRu } from "@/lib/format";
 import { useDocuments, useSettings } from "@/services/queries";
+import { getStage } from "./invoiceStage";
 import type { ID } from "@/types/common";
 import type { DashboardInvoiceRow } from "@/types/invoice";
-
-type Stage = "confirmed" | "review" | "pending";
-
-function getStage(inv: DashboardInvoiceRow, threshold: number): Stage {
-  if (inv.verified) return "confirmed";
-  if (
-    inv.has_issues ||
-    !inv.supplier_name?.trim() ||
-    !inv.number?.trim() ||
-    (inv.ai_confidence ?? 0) < threshold
-  )
-    return "review";
-  return "pending";
-}
 
 interface InvoiceKpiBarProps {
   invoices: DashboardInvoiceRow[];

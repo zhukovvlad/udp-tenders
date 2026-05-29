@@ -61,6 +61,7 @@ import { MoneyCell } from "@/components/ui-domain/MoneyCell";
 import { formatDate } from "@/lib/format";
 import { useSettings, useDeleteInvoice, useDeleteInvoicesBulk } from "@/services/queries";
 import { DEFAULT_CONFIDENCE_THRESHOLD } from "@/lib/constants";
+import { getStage, type Stage } from "./invoiceStage";
 import type { DashboardInvoiceRow } from "@/types/invoice";
 import type { ID } from "@/types/common";
 
@@ -68,7 +69,6 @@ interface InvoiceTableProps {
   invoices: DashboardInvoiceRow[];
 }
 
-type Stage = "confirmed" | "review" | "pending";
 type SortColumn = "date" | "supplier" | "total" | "number";
 type SortDir = "asc" | "desc";
 type PageSize = 10 | 20 | 50;
@@ -85,18 +85,6 @@ const COL_LABELS: Record<ColKey, string> = {
   total:    "Сумма",
   status:   "Статус",
 };
-
-function getStage(inv: DashboardInvoiceRow, threshold: number): Stage {
-  if (inv.verified) return "confirmed";
-  if (
-    inv.has_issues ||
-    !inv.supplier_name?.trim() ||
-    !inv.number?.trim() ||
-    (inv.ai_confidence ?? 0) < threshold
-  )
-    return "review";
-  return "pending";
-}
 
 const STAGE_CONFIG: Record<Stage, { tone: "success" | "danger" | "neutral"; label: string }> = {
   confirmed: { tone: "success", label: "Подтверждён" },
@@ -186,6 +174,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
   }, [filtered, sortCol, sortDir]);
 
   const totalPages  = Math.max(1, Math.ceil(sorted.length / pageSize));
+  useEffect(() => { setPage((p) => Math.min(p, totalPages)); }, [totalPages]);
   const paged       = sorted.slice((page - 1) * pageSize, page * pageSize);
   const fromIdx     = sorted.length === 0 ? 0 : (page - 1) * pageSize + 1;
   const toIdx       = Math.min(page * pageSize, sorted.length);

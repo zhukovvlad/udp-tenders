@@ -216,7 +216,7 @@ deviation_amount = (avg_price − ref_price) × qty
 - Russian UI labels everywhere — this is a Russian-language product.
 - `formatMoney` / `formatNumber` / `pluralRu` from `@/lib/format` for all number display.
 - `MONTH_NAMES_RU` from `@/lib/constants` for month labels.
-- **Tables with pagination/sorting:** use shadcn `Table` + `Pagination` + `Select` for simple cases (client-side state). For complex tables with column visibility, faceted filters, or row selection, combine with **TanStack Table** (`@tanstack/react-table`) — see [shadcn tasks example](https://ui.shadcn.com/examples/tasks) as a reference implementation.
+- **Tables with pagination/sorting:** use shadcn `Table` + `Pagination` + `Select` for simple cases (client-side state). For complex tables with column visibility, faceted filters, or row selection, consider **TanStack Table** (`@tanstack/react-table`) as one option — see [shadcn tasks example](https://ui.shadcn.com/examples/tasks) as a reference implementation. Manual state management (useState/useMemo) is also valid when the full TanStack API isn't needed.
 
 ---
 
