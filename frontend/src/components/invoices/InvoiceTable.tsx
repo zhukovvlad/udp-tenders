@@ -56,6 +56,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui-domain/Button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { StatusPill } from "@/components/ui-domain/StatusPill";
 import { MoneyCell } from "@/components/ui-domain/MoneyCell";
 import { formatDate } from "@/lib/format";
@@ -506,15 +507,26 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                           <FileEdit size={14} />
                         </Button>
                       </Link>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        aria-label="Удалить"
-                        className="text-fg-tertiary hover:text-danger"
-                        onClick={() => setPendingDelete(inv)}
-                      >
-                        <Trash2 size={14} />
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger
+                          disabled={stage !== "confirmed"}
+                          className="cursor-default"
+                        >
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-label="Удалить"
+                            className="text-fg-tertiary hover:text-danger"
+                            disabled={stage === "confirmed"}
+                            onClick={() => setPendingDelete(inv)}
+                          >
+                            <Trash2 size={14} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          Снимите подтверждение перед удалением
+                        </TooltipContent>
+                      </Tooltip>
                     </div>
                   </TableCell>
                 </TableRow>
