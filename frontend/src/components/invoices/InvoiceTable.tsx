@@ -507,26 +507,38 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                           <FileEdit size={14} />
                         </Button>
                       </Link>
-                      <Tooltip>
-                        <TooltipTrigger
-                          disabled={stage !== "confirmed"}
-                          className="cursor-default"
+                      {stage === "confirmed" ? (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <span className="cursor-default">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  aria-label="Удалить"
+                                  className="text-fg-tertiary"
+                                  disabled
+                                >
+                                  <Trash2 size={14} />
+                                </Button>
+                              </span>
+                            }
+                          />
+                          <TooltipContent>
+                            Снимите подтверждение перед удалением
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label="Удалить"
+                          className="text-fg-tertiary hover:text-danger"
+                          onClick={() => setPendingDelete(inv)}
                         >
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-label="Удалить"
-                            className="text-fg-tertiary hover:text-danger"
-                            disabled={stage === "confirmed"}
-                            onClick={() => setPendingDelete(inv)}
-                          >
-                            <Trash2 size={14} />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          Снимите подтверждение перед удалением
-                        </TooltipContent>
-                      </Tooltip>
+                          <Trash2 size={14} />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
