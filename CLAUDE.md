@@ -196,6 +196,7 @@ deviation_amount = (avg_price − ref_price) × qty
 - **`Cell` в recharts нельзя обернуть в `Tooltip`** — `Cell` не рендерит DOM-элемент сам по себе (потребляется `Bar`). Для аттрибутов на SVG-прямоугольниках баров используй кастомный `shape` prop на `Bar`, возвращающий `<rect ... data-*="..." />`. Recharts `ChartTooltip` через `formatter` — единственный способ показать доп. инфо при наведении внутри SVG-чарта.
 - **`TooltipProvider`** из `@/components/ui/tooltip` должен оборачивать всё дерево: добавлен в `App.tsx` и в `AllProviders` в `src/test/utils.tsx`. При добавлении shadcn tooltip — проверяй оба места.
 - **base-ui `Tooltip.Trigger` не поддерживает `asChild`** (это паттерн Radix). Не пытайся передать `asChild` в компоненты из `@base-ui/react`.
+- **Тестирование derived-selection (useMemo из состояния)**: при наличии `effectiveSelectedIds`-паттерна (trim выборки к видимым строкам) покрывай три кейса: (1) выбрать всё → применить фильтр → проверить счётчик (должен уменьшиться); (2) выбрать всё → применить фильтр → подтвердить удаление → проверить что API получил только видимые id; (3) базовый bulk-delete без фильтра. Пример в `InvoiceTable.test.tsx`.
 
 ---
 
@@ -211,6 +212,8 @@ deviation_amount = (avg_price − ref_price) × qty
 ### Frontend
 - TypeScript strict mode.
 - shadcn/ui components via `@/components/ui/`. Domain wrappers in `@/components/ui-domain/` (Button, Skeleton, EmptyState, etc.).
+- **`Surface`** (`ui-domain/Surface.tsx`) — standard card/panel wrapper: `rounded-lg border border-border-subtle` + bg + padding. Props: `tone` (`default`/`sunken`), `padding` (`none`/`sm`/`md`/`lg`). Use `<Surface padding="none" className="overflow-x-auto">` for all table containers — do NOT hand-roll the same classes as a plain `<div>`.
+- **`InputGroup`** (`ui/input-group.tsx`) — shadcn/base-ui component for inputs with icons/addons. Use `InputGroupInput` + `InputGroupAddon` instead of manually positioning icons over a plain `<input>`.
 - Tailwind v4 with custom CSS vars: `--color-fg`, `--color-bg`, `--color-surface`, `--color-accent`, etc. Use semantic vars, not raw colors.
 - TanStack Query: queries in `services/queries.ts`, keys in `services/queryKeys.ts`.
 - Russian UI labels everywhere — this is a Russian-language product.

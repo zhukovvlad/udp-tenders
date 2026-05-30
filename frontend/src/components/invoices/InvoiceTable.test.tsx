@@ -106,6 +106,60 @@ describe("InvoiceTable", () => {
     });
   });
 
+  it("effectiveSelectedIds: count shows only visible rows after search filter", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<InvoiceTable invoices={invoices} />);
+
+    // Select all 3 rows
+    await user.click(screen.getByRole("checkbox", { name: /Выбрать все/i }));
+    expect(await screen.findByText(String(invoices.length), { selector: ".font-medium" })).toBeInTheDocument();
+
+    // Apply search that hides 2 rows — only "СФ-PENDING" (Поставщик В) remains
+    const searchInput = screen.getByPlaceholderText(/Номер, поставщик/i);
+    await user.type(searchInput, "Поставщик В");
+
+    // Counter must drop to 1
+    await waitFor(() => {
+      expect(screen.getByText("1", { selector: ".font-medium" })).toBeInTheDocument();
+    });
+  });
+
+  it("effectiveSelectedIds: bulk delete sends only visible ids after filter", async () => {
+    const onBulkDelete = vi.fn();
+    server.use(
+      http.delete("/api/invoices/bulk", async ({ request }) => {
+        const body = (await request.json()) as { ids: number[] };
+        onBulkDelete(body.ids);
+        return HttpResponse.json({ deleted: body.ids.length, skipped: [] });
+      })
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<InvoiceTable invoices={invoices} />);
+
+    // Select all 3 rows
+    await user.click(screen.getByRole("checkbox", { name: /Выбрать все/i }));
+    expect(await screen.findByText(String(invoices.length), { selector: ".font-medium" })).toBeInTheDocument();
+
+    // Filter to only СФ-PENDING (id=203)
+    const searchInput = screen.getByPlaceholderText(/Номер, поставщик/i);
+    await user.type(searchInput, "Поставщик В");
+    await waitFor(() => {
+      expect(screen.getByText("1", { selector: ".font-medium" })).toBeInTheDocument();
+    });
+
+    // Confirm bulk delete — should send only the visible id
+    await user.click(screen.getByRole("button", { name: /Удалить выбранные/i }));
+    const dialog = await screen.findByText(/Удалить 1 СФ/);
+    const alertDialog = dialog.closest('[role="alertdialog"]')!;
+    await user.click(alertDialog.querySelector('[data-slot="alert-dialog-action"]')!);
+
+    await waitFor(() => {
+      expect(onBulkDelete).toHaveBeenCalledWith([203]);
+      expect(onBulkDelete).not.toHaveBeenCalledWith(expect.arrayContaining([201, 202]));
+    });
+  });
+
   it("single row delete calls DELETE /:id after confirmation", async () => {
     const onDelete = vi.fn();
     server.use(
