@@ -255,9 +255,11 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
   }
 
   function toggleRow(id: ID) {
-    setSelectedIds(() => {
-      const next = new Set(effectiveSelectedIds);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
       if (next.has(id)) { next.delete(id); } else { next.add(id); }
+      // Clamp to currently visible rows so stale ids don't linger after filtering
+      for (const k of next) if (!allowedIds.has(k)) next.delete(k);
       return next;
     });
   }

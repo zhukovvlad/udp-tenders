@@ -42,6 +42,18 @@
 
 ## Frontend
 
+- [ ] **`ui-domain/Button` дублирует shadcn `ui/button`**
+  Проект содержит два Button-компонента: shadcn `ui/button.tsx` (Base UI primitive + CVA) и
+  кастомный `ui-domain/Button.tsx` (hand-rolled forwardRef). Весь приложенческий код использует
+  второй. Причина: `ui-domain/Button` добавляет пропсы `leftIcon`, `rightIcon`, `loading` и
+  использует проектные CSS-токены (`--color-action`, `--color-surface-hover` и др.), которых нет
+  в shadcn-заготовке. `ui/button.tsx` используется только внутри shadcn-компонентов (pagination,
+  alert-dialog, dialog, input-group) и содержит баг: `secondary` вариант ссылается на
+  `var(--secondary)` вместо `var(--color-secondary)`.
+  **Решение:** перенести логику `ui-domain/Button` (иконки, loading, проектные токены) в `ui/button.tsx`,
+  добавить вариант `primary` / `danger`, обновить CSS-переменные — и удалить `ui-domain/Button.tsx`.
+  Все ~11 import-точек переключить на `@/components/ui/button`.
+
 - [ ] **Review.tsx: нет оптимистичного обновления при сохранении**
   После успешного `update.mutate` сервер возвращает обновлённый документ через `docQ` (invalidate),
   но до перезагрузки страница ненадолго показывает устаревшие данные.
