@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowDown, ArrowUp, Check, ChevronsUpDown, EyeOff,
@@ -20,6 +20,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -106,6 +107,59 @@ function invoiceTotal(inv: DashboardInvoiceRow): number {
   );
 }
 
+// ── SortHead / PlainHead — extracted so ESLint doesn't flag them as
+//    "components created during render". They receive callbacks as props
+//    instead of closing over the parent's state directly.
+
+interface SortHeadProps {
+  col: ColKey;
+  sortKey: SortColumn;
+  activeSortCol: SortColumn;
+  hiddenCols: Set<ColKey>;
+  onSort: (key: SortColumn, dir: SortDir) => void;
+  onHide: (col: ColKey) => void;
+  className?: string;
+  children: React.ReactNode;
+}
+
+function SortHead({ col, sortKey, activeSortCol, hiddenCols, onSort, onHide, className, children }: SortHeadProps) {
+  if (hiddenCols.has(col)) return null;
+  const isActive = activeSortCol === sortKey;
+  return (
+    <TableHead className={className}>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          type="button"
+          className={`inline-flex items-center gap-1.5 rounded px-1 -ml-1 hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 select-none${isActive ? " text-fg" : ""}`}
+        >
+          {children}
+          <ChevronsUpDown size={14} className={isActive ? "text-accent" : "text-fg-muted"} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" sideOffset={4} className="min-w-36">
+          <DropdownMenuItem className="flex items-center gap-2" onClick={() => onSort(sortKey, "asc")}>
+            <ArrowUp size={13} className="text-fg-tertiary" />
+            По возрастанию
+          </DropdownMenuItem>
+          <DropdownMenuItem className="flex items-center gap-2" onClick={() => onSort(sortKey, "desc")}>
+            <ArrowDown size={13} className="text-fg-tertiary" />
+            По убыванию
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem className="flex items-center gap-2 text-fg-secondary" onClick={() => onHide(col)}>
+            <EyeOff size={13} className="text-fg-tertiary" />
+            Скрыть
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </TableHead>
+  );
+}
+
+function PlainHead({ col, hiddenCols, children, className }: { col: ColKey; hiddenCols: Set<ColKey>; children?: React.ReactNode; className?: string }) {
+  if (hiddenCols.has(col)) return null;
+  return <TableHead className={className}>{children}</TableHead>;
+}
+
 export function InvoiceTable({ invoices }: InvoiceTableProps) {
   const settingsQ = useSettings();
   const threshold = settingsQ.data?.confidence_threshold ?? REVIEW_CONFIDENCE_THRESHOLD;
@@ -122,14 +176,6 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
   const [page, setPage]         = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(20);
   const [selectedIds, setSelectedIds] = useState<Set<ID>>(new Set());
-
-  useEffect(() => {
-    setPage(1);
-    setSelectedIds(new Set());
-  }, [invoices]);
-
-  useEffect(() => { setPage(1); }, [searchQuery]);
-  useEffect(() => { setPage(1); }, [selectedStages]);
 
   // ── derived ───────────────────────────────────────────────────────────────
 
@@ -149,15 +195,14 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
     return result;
   }, [invoices, searchQuery, selectedStages, threshold]);
 
-  // Trim selectedIds to visible rows when filter/search changes
-  useEffect(() => {
-    const allowed = new Set(filtered.map((inv) => inv.id));
-    setSelectedIds((prev) => {
-      const next = new Set<ID>();
-      for (const id of prev) if (allowed.has(id)) next.add(id);
-      return next.size === prev.size ? prev : next;
-    });
-  }, [filtered]);
+  // Trim selectedIds to rows that are still visible after filtering.
+  // Computed inline — no useEffect, no extra render.
+  const allowedIds = useMemo(() => new Set(filtered.map((inv) => inv.id)), [filtered]);
+  const effectiveSelectedIds = useMemo(() => {
+    const next = new Set<ID>();
+    for (const id of selectedIds) if (allowedIds.has(id)) next.add(id);
+    return next.size === selectedIds.size ? selectedIds : next;
+  }, [selectedIds, allowedIds]);
 
   const sorted = useMemo(() => {
     const dir = sortDir === "asc" ? 1 : -1;
@@ -174,13 +219,13 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
     });
   }, [filtered, sortCol, sortDir]);
 
-  const totalPages  = Math.max(1, Math.ceil(sorted.length / pageSize));
-  useEffect(() => { setPage((p) => Math.min(p, totalPages)); }, [totalPages]);
-  const paged       = sorted.slice((page - 1) * pageSize, page * pageSize);
-  const fromIdx     = sorted.length === 0 ? 0 : (page - 1) * pageSize + 1;
-  const toIdx       = Math.min(page * pageSize, sorted.length);
-  const allSelected = sorted.length > 0 && sorted.every((inv) => selectedIds.has(inv.id));
-  const someSelected = selectedIds.size > 0;
+  const totalPages   = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const clampedPage  = Math.min(page, totalPages);
+  const paged        = sorted.slice((clampedPage - 1) * pageSize, clampedPage * pageSize);
+  const fromIdx      = sorted.length === 0 ? 0 : (clampedPage - 1) * pageSize + 1;
+  const toIdx        = Math.min(clampedPage * pageSize, sorted.length);
+  const allSelected  = sorted.length > 0 && sorted.every((inv) => effectiveSelectedIds.has(inv.id));
+  const someSelected  = effectiveSelectedIds.size > 0;
 
   // ── helpers ───────────────────────────────────────────────────────────────
 
@@ -191,7 +236,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
   function toggleHide(col: ColKey) {
     setHiddenCols((prev) => {
       const next = new Set(prev);
-      next.has(col) ? next.delete(col) : next.add(col);
+      if (next.has(col)) { next.delete(col); } else { next.add(col); }
       return next;
     });
   }
@@ -199,9 +244,10 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
   function toggleStage(stage: Stage) {
     setSelectedStages((prev) => {
       const next = new Set(prev);
-      next.has(stage) ? next.delete(stage) : next.add(stage);
+      if (next.has(stage)) { next.delete(stage); } else { next.add(stage); }
       return next;
     });
+    setPage(1);
   }
 
   function toggleSelectAll() {
@@ -209,71 +255,11 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
   }
 
   function toggleRow(id: ID) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+    setSelectedIds(() => {
+      const next = new Set(effectiveSelectedIds);
+      if (next.has(id)) { next.delete(id); } else { next.add(id); }
       return next;
     });
-  }
-
-  // ── sub-components ────────────────────────────────────────────────────────
-
-  function SortHead({
-    col,
-    sortKey,
-    className,
-    children,
-  }: {
-    col: ColKey;
-    sortKey: SortColumn;
-    className?: string;
-    children: React.ReactNode;
-  }) {
-    if (hiddenCols.has(col)) return null;
-    const isActive = sortCol === sortKey;
-
-    return (
-      <TableHead className={className}>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            type="button"
-            className={`inline-flex items-center gap-1.5 rounded px-1 -ml-1 hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 select-none${isActive ? " text-fg" : ""}`}
-          >
-            {children}
-            <ChevronsUpDown size={14} className={isActive ? "text-accent" : "text-fg-muted"} />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" sideOffset={4} className="min-w-36">
-            <DropdownMenuItem
-              className="flex items-center gap-2"
-              onClick={() => setSort(sortKey, "asc")}
-            >
-              <ArrowUp size={13} className="text-fg-tertiary" />
-              По возрастанию
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="flex items-center gap-2"
-              onClick={() => setSort(sortKey, "desc")}
-            >
-              <ArrowDown size={13} className="text-fg-tertiary" />
-              По убыванию
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="flex items-center gap-2 text-fg-secondary"
-              onClick={() => toggleHide(col)}
-            >
-              <EyeOff size={13} className="text-fg-tertiary" />
-              Скрыть
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </TableHead>
-    );
-  }
-
-  function PlainHead({ col, children, className }: { col: ColKey; children?: React.ReactNode; className?: string }) {
-    if (hiddenCols.has(col)) return null;
-    return <TableHead className={className}>{children}</TableHead>;
   }
 
   // ── render ────────────────────────────────────────────────────────────────
@@ -282,16 +268,16 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
     <>
       {/* Toolbar */}
       <div className="flex items-center gap-2 border-b border-border-subtle px-3 py-2">
-        <div className="relative flex-1 max-w-xs">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-tertiary pointer-events-none" />
-          <input
-            type="text"
+        <InputGroup className="flex-1 max-w-xs">
+          <InputGroupInput
             placeholder="Номер, поставщик…"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-8 w-full rounded-md border border-input bg-transparent pl-7 pr-3 text-sm outline-none placeholder:text-fg-tertiary focus:border-ring focus:ring-2 focus:ring-ring/30"
+            onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
           />
-        </div>
+          <InputGroupAddon align="inline-start">
+            <Search size={13} />
+          </InputGroupAddon>
+        </InputGroup>
 
         {/* Status facet filter */}
         <Popover>
@@ -331,7 +317,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                     <CommandSeparator />
                     <CommandGroup>
                       <CommandItem
-                        onSelect={() => setSelectedStages(new Set())}
+                        onSelect={() => { setSelectedStages(new Set()); setPage(1); }}
                         className="justify-center text-xs text-fg-tertiary"
                       >
                         Сбросить фильтр
@@ -372,7 +358,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
       {someSelected && (
         <div className="flex items-center gap-3 border-b border-border-subtle bg-surface-hover px-3 py-2 text-sm">
           <span className="text-fg-secondary">
-            Выбрано: <span className="font-medium text-fg">{selectedIds.size}</span>
+            Выбрано: <span className="font-medium text-fg">{effectiveSelectedIds.size}</span>
           </span>
           <Button
             variant="ghost"
@@ -414,17 +400,17 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                   aria-label="Выбрать все"
                 />
               </TableHead>
-              <SortHead col="number"   sortKey="number">Номер</SortHead>
-              <SortHead col="date"     sortKey="date">Дата</SortHead>
-              <SortHead col="supplier" sortKey="supplier">Поставщик</SortHead>
-              <PlainHead col="items">Позиции</PlainHead>
-              <SortHead col="total"    sortKey="total" className="text-right">
+              <SortHead col="number"   sortKey="number"   activeSortCol={sortCol} hiddenCols={hiddenCols} onSort={setSort} onHide={toggleHide}>Номер</SortHead>
+              <SortHead col="date"     sortKey="date"     activeSortCol={sortCol} hiddenCols={hiddenCols} onSort={setSort} onHide={toggleHide}>Дата</SortHead>
+              <SortHead col="supplier" sortKey="supplier" activeSortCol={sortCol} hiddenCols={hiddenCols} onSort={setSort} onHide={toggleHide}>Поставщик</SortHead>
+              <PlainHead col="items" hiddenCols={hiddenCols}>Позиции</PlainHead>
+              <SortHead col="total" sortKey="total" activeSortCol={sortCol} hiddenCols={hiddenCols} onSort={setSort} onHide={toggleHide} className="text-right">
                 <div className="text-right leading-tight">
                   <div>Сумма</div>
                   <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
                 </div>
               </SortHead>
-              <PlainHead col="status">Статус</PlainHead>
+              <PlainHead col="status" hiddenCols={hiddenCols}>Статус</PlainHead>
               <TableHead />
             </TableRow>
           </TableHeader>
@@ -442,7 +428,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                   ? `Проверен ${formatDate(inv.verified_at)}`
                   : null;
               const tooltip = [label, confidencePct, verifiedPart].filter(Boolean).join(" · ");
-              const isSelected = selectedIds.has(inv.id);
+              const isSelected = effectiveSelectedIds.has(inv.id);
               return (
                 <TableRow
                   key={inv.id}
@@ -583,20 +569,20 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                     href="#"
                     text="Назад"
                     onClick={(e) => { e.preventDefault(); setPage((p) => Math.max(1, p - 1)); }}
-                    className={page === 1 ? "pointer-events-none opacity-40" : ""}
-                    aria-disabled={page === 1}
+                    className={clampedPage === 1 ? "pointer-events-none opacity-40" : ""}
+                    aria-disabled={clampedPage === 1}
                   />
                 </PaginationItem>
                 <PaginationItem>
-                  <span className="px-3 tabular-nums text-xs">{page} / {totalPages}</span>
+                  <span className="px-3 tabular-nums text-xs">{clampedPage} / {totalPages}</span>
                 </PaginationItem>
                 <PaginationItem>
                   <PaginationNext
                     href="#"
                     text="Вперёд"
                     onClick={(e) => { e.preventDefault(); setPage((p) => Math.min(totalPages, p + 1)); }}
-                    className={page === totalPages ? "pointer-events-none opacity-40" : ""}
-                    aria-disabled={page === totalPages}
+                    className={clampedPage === totalPages ? "pointer-events-none opacity-40" : ""}
+                    aria-disabled={clampedPage === totalPages}
                   />
                 </PaginationItem>
               </PaginationContent>
@@ -637,7 +623,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
       <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Удалить {selectedIds.size} СФ?</AlertDialogTitle>
+            <AlertDialogTitle>Удалить {effectiveSelectedIds.size} СФ?</AlertDialogTitle>
             <AlertDialogDescription>
               Выбранные счета-фактуры и все их позиции будут удалены без возможности
               восстановления. Подтверждённые СФ будут пропущены.
@@ -649,7 +635,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
               variant="destructive"
               disabled={deleteBulk.isPending}
               onClick={() => {
-                deleteBulk.mutate([...selectedIds], {
+                deleteBulk.mutate([...effectiveSelectedIds], {
                   onSuccess: () => {
                     setBulkDeleteOpen(false);
                     setSelectedIds(new Set());

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/ui-domain/PageHeader";
 import { EmptyState } from "@/components/ui-domain/EmptyState";
 import { Skeleton } from "@/components/ui-domain/Skeleton";
+import { Surface } from "@/components/ui-domain/Surface";
 import {
   Table,
   TableBody,
@@ -12,7 +13,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import { Search } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -94,26 +100,16 @@ export default function Suppliers() {
       />
 
       <div className="mt-6 flex gap-2">
-        <div className="relative flex-1">
-          <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-tertiary"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-          <Input
-            className="pl-9"
+        <InputGroup className="flex-1">
+          <InputGroupInput
             placeholder="Поиск по названию или ИНН"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-        </div>
+          <InputGroupAddon align="inline-start">
+            <Search size={14} />
+          </InputGroupAddon>
+        </InputGroup>
         <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v ?? "__all__")}>
           <SelectTrigger className="w-44">
             <SelectValue>
@@ -158,7 +154,7 @@ export default function Suppliers() {
           <EmptyState title="Ничего не найдено" description="Уточните параметры поиска или фильтра." />
         )}
         {suppliersQ.isSuccess && filtered.length > 0 && (
-          <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface">
+          <Surface padding="none" className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -227,7 +223,7 @@ export default function Suppliers() {
                 </TableRow>
               </TableBody>
             </Table>
-          </div>
+          </Surface>
         )}
       </div>
     </div>
@@ -236,13 +232,13 @@ export default function Suppliers() {
 
 function SupplierTableSkeleton() {
   return (
-    <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface">
+    <Surface padding="none" className="overflow-x-auto">
       <div className="p-4 space-y-3">
         {Array.from({ length: 5 }).map((_, i) => (
           <Skeleton key={i} className="h-12 w-full" />
         ))}
       </div>
-    </div>
+    </Surface>
   );
 }
 

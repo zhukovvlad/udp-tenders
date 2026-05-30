@@ -211,6 +211,8 @@ deviation_amount = (avg_price − ref_price) × qty
 ### Frontend
 - TypeScript strict mode.
 - shadcn/ui components via `@/components/ui/`. Domain wrappers in `@/components/ui-domain/` (Button, Skeleton, EmptyState, etc.).
+- **`Surface`** (`ui-domain/Surface.tsx`) — standard card/panel wrapper: `rounded-lg border border-border-subtle` + bg + padding. Props: `tone` (`default`/`sunken`), `padding` (`none`/`sm`/`md`/`lg`). Use `<Surface padding="none" className="overflow-x-auto">` for all table containers — do NOT hand-roll the same classes as a plain `<div>`.
+- **`InputGroup`** (`ui/input-group.tsx`) — shadcn/base-ui component for inputs with icons/addons. Use `InputGroupInput` + `InputGroupAddon` instead of manually positioning icons over a plain `<input>`.
 - Tailwind v4 with custom CSS vars: `--color-fg`, `--color-bg`, `--color-surface`, `--color-accent`, etc. Use semantic vars, not raw colors.
 - TanStack Query: queries in `services/queries.ts`, keys in `services/queryKeys.ts`.
 - Russian UI labels everywhere — this is a Russian-language product.

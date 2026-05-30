@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui-domain/EmptyState";
 import { Skeleton } from "@/components/ui-domain/Skeleton";
 import { KpiCard } from "@/components/ui-domain/KpiCard";
 import { Button } from "@/components/ui-domain/Button";
+import { Surface } from "@/components/ui-domain/Surface";
 import {
   Tabs,
   TabsContent,
@@ -294,7 +295,7 @@ function ProjectsTab({ supplierId }: { supplierId: ID }) {
 
   return (
     <>
-      <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface">
+      <Surface padding="none" className="overflow-x-auto">
         <Table className="min-w-[740px]">
           <TableHeader>
             <TableRow>
@@ -367,7 +368,7 @@ function ProjectsTab({ supplierId }: { supplierId: ID }) {
             </TableRow>
           </TableBody>
         </Table>
-      </div>
+      </Surface>
       <OutlierHint rows={rows} />
     </>
   );
@@ -417,7 +418,7 @@ function InvoicesTab({ supplierId, projectRows }: { supplierId: ID; projectRows:
           description="По выбранным фильтрам счета отсутствуют."
         />
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface">
+        <Surface padding="none" className="overflow-x-auto">
           <Table className="min-w-[640px]">
             <TableHeader>
               <TableRow>
@@ -447,7 +448,7 @@ function InvoicesTab({ supplierId, projectRows }: { supplierId: ID; projectRows:
               ))}
             </TableBody>
           </Table>
-        </div>
+        </Surface>
       )}
     </div>
   );

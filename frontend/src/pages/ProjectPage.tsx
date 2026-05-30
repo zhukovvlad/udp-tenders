@@ -7,6 +7,7 @@ import { Breadcrumbs } from "@/components/ui-domain/Breadcrumbs";
 import { PageHeader } from "@/components/ui-domain/PageHeader";
 import { EmptyState } from "@/components/ui-domain/EmptyState";
 import { Skeleton } from "@/components/ui-domain/Skeleton";
+import { Surface } from "@/components/ui-domain/Surface";
 import { Button } from "@/components/ui-domain/Button";
 import { KpiCard } from "@/components/ui-domain/KpiCard";
 import { InvoiceKpiBar } from "@/components/invoices/InvoiceKpiBar";
@@ -505,7 +506,7 @@ export default function ProjectPage() {
 
             {/* Calculations table */}
             {hasCalculations && (
-              <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface">
+              <Surface padding="none" className="overflow-x-auto">
                 <Table className="min-w-max">
                   <TableHeader>
                     <TableRow className="text-xs text-fg-tertiary hover:bg-transparent">
@@ -587,7 +588,7 @@ export default function ProjectPage() {
                     ))}
                   </TableBody>
                 </Table>
-              </div>
+              </Surface>
             )}
           </TabsContent>
 
@@ -655,7 +656,7 @@ export default function ProjectPage() {
                 description="Добавьте базовые цены для расчёта отклонений."
               />
             ) : (
-              <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface">
+              <Surface padding="none" className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border-subtle text-left text-xs text-fg-tertiary">
@@ -713,7 +714,7 @@ export default function ProjectPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </Surface>
             )}
 
             {/* Add reference price dialog */}
@@ -913,7 +914,7 @@ export default function ProjectPage() {
                 }
               />
             ) : (
-              <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface">
+              <Surface padding="none" className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border-subtle text-left text-xs text-fg-tertiary">
@@ -1029,7 +1030,7 @@ export default function ProjectPage() {
                     })}
                   </tbody>
                 </table>
-              </div>
+              </Surface>
             )}
           </TabsContent>
         </Tabs>
