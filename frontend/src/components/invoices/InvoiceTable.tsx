@@ -570,7 +570,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                   <PaginationPrevious
                     href="#"
                     text="Назад"
-                    onClick={(e) => { e.preventDefault(); setPage((p) => Math.max(1, p - 1)); }}
+                    onClick={(e) => { e.preventDefault(); setPage(Math.max(1, clampedPage - 1)); }}
                     className={clampedPage === 1 ? "pointer-events-none opacity-40" : ""}
                     aria-disabled={clampedPage === 1}
                   />
@@ -582,7 +582,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                   <PaginationNext
                     href="#"
                     text="Вперёд"
-                    onClick={(e) => { e.preventDefault(); setPage((p) => Math.min(totalPages, p + 1)); }}
+                    onClick={(e) => { e.preventDefault(); setPage(Math.min(totalPages, clampedPage + 1)); }}
                     className={clampedPage === totalPages ? "pointer-events-none opacity-40" : ""}
                     aria-disabled={clampedPage === totalPages}
                   />
