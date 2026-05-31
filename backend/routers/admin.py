@@ -5,7 +5,7 @@
 """
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
@@ -248,4 +248,4 @@ def unlink_project(
 ):
     """Снять привязку организации к проекту (idempotent)."""
     crud_admin.unlink_project(db, org_id, project_id)
-    return None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
