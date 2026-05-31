@@ -10,6 +10,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
 
 import { Button } from "@/components/ui-domain/Button";
@@ -110,18 +111,17 @@ export default function Projects() {
         }
       />
 
-      <div className="mt-6 relative w-full max-w-md">
-        <Search
-          size={14}
-          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-tertiary"
-        />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Поиск по названию или договору"
-          className="w-full rounded-md border border-border-subtle bg-surface py-2 pl-9 pr-3 text-sm text-fg placeholder:text-fg-tertiary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
-        />
+      <div className="mt-6">
+        <InputGroup className="flex-1 max-w-xs">
+          <InputGroupInput
+            placeholder="Поиск по названию или договору"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <InputGroupAddon align="inline-start">
+            <Search size={13} />
+          </InputGroupAddon>
+        </InputGroup>
       </div>
 
       <div className="mt-6">

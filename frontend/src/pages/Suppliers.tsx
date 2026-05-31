@@ -107,7 +107,7 @@ export default function Suppliers() {
             onChange={(e) => setSearch(e.target.value)}
           />
           <InputGroupAddon align="inline-start">
-            <Search size={14} />
+            <Search size={13} />
           </InputGroupAddon>
         </InputGroup>
         <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v ?? "__all__")}>

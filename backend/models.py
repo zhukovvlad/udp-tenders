@@ -51,6 +51,16 @@ class Organization(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     inn = Column(String, nullable=True, index=True)
+    # Роль организации (заказчик/подрядчик). Используем тот же enum, что и
+    # ProjectOrganization.project_role — значения идентичны. NOT NULL со
+    # server_default='customer': для УПД-трекера типичная организация — заказчик
+    # (загружает счета своих подрядчиков); существующие строки миграция заполнит
+    # этим значением. native_enum=False → VARCHAR + CHECK (см. примечание у org_role).
+    kind = Column(
+        SqlEnum(ProjectRole, name="org_kind", native_enum=False),
+        nullable=False,
+        server_default=ProjectRole.customer.value,
+    )
     created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
 
     users = relationship("User", back_populates="organization")

@@ -1,7 +1,13 @@
-"""Эндпоинты управления собственной организацией (для org admin).
+"""Эндпоинты управления собственной организацией (для org admin/superadmin).
 
-Позволяет org admin-у управлять пользователями внутри своей организации.
 org_id берётся из токена текущего пользователя, не из тела запроса.
+
+Матрица прав (enforced в crud.admin.can_set_role / can_manage_target):
+- superadmin (org): управляет admin и member; назначает роли admin/member
+  (superadmin — только через /api/admin платформенным суперюзером).
+- admin: управляет только member; назначает только member.
+- member: ничего.
+Защита последнего активного superadmin'а — в crud.admin.set_user_role_and_active.
 """
 import logging
 
@@ -10,6 +16,8 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from auth import require_org_admin_with_org
+from crud import admin as crud_admin
+from crud.admin import AdminError, can_manage_target, can_set_role
 from database import get_db
 from models import OrgRole, User
 from security import hash_password
@@ -25,12 +33,27 @@ class UserCreate(BaseModel):
     org_role: OrgRole = OrgRole.member
 
 
+class UserUpdate(BaseModel):
+    org_role: OrgRole | None = None
+    is_active: bool | None = None
+
+
 class OrgUserOut(BaseModel):
     id: int
     email: str
     org_id: int | None
     org_role: str | None
     is_active: bool
+
+
+def _to_out(user: User) -> OrgUserOut:
+    return OrgUserOut(
+        id=user.id,
+        email=user.email,
+        org_id=user.org_id,
+        org_role=user.org_role.value if user.org_role else None,
+        is_active=user.is_active,
+    )
 
 
 @router.post("/users", status_code=status.HTTP_201_CREATED, response_model=OrgUserOut)
@@ -41,13 +64,15 @@ def create_user(
 ):
     """Создать пользователя в собственной организации.
 
-    org_id берётся из токена текущего пользователя — нельзя создать
-    пользователя в чужой организации.
-
-    org_role ограничена: member или admin (superadmin — только через /api/admin).
+    org_id берётся из токена текущего пользователя. Назначаемая роль ограничена
+    матрицей: admin → только member; superadmin (org) → admin/member.
+    superadmin-роль назначается только через /api/admin.
     """
-    if body.org_role == OrgRole.superadmin:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "superadmin роль назначается только через /api/admin")
+    if not can_set_role(current_user.org_role, body.org_role):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Недостаточно прав для назначения этой роли",
+        )
     if db.query(User).filter(User.email == body.email).first():
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
 
@@ -61,14 +86,11 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
-    logger.info("user_created id=%s email=%s org_id=%s role=%s", user.id, user.email, current_user.org_id, body.org_role)
-    return OrgUserOut(
-        id=user.id,
-        email=user.email,
-        org_id=current_user.org_id,
-        org_role=body.org_role.value,
-        is_active=True,
+    logger.info(
+        "user_created id=%s email=%s org_id=%s role=%s",
+        user.id, user.email, current_user.org_id, body.org_role.value,
     )
+    return _to_out(user)
 
 
 @router.get("/users", response_model=list[OrgUserOut])
@@ -78,13 +100,42 @@ def list_users(
 ):
     """Список пользователей своей организации."""
     users = db.query(User).filter(User.org_id == current_user.org_id).order_by(User.id).all()
-    return [
-        OrgUserOut(
-            id=u.id,
-            email=u.email,
-            org_id=u.org_id,
-            org_role=u.org_role.value if u.org_role else None,
-            is_active=u.is_active,
+    return [_to_out(u) for u in users]
+
+
+@router.patch("/users/{user_id}", response_model=OrgUserOut)
+def update_user(
+    user_id: int,
+    body: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_org_admin_with_org),
+):
+    """Сменить роль и/или статус пользователя своей организации (по матрице).
+
+    Нельзя трогать пользователей других организаций, нельзя назначать superadmin,
+    нельзя понизить/деактивировать последнего активного superadmin'а.
+    """
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target or target.org_id != current_user.org_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
+    if target.id == current_user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нельзя менять собственную роль или статус")
+
+    # Может ли actor управлять текущей ролью target?
+    if not can_manage_target(current_user.org_role, target.org_role):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для управления этим пользователем")
+
+    # Если меняется роль — проверяем право назначить новую роль
+    if body.org_role is not None and not can_set_role(current_user.org_role, body.org_role):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для назначения этой роли")
+
+    try:
+        user = crud_admin.set_user_role_and_active(
+            db,
+            user_id,
+            org_role=body.org_role if body.org_role is not None else crud_admin._UNSET,
+            is_active=body.is_active if body.is_active is not None else crud_admin._UNSET,
         )
-        for u in users
-    ]
+    except AdminError as e:
+        raise HTTPException(e.status_code, e.detail) from e
+    return _to_out(user)

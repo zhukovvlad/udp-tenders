@@ -205,5 +205,6 @@ def me(current_user: User = Depends(get_current_user)):
             "id": current_user.organization.id,
             "name": current_user.organization.name,
             "inn": current_user.organization.inn,
+            "kind": current_user.organization.kind.value if current_user.organization.kind else None,
         } if current_user.organization else None,
     }

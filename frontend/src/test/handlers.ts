@@ -146,4 +146,100 @@ export const handlers = [
   http.post("/api/auth/login", () => HttpResponse.json({ status: "ok" })),
   http.post("/api/auth/logout", () => HttpResponse.json({ status: "ok" })),
   http.post("/api/auth/refresh", () => HttpResponse.json({ status: "ok" })),
+
+  // Admin (superuser)
+  http.get("/api/admin/organizations", () =>
+    HttpResponse.json([
+      {
+        id: 1,
+        name: "ООО «СтройГрад»",
+        inn: "7705123456",
+        kind: "customer",
+        created_at: "2026-05-01T10:00:00",
+        user_count: 3,
+        project_count: 2,
+      },
+    ])
+  ),
+  http.get("/api/admin/organizations/:id", ({ params }) =>
+    HttpResponse.json({
+      id: Number(params.id),
+      name: "ООО «СтройГрад»",
+      inn: "7705123456",
+      kind: "customer",
+      created_at: "2026-05-01T10:00:00",
+      users: [
+        {
+          id: 1,
+          email: "a.petrov@stroygrad.ru",
+          org_id: Number(params.id),
+          org_role: "superadmin",
+          is_superuser: false,
+          is_active: true,
+        },
+      ],
+      projects: [],
+    })
+  ),
+  http.post("/api/admin/organizations", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    return HttpResponse.json(
+      { id: 1, name: body.name ?? "ООО Новая", inn: body.inn ?? null, kind: body.kind ?? "customer" },
+      { status: 201 }
+    );
+  }),
+  http.patch("/api/admin/organizations/:id", ({ params }) =>
+    HttpResponse.json({ id: Number(params.id), name: "ООО «СтройГрад»", inn: "7705123456", kind: "customer" })
+  ),
+  http.post("/api/admin/organizations/:id/users", async ({ request, params }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    return HttpResponse.json(
+      {
+        id: 2,
+        email: body.email ?? "new@example.com",
+        org_id: Number(params.id),
+        org_role: body.org_role ?? "member",
+        is_active: body.is_active ?? true,
+      },
+      { status: 201 }
+    );
+  }),
+  http.get("/api/admin/users", () =>
+    HttpResponse.json({
+      items: [
+        {
+          id: 1,
+          email: "a.petrov@stroygrad.ru",
+          org_id: 1,
+          org_name: "ООО «СтройГрад»",
+          org_role: "superadmin",
+          is_superuser: false,
+          is_active: true,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    })
+  ),
+  http.patch("/api/admin/users/:id", ({ params }) =>
+    HttpResponse.json({
+      id: Number(params.id),
+      email: "a.petrov@stroygrad.ru",
+      org_id: 1,
+      org_role: "admin",
+      is_active: true,
+    })
+  ),
+  http.post("/api/admin/users/:id/reset-password", ({ params }) =>
+    HttpResponse.json({ id: Number(params.id), email: "a.petrov@stroygrad.ru", password: "Xk7m-Pq9L-vf2Z" })
+  ),
+  http.post("/api/admin/organizations/:id/projects", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    return HttpResponse.json(
+      { project_id: body.project_id ?? 1, project_name: "ЖК Радуга", project_role: body.project_role ?? "customer" },
+      { status: 201 }
+    );
+  }),
+  http.delete("/api/admin/organizations/:id/projects/:projectId", () => new HttpResponse(null, { status: 204 })),
 ];

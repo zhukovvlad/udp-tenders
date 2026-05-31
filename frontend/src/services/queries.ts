@@ -10,6 +10,7 @@ import { uploadApi } from "./api/upload";
 import { settingsApi } from "./api/settings";
 import { suppliersApi } from "./api/suppliers";
 import type { SupplierUpdateInput } from "./api/suppliers";
+import { adminApi } from "./api/admin";
 import { qk } from "./queryKeys";
 
 import type { ID } from "@/types/common";
@@ -18,6 +19,13 @@ import type { MaterialClassCreateInput } from "@/types/materialClass";
 import type { ReferencePriceCreateInput, ReferencePriceUpdateInput } from "@/types/referencePrice";
 import type { InvoiceUpdateInput } from "@/types/invoice";
 import type { AppSettings } from "./api/settings";
+import type {
+  AdminUserCreateInput,
+  AdminUserUpdateInput,
+  OrgCreateInput,
+  OrgUpdateInput,
+  ProjectLinkInput,
+} from "@/types/admin";
 
 // ========== Projects ==========
 export function useProjects() {
@@ -434,6 +442,109 @@ export function useToggleSupplierExclusion(projectId: ID | null) {
       qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
       qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
       qc.invalidateQueries({ queryKey: qk.dashboard.monthly(projectId) });
+    },
+  });
+}
+
+// ========== Admin (superuser) ==========
+
+export function useAdminOrganizations() {
+  return useQuery({ queryKey: qk.admin.organizations, queryFn: adminApi.listOrganizations });
+}
+
+export function useAdminOrganization(id: ID | null | undefined) {
+  return useQuery({
+    queryKey: qk.admin.organization(id ?? -1),
+    queryFn: () => adminApi.getOrganization(id as ID),
+    enabled: id !== null && id !== undefined,
+  });
+}
+
+export function useAdminUsers(params?: { q?: string; page?: number; page_size?: number }) {
+  return useQuery({
+    queryKey: qk.admin.users(params?.q, params?.page),
+    queryFn: () => adminApi.listUsers(params),
+  });
+}
+
+export function useCreateOrganization() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: OrgCreateInput) => adminApi.createOrganization(input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.admin.organizations });
+      toast.success("Организация создана");
+    },
+  });
+}
+
+export function useUpdateOrganization() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: ID; input: OrgUpdateInput }) =>
+      adminApi.updateOrganization(id, input),
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: qk.admin.organizations });
+      qc.invalidateQueries({ queryKey: qk.admin.organization(id) });
+      toast.success("Организация обновлена");
+    },
+  });
+}
+
+export function useCreateAdminUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orgId, input }: { orgId: ID; input: AdminUserCreateInput }) =>
+      adminApi.createUser(orgId, input),
+    onSuccess: (_data, { orgId }) => {
+      qc.invalidateQueries({ queryKey: qk.admin.organization(orgId) });
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
+      toast.success("Пользователь создан");
+    },
+  });
+}
+
+export function useUpdateAdminUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, input }: { userId: ID; input: AdminUserUpdateInput }) =>
+      adminApi.updateUser(userId, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "organizations"] });
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
+      toast.success("Пользователь обновлён");
+    },
+  });
+}
+
+export function useResetUserPassword() {
+  // Намеренно без инвалидации — возвращает plaintext-пароль, который страница
+  // показывает в диалоге. Тост-напоминание вызывается на странице после показа.
+  return useMutation({
+    mutationFn: (userId: ID) => adminApi.resetPassword(userId),
+  });
+}
+
+export function useLinkProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orgId, input }: { orgId: ID; input: ProjectLinkInput }) =>
+      adminApi.linkProject(orgId, input),
+    onSuccess: (_data, { orgId }) => {
+      qc.invalidateQueries({ queryKey: qk.admin.organization(orgId) });
+      toast.success("Доступ к проекту выдан");
+    },
+  });
+}
+
+export function useUnlinkProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orgId, projectId }: { orgId: ID; projectId: ID }) =>
+      adminApi.unlinkProject(orgId, projectId),
+    onSuccess: (_data, { orgId }) => {
+      qc.invalidateQueries({ queryKey: qk.admin.organization(orgId) });
+      toast.success("Доступ к проекту снят");
     },
   });
 }

@@ -67,9 +67,10 @@ UDP/
 │   │   ├── documents.py  — Document + Invoice CRUD
 │   │   ├── calculations.py — avg_price, deviation, export row calculations
 │   │   ├── suppliers.py  — Supplier CRUD + analytics aggregates
-│   │   └── supplier_exclusions.py — get_excluded_supplier_ids, set_supplier_excluded
+│   │   ├── supplier_exclusions.py — get_excluded_supplier_ids, set_supplier_excluded
+│   │   └── admin.py      — superuser admin console CRUD: orgs, users, project links, last-superadmin guard, role matrix (can_set_role / can_manage_target)
 │   ├── security.py       — pure crypto helpers: hash_password, JWT encode/decode, refresh token, CSRF
-│   ├── auth.py           — FastAPI auth dependencies: get_current_user, require_csrf, require_superuser, require_org_admin, require_org_admin_with_org, ProjectAccess
+│   ├── auth.py           — FastAPI auth dependencies: get_current_user, require_csrf, require_superuser, require_org_admin, require_org_admin_with_org, require_org_superadmin, ProjectAccess
 │   ├── cli.py            — Click CLI: create-superuser, create-org, create-user
 │   ├── pdf_parser.py     — OpenRouter API parsing
 │   ├── s3.py             — MinIO helpers
@@ -78,10 +79,11 @@ UDP/
 │   ├── alembic/          — migrations
 │   └── tests/            — unit/ + integration/ + fixtures/ + test_auth_coverage.py
 ├── frontend/src/
-│   ├── pages/            — Dashboard, Projects, ProjectPage, Suppliers, SupplierPage, Materials, Reports, Review, Settings
-│   ├── components/       — ui/, ui-domain/, layout/, dashboard/, projects/, invoices/, review/
+│   ├── pages/            — Dashboard, Projects, ProjectPage, Suppliers, SupplierPage, Materials, Reports, Review, Settings, admin/ (superuser console: AdminOrganizations, AdminOrgCreate, AdminOrgDetail, AdminUserCreate, AdminUsers)
+│   ├── components/       — ui/, ui-domain/, layout/, dashboard/, projects/, invoices/, review/, admin/ (RoleBadges, PasswordField)
+│   ├── lib/             — format, constants, utils, useDebounce, password (CSPRNG generatePassword + copyToClipboard)
 │   ├── services/         — api/ (axios), queries.ts (TanStack Query), queryKeys.ts
-│   └── types/            — TypeScript types per domain (common, project, invoice, materialClass, referencePrice, supplier)
+│   └── types/            — TypeScript types per domain (common, project, invoice, materialClass, referencePrice, supplier, admin, auth)
 ├── docs/
 │   ├── TECH_DEBT.md      — tracked debt items (check before touching related code)
 │   ├── testing.md        — testing architecture, coverage status, how to add tests
@@ -105,7 +107,7 @@ UDP/
 ## Database models — key relationships
 
 ```
-Organization → Users (org members via OrgRole)
+Organization (kind: customer/contractor) → Users (org members via OrgRole)
 Organization → Projects (via ProjectOrganization — ProjectRole: customer/contractor)
 Project → Documents → Invoices → InvoiceItems → MaterialClass
 Project → ReferencePrices (project ↔ material_class ↔ period)
@@ -113,6 +115,8 @@ Project → ProjectSupplierExclusion ← Supplier  (исключения пос�
 Supplier → Invoices (one supplier, many projects)
 User → RefreshTokens (many, revokable, 14 days)
 ```
+
+`Organization.kind` (`customer`/`contractor`, реюзает enum `ProjectRole`, `SqlEnum(native_enum=False)`, NOT NULL, `server_default='customer'`) — роль организации по умолчанию. При выдаче доступа к проекту через `/api/admin/.../projects` `ProjectOrganization.project_role` берётся из `organization.kind`, но переопределяется явным значением в теле запроса. Миграция: `2026_05_30_1200-a7b8c9d0e1f2_add_organization_kind` (VARCHAR+CHECK, `server_default` заполняет существующие строки).
 
 `GET /dashboard/calculations` вычисляет данные на лету (нет кеша) через `compute_calculations()` из `crud.calculations` — единый источник истины для аналитики цен. `compute_full_deviation()` делегирует в неё же.
 
@@ -164,8 +168,10 @@ deviation_amount = (avg_price − ref_price) × qty
 - **CSRF**: double-submit cookie pattern — CSRF middleware in `main.py` + `require_csrf` dependency. Exempt paths: login, /docs, /openapi.json.
 - **JWT**: HS256, 30 min expiry. Payload: `sub` (user id), `org_id`, `is_superuser`, `org_role`, `exp`, `iat`, `jti`.
 - **Refresh tokens**: stored in DB (`refresh_tokens` table), hashed (SHA-256), 14-day expiry, revokable. Rotated on each `/api/auth/refresh` call.
-- **Roles**: `OrgRole` (superadmin / admin / member) per organization. `ProjectRole` (customer / contractor) per project link. First user in a new org auto-gets `superadmin`.
-- **Endpoints**: `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/auth/me`.
+- **Roles**: `OrgRole` (superadmin / admin / member) per organization. `ProjectRole` (customer / contractor) per project link. First user in a new org auto-gets `superadmin` (enforced in `crud.admin.create_user_in_org`).
+- **Role matrix (enforced in guards/CRUD, not just UI)**: внутри организации `superadmin` управляет admin+member и назначает роли admin/member; `admin` управляет только member и назначает только member; `member` — ничего. Роль `superadmin` назначается **только** через `/api/admin` (платформенным `is_superuser`). Хелперы `can_set_role` / `can_manage_target` в `crud.admin`; новый guard `require_org_superadmin` в `auth.py`. **Последний активный `superadmin` организации защищён**: нельзя деактивировать/понизить (4xx) — проверка в `crud.admin.set_user_role_and_active`. Платформенный `is_superuser` может всё во всех организациях через `/api/admin/*` и не подчиняется матрице.
+- **Endpoints**: `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/auth/me` (отдаёт `organization.kind`).
+- **Superuser admin console** (`routers/admin.py`, все под `require_superuser`): `GET/POST /api/admin/organizations`, `GET/PATCH /api/admin/organizations/{id}` (вкл. `kind`), `POST /api/admin/organizations/{id}/users` (первый = superadmin), `GET /api/admin/users` (пагинация `q`/`page`/`page_size` → `{items, total, page, page_size}` + `org_name`; **это не голый массив, в отличие от прежнего ответа**), `PATCH /api/admin/users/{id}` (role/active + защита последнего superadmin → 409), `POST /api/admin/users/{id}/reset-password` (сервер генерит пароль через `secrets`, отдаёт plaintext один раз), `POST /api/admin/organizations/{id}/projects` (project_role default = `kind`), `DELETE /api/admin/organizations/{id}/projects/{project_id}`. **Org self-service** (`routers/orgs.py`, под `require_org_admin_with_org`): `GET/POST /api/orgs/users`, `PATCH /api/orgs/users/{id}` — всё по матрице. **Frontend**: маршруты `/admin/*` под guard `RequireSuperuser` (экспортируется из `App.tsx`); пункт «Админ» в `TopNav` виден только суперюзеру.
 - **All business routers** require `get_current_user`. Org-level data isolation for project/invoice queries is **not yet enforced** (see TECH_DEBT.md) — auth only prevents unauthenticated access.
 - **CLI**: `just create-superuser` / `just create-org` — use these to bootstrap the first users.
 - **Auth coverage guardian**: `tests/test_auth_coverage.py` — hits every route without a token, expects 401/403. Run with `just test-backend-unit`.
@@ -176,7 +182,7 @@ deviation_amount = (avg_price − ref_price) × qty
 
 ### Backend
 - **Unit tests** (`tests/unit/`): no DB, pure functions. Representative coverage includes `test_security.py`, `test_auth_deps.py`, and `test_supplier_exclusions.py`.
-- **Integration tests** (`tests/integration/`): require `TEST_DATABASE_URL` (separate Neon branch). Each test runs in a transaction + savepoint → full isolation, automatic rollback.
+- **Integration tests** (`tests/integration/`): require `TEST_DATABASE_URL` (separate Neon branch). Loaded by **pytest-dotenv** from `.env.test` (`env_files` in `pyproject.toml`) — the file lives in the **repo root** (`UDP/.env.test`), NOT in `backend/`. Each test runs in a transaction + savepoint → full isolation, automatic rollback. Safety guard in `conftest.py`: refuses `DROP SCHEMA` if `TEST_DATABASE_URL == DATABASE_URL`. To run admin matrix tests that need a non-superuser actor, the `_login_as(user)` contextmanager in `test_admin.py` re-overrides `get_current_user` per-test (the default `client` fixture mocks a platform superuser).
 - **Fixtures**: `factory_boy` factories in `tests/factories.py`. AI responses mocked via `respx` + JSON fixtures in `tests/fixtures/openrouter/`.
 - `block_real_openrouter` autouse fixture — any accidental real call fails loudly.
 - `in_memory_s3` — MinIO mocked for upload tests.
@@ -187,7 +193,8 @@ deviation_amount = (avg_price − ref_price) × qty
 - `renderWithProviders` from `src/test/utils.tsx` — wraps in QueryClient (retries=0), MemoryRouter, ThemeProvider. Accepts `initialUser` param (default: `DEFAULT_TEST_USER`); pass `null` for unauthenticated scenarios.
 - New endpoint? Add to `handlers.ts` before writing the test.
 - Binary endpoints (blob/arraybuffer) must return `HttpResponse.arrayBuffer(...)` in MSW handlers, not `HttpResponse.json(...)`.
-- Auth endpoints already handled in `handlers.ts` (`GET /api/auth/me`, `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/refresh`).
+- Auth endpoints already handled in `handlers.ts` (`GET /api/auth/me`, `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/refresh`). Admin endpoints (`/api/admin/*`) also have default handlers.
+- **Testing superuser guards**: `RequireSuperuser` is exported from `App.tsx`. Mount it in a small local `<Routes>` and pass `initialUser` to `renderWithProviders` (a user with `is_superuser: true` vs an org admin) to assert content-vs-redirect — see `pages/admin/RequireSuperuser.test.tsx`.
 - **Asserting request payloads**: override the default MSW handler per-test with `server.use(http.put(..., async ({ request, params }) => { onUpdate({ id: params.id, body: await request.json() }); return HttpResponse.json(...); }))` and assert on a `vi.fn()` spy. The default handlers in `handlers.ts` echo `sampleProject` and similar fixtures — they're enough for happy-path GETs but don't capture request bodies.
 - **Destructive UI flows must test the confirmation step**, not just the API call. For `AlertDialog`-based confirmations: assert that the API mock is NOT called on first click, only after clicking the explicit confirm button. Verifies that the dialog can't be bypassed by Escape/overlay-click (base-ui `AlertDialog` blocks both).
 - **Component-level tests live next to the component** (e.g. `ProjectCard.test.tsx` next to `ProjectCard.tsx`). Page-level tests live in `src/pages/*.test.tsx`. Prefer component-level tests when the logic is isolated to a single component — they're faster and survive page refactors.
@@ -227,7 +234,7 @@ deviation_amount = (avg_price − ref_price) × qty
 
 ```
 backend/.env          — production config (gitignored)
-backend/.env.test     — TEST_DATABASE_URL for integration tests (gitignored)
+.env.test             — TEST_DATABASE_URL for integration tests (gitignored; lives in REPO ROOT, loaded by pytest-dotenv via pyproject env_files)
 backend/.env.example  — template (includes SECRET_KEY, COOKIE_SECURE, ALLOWED_ORIGINS)
 ```
 
