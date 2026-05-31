@@ -117,6 +117,10 @@ def update_organization(
 ):
     """Изменить name / inn / kind организации."""
     fields = body.model_dump(exclude_unset=True)
+    if "name" in fields and fields["name"] is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Поле name не может быть null")
+    if "kind" in fields and fields["kind"] is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Поле kind не может быть null")
     try:
         org = crud_admin.update_organization(
             db,
@@ -184,6 +188,10 @@ def update_user(
 ):
     """Сменить org_role и/или is_active. Защищает последнего superadmin'а организации."""
     fields = body.model_dump(exclude_unset=True)
+    if "org_role" in fields and fields["org_role"] is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Поле org_role не может быть null")
+    if "is_active" in fields and fields["is_active"] is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Поле is_active не может быть null")
     try:
         user = crud_admin.set_user_role_and_active(
             db,

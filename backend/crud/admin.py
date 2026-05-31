@@ -73,7 +73,7 @@ def list_organizations(db: Session) -> list[dict]:
             "id": org.id,
             "name": org.name,
             "inn": org.inn,
-            "kind": org.kind.value if org.kind else None,
+            "kind": org.kind.value,
             "created_at": org.created_at.isoformat() if org.created_at else None,
             "user_count": user_count_,
             "project_count": project_count_,
@@ -114,7 +114,7 @@ def get_organization_detail(db: Session, org_id: int) -> dict | None:
         "id": org.id,
         "name": org.name,
         "inn": org.inn,
-        "kind": org.kind.value if org.kind else None,
+        "kind": org.kind.value,
         "created_at": org.created_at.isoformat() if org.created_at else None,
         "users": [_user_to_dict(u) for u in users],
         "projects": [
