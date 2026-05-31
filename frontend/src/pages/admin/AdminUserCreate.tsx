@@ -13,6 +13,7 @@ import { PasswordField } from "@/components/admin/PasswordField";
 import { OrgRoleBadge } from "@/components/admin/RoleBadges";
 import { useAdminOrganization, useCreateAdminUser } from "@/services/queries";
 import { generatePassword } from "@/lib/password";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { OrgRole } from "@/types/auth";
 
@@ -45,7 +46,7 @@ export default function AdminUserCreate() {
         orgId,
         input: { email, password, org_role: role, is_active: isActive },
       });
-      // Тост успеха уже показывает useCreateAdminUser — здесь не дублируем
+      toast.success("Пользователь создан");
       navigate(`/admin/organizations/${orgId}`);
     } catch {
       // тосты в onError

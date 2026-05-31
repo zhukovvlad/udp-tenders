@@ -473,7 +473,6 @@ export function useCreateOrganization() {
     mutationFn: (input: OrgCreateInput) => adminApi.createOrganization(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.admin.organizations });
-      toast.success("Организация создана");
     },
   });
 }
@@ -499,7 +498,6 @@ export function useCreateAdminUser() {
     onSuccess: (_data, { orgId }) => {
       qc.invalidateQueries({ queryKey: qk.admin.organization(orgId) });
       qc.invalidateQueries({ queryKey: ["admin", "users"] });
-      toast.success("Пользователь создан");
     },
   });
 }
