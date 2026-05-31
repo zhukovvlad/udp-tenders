@@ -23,14 +23,20 @@ from security import hash_password, verify_password
 
 @contextmanager
 def _login_as(user: User):
-    """Временно переопределить get_current_user реальным пользователем (для /api/orgs/*)."""
+    """Временно переопределить get_current_user реальным пользователем (для /api/orgs/*).
+
+    Сохраняет и восстанавливает предыдущий override (мок-суперюзер из client
+    fixture), чтобы запросы после выхода из контекста снова шли от суперюзера.
+    """
+    prev = app.dependency_overrides.get(get_current_user)
     app.dependency_overrides[get_current_user] = lambda: user
     try:
         yield
     finally:
-        # Возвращаем мок-суперюзера из client fixture не нужно — фикстура чистит
-        # overrides в teardown. Но восстановим, чтобы последующие вызовы в тесте работали.
-        app.dependency_overrides.pop(get_current_user, None)
+        if prev is None:
+            app.dependency_overrides.pop(get_current_user, None)
+        else:
+            app.dependency_overrides[get_current_user] = prev
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +87,8 @@ def test_get_organization_detail(client, factories):
     assert len(body["users"]) == 1
     assert len(body["projects"]) == 1
     assert body["projects"][0]["project_id"] == project.id
+    # project_role наследуется из kind организации (contractor)
+    assert body["projects"][0]["project_role"] == "contractor"
 
 
 def test_update_organization(client, factories):
@@ -315,3 +323,38 @@ def test_org_admin_cannot_manage_other_org_user(client, factories):
     with _login_as(admin_a):
         response = client.patch(f"/api/orgs/users/{user_b.id}", json={"is_active": False})
         assert response.status_code == 404
+
+
+def test_org_superadmin_cannot_manage_peer_superadmin(client, factories):
+    """superadmin (org) не может управлять другим superadmin через self-service — только /api/admin."""
+    org = factories.OrganizationFactory.create()
+    actor = factories.UserFactory.create(organization=org, org_role=OrgRole.superadmin)
+    peer = factories.UserFactory.create(organization=org, org_role=OrgRole.superadmin)
+    with _login_as(actor):
+        response = client.patch(f"/api/orgs/users/{peer.id}", json={"is_active": False})
+        assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+#  Совместимость контрактов admin-эндпоинтов
+# ---------------------------------------------------------------------------
+
+def test_patch_user_response_includes_is_superuser(client, factories):
+    """PATCH /api/admin/users/{id} возвращает is_superuser (фронт на него рассчитывает)."""
+    org = factories.OrganizationFactory.create()
+    factories.UserFactory.create(organization=org, org_role=OrgRole.superadmin)
+    member = factories.UserFactory.create(organization=org, org_role=OrgRole.member)
+    response = client.patch(f"/api/admin/users/{member.id}", json={"is_active": False})
+    assert response.status_code == 200
+    assert response.json()["is_superuser"] is False
+
+
+def test_link_project_response_includes_project_name(client, factories):
+    """POST .../projects возвращает project_name (формат OrgProjectLink)."""
+    org = factories.OrganizationFactory.create()
+    project = factories.ProjectFactory.create()
+    response = client.post(f"/api/admin/organizations/{org.id}/projects", json={"project_id": project.id})
+    assert response.status_code == 201
+    body = response.json()
+    assert body["project_name"] == project.name
+    assert body["project_id"] == project.id

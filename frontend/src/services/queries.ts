@@ -462,7 +462,7 @@ export function useAdminOrganization(id: ID | null | undefined) {
 
 export function useAdminUsers(params?: { q?: string; page?: number; page_size?: number }) {
   return useQuery({
-    queryKey: qk.admin.users(params?.q, params?.page),
+    queryKey: qk.admin.users(params?.q, params?.page, params?.page_size),
     queryFn: () => adminApi.listUsers(params),
   });
 }

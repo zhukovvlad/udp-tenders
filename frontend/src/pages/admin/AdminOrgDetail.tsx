@@ -65,12 +65,22 @@ type TabKey = "users" | "projects";
 export default function AdminOrgDetail() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const orgId = Number(id);
+  const parsed = Number(id);
+  // Невалидный id в URL (/admin/organizations/abc) → null: запрос не уходит на /NaN
+  const orgId = Number.isInteger(parsed) && parsed > 0 ? parsed : null;
   const orgQ = useAdminOrganization(orgId);
   const [tab, setTab] = useState<TabKey>("users");
   const [editOpen, setEditOpen] = useState(false);
 
   const org = orgQ.data;
+
+  if (orgId === null) {
+    return (
+      <div className="container-page py-8">
+        <EmptyState title="Организация не найдена" description="Некорректный адрес страницы." />
+      </div>
+    );
+  }
 
   return (
     <div className="container-page py-8">
@@ -141,21 +151,26 @@ function EditOrgDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Редактирование организации</DialogTitle>
+          <DialogDescription>Измените название, ИНН или роль организации.</DialogDescription>
+        </DialogHeader>
+        {/* key пересоздаёт форму при каждом открытии → состояние инициализируется
+            из актуального org через useState, без setState-in-effect/render. */}
+        {open && <EditOrgForm key={org.id} org={org} onClose={onClose} />}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditOrgForm({ org, onClose }: { org: AdminOrgDetailType; onClose: () => void }) {
   const updateOrg = useUpdateOrganization();
   const [name, setName] = useState(org.name);
   const [inn, setInn] = useState(org.inn ?? "");
-  const [kind, setKind] = useState<OrgKind>(org.kind ?? "customer");
-
-  // Сброс формы к актуальным данным при каждом открытии (org мог измениться)
-  const [lastOpen, setLastOpen] = useState(false);
-  if (open && !lastOpen) {
-    setName(org.name);
-    setInn(org.inn ?? "");
-    setKind(org.kind ?? "customer");
-    setLastOpen(true);
-  } else if (!open && lastOpen) {
-    setLastOpen(false);
-  }
+  const [kind, setKind] = useState<OrgKind>(org.kind);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -166,13 +181,7 @@ function EditOrgDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Редактирование организации</DialogTitle>
-          <DialogDescription>Измените название, ИНН или роль организации.</DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="edit-org-name">Название</Label>
             <Input
@@ -226,8 +235,6 @@ function EditOrgDialog({
             </Button>
           </div>
         </form>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -263,8 +270,13 @@ function UsersTab({ orgId, users }: { orgId: ID; users: AdminUser[] }) {
   }
 
   async function handleReset(user: AdminUser) {
-    const result = await resetPassword.mutateAsync(user.id);
-    setResetResult({ email: result.email, password: result.password });
+    try {
+      const result = await resetPassword.mutateAsync(user.id);
+      setResetResult({ email: result.email, password: result.password });
+    } catch {
+      // Ошибка уже показана глобальным mutations.onError; ловим, чтобы не было
+      // unhandled promise rejection (onClick не await'ит этот промис).
+    }
   }
 
   return (

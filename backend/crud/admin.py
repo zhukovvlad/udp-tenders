@@ -249,15 +249,28 @@ def list_users_paginated(
     }
 
 
-def _count_active_superadmins(db: Session, org_id: int, exclude_user_id: int | None = None) -> int:
-    q = db.query(func.count(User.id)).filter(
-        User.org_id == org_id,
-        User.org_role == OrgRole.superadmin,
-        User.is_active.is_(True),
+def _count_other_active_superadmins_locked(db: Session, org_id: int, exclude_user_id: int) -> int:
+    """Сколько ДРУГИХ активных superadmin'ов в организации, с блокировкой их строк.
+
+    Использует SELECT ... FOR UPDATE на строках кандидатов, чтобы защита
+    «последнего superadmin» была атомарной: два параллельных запроса на
+    деактивацию/понижение не смогут одновременно пройти проверку — второй
+    дождётся коммита первого и пересчитает уже актуальное число.
+
+    Возвращает количество (а не строки) — нам нужен только факт «> 0».
+    """
+    rows = (
+        db.query(User.id)
+        .filter(
+            User.org_id == org_id,
+            User.org_role == OrgRole.superadmin,
+            User.is_active.is_(True),
+            User.id != exclude_user_id,
+        )
+        .with_for_update()
+        .all()
     )
-    if exclude_user_id is not None:
-        q = q.filter(User.id != exclude_user_id)
-    return q.scalar() or 0
+    return len(rows)
 
 
 def set_user_role_and_active(
@@ -294,7 +307,10 @@ def set_user_role_and_active(
         and user.is_active
     )
     if (losing_superadmin or deactivating_superadmin) and user.org_id is not None:
-        remaining = _count_active_superadmins(db, user.org_id, exclude_user_id=user.id)
+        # Атомарно: блокируем строки других активных superadmin'ов и считаем их.
+        # Параллельный запрос на деактивацию/понижение дождётся коммита и увидит
+        # актуальное число — инвариант «хотя бы один активный superadmin» сохранится.
+        remaining = _count_other_active_superadmins_locked(db, user.org_id, exclude_user_id=user.id)
         if remaining == 0:
             raise AdminError(409, "Нельзя деактивировать или понизить последнего активного superadmin организации")
 
@@ -414,13 +430,14 @@ def can_set_role(actor_role: OrgRole, new_role: OrgRole) -> bool:
 def can_manage_target(actor_role: OrgRole, target_role: OrgRole) -> bool:
     """Может ли actor управлять пользователем с ролью target_role (деактивация/смена роли).
 
-    - superadmin (org): может управлять admin и member (не другими — кроме себя
-      это контролирует защита последнего superadmin отдельно).
+    - superadmin (org): может управлять admin и member. Управление другими
+      superadmin'ами — только через /api/admin (платформенным суперюзером),
+      не через org-самообслуживание.
     - admin: может управлять только member.
     - member: никем.
     """
     if actor_role == OrgRole.superadmin:
-        return target_role in (OrgRole.admin, OrgRole.member, OrgRole.superadmin)
+        return target_role in (OrgRole.admin, OrgRole.member)
     if actor_role == OrgRole.admin:
         return target_role == OrgRole.member
     return False

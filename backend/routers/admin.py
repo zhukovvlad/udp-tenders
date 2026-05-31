@@ -56,6 +56,21 @@ def _raise(err: AdminError) -> None:
     raise HTTPException(err.status_code, err.detail)
 
 
+def _user_response(user: User) -> dict:
+    """Единый формат пользователя для admin-эндпоинтов (совместим с GET /api/admin/users).
+
+    Включает is_superuser — фронт (тип AdminUser) на него рассчитывает.
+    """
+    return {
+        "id": user.id,
+        "email": user.email,
+        "org_id": user.org_id,
+        "org_role": user.org_role.value if user.org_role else None,
+        "is_superuser": user.is_superuser,
+        "is_active": user.is_active,
+    }
+
+
 # ---------------------------------------------------------------------------
 #  Организации
 # ---------------------------------------------------------------------------
@@ -141,13 +156,7 @@ def create_user_in_org(
         )
     except AdminError as e:
         _raise(e)
-    return {
-        "id": user.id,
-        "email": user.email,
-        "org_id": user.org_id,
-        "org_role": user.org_role.value if user.org_role else None,
-        "is_active": user.is_active,
-    }
+    return _user_response(user)
 
 
 @router.get("/users")
@@ -184,13 +193,7 @@ def update_user(
         )
     except AdminError as e:
         _raise(e)
-    return {
-        "id": user.id,
-        "email": user.email,
-        "org_id": user.org_id,
-        "org_role": user.org_role.value if user.org_role else None,
-        "is_active": user.is_active,
-    }
+    return _user_response(user)
 
 
 @router.post("/users/{user_id}/reset-password")
@@ -228,9 +231,10 @@ def link_project(
         )
     except AdminError as e:
         _raise(e)
+    # Формат совместим с OrgProjectLink (GET /organizations/{id}): {project_id, project_name, project_role}
     return {
-        "org_id": link.org_id,
         "project_id": link.project_id,
+        "project_name": link.project.name,
         "project_role": link.project_role.value,
     }
 

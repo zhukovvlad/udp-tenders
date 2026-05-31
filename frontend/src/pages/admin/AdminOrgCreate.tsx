@@ -122,7 +122,7 @@ export default function AdminOrgCreate() {
             <div className="border-t border-border-subtle pt-4">
               <div className="flex items-baseline justify-between">
                 <p className="text-sm font-medium text-fg-tertiary">Первый администратор</p>
-                <span className="rounded-md bg-[#EEEDFE] px-2 py-0.5 text-xs text-[#3C3489] dark:bg-violet-950 dark:text-violet-300">
+                <span className="rounded-md bg-accent/15 px-2 py-0.5 text-xs text-accent">
                   роль superadmin
                 </span>
               </div>

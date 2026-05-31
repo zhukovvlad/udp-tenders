@@ -21,10 +21,13 @@ class TestCanSetRole:
 
 
 class TestCanManageTarget:
-    def test_superadmin_manages_all_roles(self):
+    def test_superadmin_manages_admin_and_member(self):
         assert can_manage_target(OrgRole.superadmin, OrgRole.admin)
         assert can_manage_target(OrgRole.superadmin, OrgRole.member)
-        assert can_manage_target(OrgRole.superadmin, OrgRole.superadmin)
+
+    def test_superadmin_cannot_manage_peer_superadmin(self):
+        # Управление другими superadmin'ами — только через /api/admin, не self-service
+        assert not can_manage_target(OrgRole.superadmin, OrgRole.superadmin)
 
     def test_admin_manages_only_member(self):
         assert can_manage_target(OrgRole.admin, OrgRole.member)

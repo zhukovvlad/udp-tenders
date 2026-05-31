@@ -23,9 +23,9 @@ export function OrgKindBadge({ kind }: { kind: OrgKind | null | undefined }) {
 }
 
 const ROLE_STYLE: Record<OrgRole, string> = {
-  // superadmin — фиолетовый, admin — синий, member — серый
-  superadmin: "bg-[#EEEDFE] text-[#3C3489] dark:bg-violet-950 dark:text-violet-300",
-  admin: "bg-[#E6F1FB] text-[#0C447C] dark:bg-blue-950 dark:text-blue-300",
+  // Семантические токены (без raw hex): superadmin — accent, admin — info, member — нейтральный
+  superadmin: "bg-accent/15 text-accent",
+  admin: "bg-info-soft text-info-text",
   member: "bg-surface-sunken text-fg-secondary",
 };
 

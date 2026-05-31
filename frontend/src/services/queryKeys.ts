@@ -36,7 +36,8 @@ export const qk = {
   admin: {
     organizations: ["admin", "organizations"] as const,
     organization: (id: ID) => ["admin", "organizations", id] as const,
-    users: (q?: string, page?: number) => ["admin", "users", q ?? "", page ?? 1] as const,
+    users: (q?: string, page?: number, pageSize?: number) =>
+      ["admin", "users", q ?? "", page ?? 1, pageSize ?? 0] as const,
   },
   projectSuppliers: (projectId: ID) => ["project-suppliers", projectId] as const,
   supplierExclusions: (projectId: ID) => ["supplier-exclusions", projectId] as const,

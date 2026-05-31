@@ -7,7 +7,8 @@ export interface AdminOrgListItem {
   id: ID;
   name: string;
   inn: string | null;
-  kind: OrgKind | null;
+  // Бэкенд гарантирует NOT NULL (server_default='customer')
+  kind: OrgKind;
   created_at: ISODateTime | null;
   user_count: number;
   project_count: number;
@@ -38,7 +39,7 @@ export interface AdminOrgDetail {
   id: ID;
   name: string;
   inn: string | null;
-  kind: OrgKind | null;
+  kind: OrgKind;
   created_at: ISODateTime | null;
   users: AdminUser[];
   projects: OrgProjectLink[];
