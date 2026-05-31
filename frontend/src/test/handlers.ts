@@ -199,6 +199,7 @@ export const handlers = [
         email: body.email ?? "new@example.com",
         org_id: Number(params.id),
         org_role: body.org_role ?? "member",
+        is_superuser: false,
         is_active: body.is_active ?? true,
       },
       { status: 201 }
@@ -228,6 +229,7 @@ export const handlers = [
       email: "a.petrov@stroygrad.ru",
       org_id: 1,
       org_role: "admin",
+      is_superuser: false,
       is_active: true,
     })
   ),

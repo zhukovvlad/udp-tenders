@@ -1,6 +1,7 @@
 import api from "@/lib/api";
 import type { ID } from "@/types/common";
 import type {
+  AdminOrgBase,
   AdminOrgDetail,
   AdminOrgListItem,
   AdminUser,
@@ -22,11 +23,12 @@ export const adminApi = {
   getOrganization: (id: ID): Promise<AdminOrgDetail> =>
     api.get<AdminOrgDetail>(`/admin/organizations/${id}`).then((r) => r.data),
 
-  createOrganization: (input: OrgCreateInput): Promise<AdminOrgListItem> =>
-    api.post<AdminOrgListItem>("/admin/organizations", input).then((r) => r.data),
+  // POST/PATCH возвращают только базовые поля (без агрегатов) — см. backend/routers/admin.py
+  createOrganization: (input: OrgCreateInput): Promise<AdminOrgBase> =>
+    api.post<AdminOrgBase>("/admin/organizations", input).then((r) => r.data),
 
-  updateOrganization: (id: ID, input: OrgUpdateInput): Promise<AdminOrgListItem> =>
-    api.patch<AdminOrgListItem>(`/admin/organizations/${id}`, input).then((r) => r.data),
+  updateOrganization: (id: ID, input: OrgUpdateInput): Promise<AdminOrgBase> =>
+    api.patch<AdminOrgBase>(`/admin/organizations/${id}`, input).then((r) => r.data),
 
   // --- Пользователи ---
   createUser: (orgId: ID, input: AdminUserCreateInput): Promise<AdminUser> =>

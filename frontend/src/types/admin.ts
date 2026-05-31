@@ -2,13 +2,17 @@
 import type { ID, ISODateTime } from "@/types/common";
 import type { OrgKind, OrgRole } from "@/types/auth";
 
-/** Строка списка организаций (GET /api/admin/organizations). */
-export interface AdminOrgListItem {
+/** Базовые поля организации — то, что возвращают POST/PATCH /api/admin/organizations. */
+export interface AdminOrgBase {
   id: ID;
   name: string;
   inn: string | null;
   // Бэкенд гарантирует NOT NULL (server_default='customer')
   kind: OrgKind;
+}
+
+/** Строка списка организаций (GET /api/admin/organizations) — с агрегатами. */
+export interface AdminOrgListItem extends AdminOrgBase {
   created_at: ISODateTime | null;
   user_count: number;
   project_count: number;

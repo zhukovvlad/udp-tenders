@@ -509,8 +509,10 @@ export function useUpdateAdminUser() {
   return useMutation({
     mutationFn: ({ userId, input }: { userId: ID; input: AdminUserUpdateInput }) =>
       adminApi.updateUser(userId, input),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["admin", "organizations"] });
+    onSuccess: (data) => {
+      // Карточка конкретной организации (AdminOrgDetail) — чтобы роль/статус обновились сразу
+      if (data.org_id) qc.invalidateQueries({ queryKey: qk.admin.organization(data.org_id) });
+      qc.invalidateQueries({ queryKey: qk.admin.organizations });
       qc.invalidateQueries({ queryKey: ["admin", "users"] });
       toast.success("Пользователь обновлён");
     },

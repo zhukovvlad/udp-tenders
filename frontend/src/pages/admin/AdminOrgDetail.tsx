@@ -124,7 +124,7 @@ export default function AdminOrgDetail() {
               <UsersTab orgId={orgId} users={org.users} />
             </TabsContent>
             <TabsContent value="projects" className="mt-6">
-              <ProjectsTab orgId={orgId} kind={org.kind} links={org.projects} />
+              <ProjectsTab key={org.kind} orgId={orgId} kind={org.kind} links={org.projects} />
             </TabsContent>
           </Tabs>
         </>
