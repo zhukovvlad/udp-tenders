@@ -250,14 +250,14 @@ def list_users_paginated(
 
 
 def _count_other_active_superadmins_locked(db: Session, org_id: int, exclude_user_id: int) -> int:
-    """Сколько ДРУГИХ активных superadmin'ов в организации, с блокировкой их строк.
+    """Сколько ДРУГИХ активных superadmin'ов в организации, с блокировкой строк.
 
-    Использует SELECT ... FOR UPDATE на строках кандидатов, чтобы защита
-    «последнего superadmin» была атомарной: два параллельных запроса на
-    деактивацию/понижение не смогут одновременно пройти проверку — второй
-    дождётся коммита первого и пересчитает уже актуальное число.
+    Важно лочить *все* активные строки superadmin'ов в организации в детерминированном
+    порядке (order_by User.id), иначе два конкурентных запроса на деактивацию/понижение
+    разных superadmin'ов могут одновременно пройти проверку и оставить 0 активных superadmin'ов
+    (каждый лочит чужую строку, оба видят count=1 и оба проходят).
 
-    Возвращает количество (а не строки) — нам нужен только факт «> 0».
+    Возвращает количество *других* (а не строки) — нам нужен только факт «> 0».
     """
     rows = (
         db.query(User.id)
@@ -265,12 +265,13 @@ def _count_other_active_superadmins_locked(db: Session, org_id: int, exclude_use
             User.org_id == org_id,
             User.org_role == OrgRole.superadmin,
             User.is_active.is_(True),
-            User.id != exclude_user_id,
         )
+        .order_by(User.id)
         .with_for_update()
         .all()
     )
-    return len(rows)
+    ids = [r[0] for r in rows]
+    return sum(1 for uid in ids if uid != exclude_user_id)
 
 
 def set_user_role_and_active(
