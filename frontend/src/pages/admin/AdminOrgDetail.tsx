@@ -472,6 +472,7 @@ function ProjectsTab({
               onChange={setSelectedProject}
               getLabel={(p) => p.name}
               placeholder="Выберите проект"
+              disabled={projectsQ.isPending || projectsQ.isError}
             />
           </div>
           <Select value={projectRole} onValueChange={(v) => v && setProjectRole(v as OrgKind)}>

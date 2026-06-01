@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import type { AxiosError } from "axios";
 
 import { projectsApi } from "./api/projects";
 import { materialClassesApi } from "./api/materialClasses";
@@ -497,6 +498,7 @@ export function useCreateAdminUser() {
       adminApi.createUser(orgId, input),
     onSuccess: (_data, { orgId }) => {
       qc.invalidateQueries({ queryKey: qk.admin.organization(orgId) });
+      qc.invalidateQueries({ queryKey: qk.admin.organizations });
       qc.invalidateQueries({ queryKey: ["admin", "users"] });
     },
   });
@@ -513,6 +515,10 @@ export function useUpdateAdminUser() {
       qc.invalidateQueries({ queryKey: qk.admin.organizations });
       qc.invalidateQueries({ queryKey: ["admin", "users"] });
       toast.success("Пользователь обновлён");
+    },
+    onError: (err: unknown) => {
+      const detail = (err as AxiosError<{ detail?: string }>)?.response?.data?.detail;
+      toast.error(typeof detail === "string" ? detail : err instanceof Error ? err.message : "Произошла ошибка");
     },
   });
 }
@@ -532,6 +538,7 @@ export function useLinkProject() {
       adminApi.linkProject(orgId, input),
     onSuccess: (_data, { orgId }) => {
       qc.invalidateQueries({ queryKey: qk.admin.organization(orgId) });
+      qc.invalidateQueries({ queryKey: qk.admin.organizations });
       toast.success("Доступ к проекту выдан");
     },
   });
@@ -544,6 +551,7 @@ export function useUnlinkProject() {
       adminApi.unlinkProject(orgId, projectId),
     onSuccess: (_data, { orgId }) => {
       qc.invalidateQueries({ queryKey: qk.admin.organization(orgId) });
+      qc.invalidateQueries({ queryKey: qk.admin.organizations });
       toast.success("Доступ к проекту снят");
     },
   });
