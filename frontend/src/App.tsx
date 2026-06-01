@@ -14,6 +14,7 @@ import ProjectPage from "@/pages/ProjectPage";
 import Projects from "@/pages/Projects";
 import Reports from "@/pages/Reports";
 import Review from "@/pages/Review";
+import Handbook from "@/pages/handbook/Handbook";
 import SettingsPage from "@/pages/Settings";
 import SupplierPage from "@/pages/SupplierPage";
 import Suppliers from "@/pages/Suppliers";
@@ -22,6 +23,7 @@ import AdminOrgCreate from "@/pages/admin/AdminOrgCreate";
 import AdminOrgDetail from "@/pages/admin/AdminOrgDetail";
 import AdminUserCreate from "@/pages/admin/AdminUserCreate";
 import AdminUsers from "@/pages/admin/AdminUsers";
+import HandbookArticle from "@/pages/handbook/HandbookArticle";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -88,6 +90,8 @@ export default function App() {
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/documents/:id" element={<Review />} />
+                <Route path="/handbook" element={<Handbook />} />
+                <Route path="/handbook/:slug" element={<HandbookArticle />} />
                 <Route element={<RequireSuperuser />}>
                   <Route path="/admin" element={<AdminOrganizations />} />
                   <Route path="/admin/organizations/new" element={<AdminOrgCreate />} />

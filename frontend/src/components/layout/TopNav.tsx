@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard, Building2, Users, Layers, FileSpreadsheet,
+  LayoutDashboard, BookOpen, Building2, Users, Layers, FileSpreadsheet,
   Settings, LogOut, Search, Bell, ShieldCheck, type LucideIcon,
 } from "lucide-react";
 import { Logo } from "./Logo";
@@ -18,6 +18,7 @@ const NAV: { to: string; icon: LucideIcon; label: string; end?: boolean; superus
   { to: "/suppliers", icon: Users,           label: "Поставщики" },
   { to: "/materials", icon: Layers,          label: "Номенклатура" },
   { to: "/reports",   icon: FileSpreadsheet, label: "Отчёты" },
+  { to: "/handbook", icon: BookOpen,         label: "Справочник" },
   { to: "/admin",     icon: ShieldCheck,     label: "Админ", superuserOnly: true },
 ];
 
