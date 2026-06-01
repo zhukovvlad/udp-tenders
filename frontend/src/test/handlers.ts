@@ -238,16 +238,17 @@ export const handlers = [
       page_size,
     });
   }),
-  http.patch("/api/admin/users/:id", ({ params }) =>
-    HttpResponse.json({
+  http.patch("/api/admin/users/:id", async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    return HttpResponse.json({
       id: Number(params.id),
       email: "a.petrov@stroygrad.ru",
       org_id: 1,
-      org_role: "admin",
+      org_role: (body.org_role as string) ?? "admin",
       is_superuser: false,
-      is_active: true,
-    })
-  ),
+      is_active: (body.is_active as boolean) ?? true,
+    });
+  }),
   http.post("/api/admin/users/:id/reset-password", ({ params }) =>
     HttpResponse.json({ id: Number(params.id), email: "a.petrov@stroygrad.ru", password: "Xk7m-Pq9L-vf2Z" })
   ),

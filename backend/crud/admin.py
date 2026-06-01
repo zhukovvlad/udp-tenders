@@ -154,7 +154,7 @@ def update_organization(
 #  Пользователи
 # ---------------------------------------------------------------------------
 
-def _user_to_dict(u: User, org_name: str | None = None) -> dict:
+def _user_to_dict(u: User, org_name=UNSET) -> dict:
     """Сериализация пользователя. Поля совместимы с прежним ответом /api/admin/users."""
     d = {
         "id": u.id,
@@ -165,7 +165,7 @@ def _user_to_dict(u: User, org_name: str | None = None) -> dict:
         "is_active": u.is_active,
         "created_at": (u.created_at.isoformat() + "Z") if u.created_at else None,
     }
-    if org_name is not None:
+    if org_name is not UNSET:
         d["org_name"] = org_name
     return d
 

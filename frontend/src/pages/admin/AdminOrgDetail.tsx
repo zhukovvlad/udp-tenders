@@ -175,7 +175,7 @@ function EditOrgForm({ org, onClose }: { org: AdminOrgDetailType; onClose: () =>
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     updateOrg.mutate(
-      { id: org.id, input: { name, inn: inn.trim() || null, kind } },
+      { id: org.id, input: { name: name.trim(), inn: inn.trim() || null, kind } },
       { onSuccess: () => onClose() },
     );
   }
