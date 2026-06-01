@@ -34,11 +34,13 @@ export default function AdminOrgCreate() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     try {
-      const org = await createOrg.mutateAsync({ name, inn: inn.trim() || null, kind });
+      const trimmedName = name.trim();
+      const trimmedEmail = email.trim();
+      const org = await createOrg.mutateAsync({ name: trimmedName, inn: inn.trim() || null, kind });
       // Первый пользователь организации автоматически становится superadmin (на бэке)
       await createUser.mutateAsync({
         orgId: org.id,
-        input: { email, password, org_role: "superadmin" },
+        input: { email: trimmedEmail, password, org_role: "superadmin" },
       });
       toast.success("Организация и администратор созданы — передайте пароль безопасно");
       navigate(`/admin/organizations/${org.id}`);
@@ -153,7 +155,7 @@ export default function AdminOrgCreate() {
             <Button type="button" variant="secondary" onClick={() => navigate("/admin")}>
               Отмена
             </Button>
-            <Button type="submit" loading={submitting} disabled={!name || !email || !password}>
+            <Button type="submit" loading={submitting} disabled={!name.trim() || !email.trim() || !password}>
               Создать организацию
             </Button>
           </div>

@@ -36,7 +36,7 @@ export default function AdminUserCreate() {
 
   const isEmptyOrg = orgQ.data ? orgQ.data.users.length === 0 : false;
   // Создавать пользователя можно только когда организация успешно загружена
-  const canSubmit = orgQ.isSuccess && !!email && !!password;
+  const canSubmit = orgQ.isSuccess && !!email.trim() && !!password;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -44,7 +44,7 @@ export default function AdminUserCreate() {
     try {
       await createUser.mutateAsync({
         orgId,
-        input: { email, password, org_role: role, is_active: isActive },
+        input: { email: email.trim(), password, org_role: role, is_active: isActive },
       });
       toast.success("Пользователь создан");
       navigate(`/admin/organizations/${orgId}`);
