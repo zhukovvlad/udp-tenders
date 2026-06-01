@@ -148,6 +148,8 @@ deviation_amount = (avg_price − ref_price) × qty
 
 **VAT guard:** `Invoice.vat_rate` не имеет `NOT NULL` в БД (см. TECH_DEBT.md), поэтому во всех SQL-выражениях используется `COALESCE(vat_rate, 20.0)` как fallback.
 
+**DateTime serialization:** все `DateTime`-колонки хранятся как **naive UTC** (без timezone). При ручной сериализации в JSON добавляй суффикс `"Z"`: `dt.isoformat() + "Z"`. Это сигнализирует браузеру о UTC и исключает сдвиг даты у пользователей не в UTC. Pydantic-схемы с `datetime` обрабатывают это автоматически — правило актуально для dict-ответов (например, в `crud/admin.py`).
+
 **Supplier aggregation** is computed on-the-fly (not cached). Key functions in `crud.suppliers`:
 - `get_suppliers_with_stats` — registry list with turnover, project_count, invoice_count, categories
 - `get_supplier_detail` — same aggregates for a single supplier (card header)
