@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { formatMoney, formatNumber } from "@/lib/format";
+import { DEMO_SF } from "./concreteAvgBreakdownData";
 import { Surface } from "@/components/ui-domain/Surface";
 import {
   Table,
@@ -33,13 +35,9 @@ export interface ConcreteSfData {
   otherLines?: ConcreteOtherLine[];
 }
 
-const rubFmt = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
-const m3Fmt = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
-const pctFmt = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
-
-const rub = (n: number) => `${rubFmt.format(Math.round(n))} ₽`;
-const m3 = (n: number) => `${m3Fmt.format(n)} м³`;
-const pct = (n: number) => `${pctFmt.format(n * 100)} %`;
+const rub = (n: number) => formatMoney(Math.round(n));
+const m3 = (n: number) => `${formatNumber(n, 2)} м³`;
+const pct = (n: number) => `${formatNumber(n * 100, 2)} %`;
 
 function allocate(data: ConcreteSfData, cls: string) {
   const additive = data.additiveWithVat ?? 0;
@@ -53,17 +51,6 @@ function allocate(data: ConcreteSfData, cls: string) {
   return { line, baseQty, share, deliveryAlloc, additiveAlloc, totalWithVat, perM3, additive };
 }
 
-export const DEMO_SF: ConcreteSfData = {
-  invoiceLabel: "СФ ЦБ-390 · Термобетон",
-  baseLines: [
-    { cls: "В40", name: "Бетон БСТ В40 П4 F200", qty: 14, sumWithVat: 122640 },
-    { cls: "В30", name: "Бетон БСТ В30", qty: 107, sumWithVat: 732360 },
-  ],
-  deliveryWithVat: 145200,
-  additiveWithVat: 0,
-  otherLines: [{ name: "Цементное молочко", qty: 1, sumWithVat: 8130 }],
-};
-
 interface Props {
   data?: ConcreteSfData;
   initialClass?: string;
@@ -76,10 +63,10 @@ export function ConcreteAvgBreakdown({ data = DEMO_SF, initialClass }: Props) {
   const steps: Array<[string, string, string]> = [
     [
       "Суммарный объём бетона (база)",
-      data.baseLines.map((l) => m3Fmt.format(l.qty)).join(" + "),
+      data.baseLines.map((l) => formatNumber(l.qty, 2)).join(" + "),
       m3(a.baseQty),
     ],
-    ["Доля " + selected + " в объёме", `${m3Fmt.format(a.line.qty)} / ${m3Fmt.format(a.baseQty)}`, pct(a.share)],
+    ["Доля " + selected + " в объёме", `${formatNumber(a.line.qty, 2)} / ${formatNumber(a.baseQty, 2)}`, pct(a.share)],
     ["Доставка на " + selected, `${rub(data.deliveryWithVat)} × ${pct(a.share)}`, rub(a.deliveryAlloc)],
   ];
   if (a.additive > 0) {
@@ -136,7 +123,7 @@ export function ConcreteAvgBreakdown({ data = DEMO_SF, initialClass }: Props) {
             ))}
             <TableRow>
               <TableCell>Доставка</TableCell>
-              <TableCell className="text-right text-fg-tertiary">база {m3Fmt.format(a.baseQty)}</TableCell>
+              <TableCell className="text-right text-fg-tertiary">база {formatNumber(a.baseQty, 2)}</TableCell>
               <TableCell className="text-right">{rub(data.deliveryWithVat)}</TableCell>
               <TableCell className="text-fg-secondary">разносится по объёму</TableCell>
             </TableRow>
