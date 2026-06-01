@@ -80,7 +80,7 @@ function useDetailWithMemberAndProject() {
         name: "ООО «СтройГрад»",
         inn: "7705123456",
         kind: "customer",
-        created_at: "2026-05-01T10:00:00",
+        created_at: "2026-05-01T10:00:00Z",
         users: [
           { id: 1, email: "boss@stroygrad.ru", org_id: 1, org_role: "superadmin", is_superuser: false, is_active: true },
           { id: 2, email: "ivan@stroygrad.ru", org_id: 1, org_role: "member", is_superuser: false, is_active: true },

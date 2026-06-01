@@ -125,16 +125,22 @@ def update_user(
     if not can_manage_target(current_user.org_role, target.org_role):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для управления этим пользователем")
 
+    fields = body.model_dump(exclude_unset=True)
+    if "org_role" in fields and fields["org_role"] is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Поле org_role не может быть null")
+    if "is_active" in fields and fields["is_active"] is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Поле is_active не может быть null")
+
     # Если меняется роль — проверяем право назначить новую роль
-    if body.org_role is not None and not can_set_role(current_user.org_role, body.org_role):
+    if "org_role" in fields and not can_set_role(current_user.org_role, fields["org_role"]):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для назначения этой роли")
 
     try:
         user = crud_admin.set_user_role_and_active(
             db,
             user_id,
-            org_role=body.org_role if body.org_role is not None else crud_admin.UNSET,
-            is_active=body.is_active if body.is_active is not None else crud_admin.UNSET,
+            org_role=fields.get("org_role", crud_admin.UNSET),
+            is_active=fields.get("is_active", crud_admin.UNSET),
         )
     except AdminError as e:
         raise HTTPException(e.status_code, e.detail) from e
