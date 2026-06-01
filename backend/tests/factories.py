@@ -13,10 +13,15 @@ from models import (
     Invoice,
     InvoiceItem,
     MaterialClass,
+    Organization,
+    OrgRole,
     Project,
+    ProjectRole,
     ReferencePrice,
     Supplier,
+    User,
 )
+from security import hash_password
 
 # Глобальный slot — устанавливается фикстурой db_session
 _session_holder: dict = {"session": None}
@@ -38,6 +43,29 @@ class _BaseFactory(SQLAlchemyModelFactory):
             raise RuntimeError("Session не зарегистрирована. Используй фикстуру `factories`.")
         cls._meta.sqlalchemy_session = session
         return super()._create(model_class, *args, **kwargs)
+
+
+class OrganizationFactory(_BaseFactory):
+    class Meta:
+        model = Organization
+
+    name = factory.Sequence(lambda n: f"ООО Организация {n}")
+    inn = factory.Sequence(lambda n: f"{n + 1000000000:010d}")
+    kind = ProjectRole.customer
+
+
+class UserFactory(_BaseFactory):
+    class Meta:
+        model = User
+
+    email = factory.Sequence(lambda n: f"user{n}@example.com")
+    # Пароль по умолчанию — "secret"; хэш считается лениво, чтобы тесты могли
+    # проверять логин. Override password_hash через .create(password_hash=...).
+    password_hash = factory.LazyFunction(lambda: hash_password("secret"))
+    is_superuser = False
+    organization = factory.SubFactory(OrganizationFactory)
+    org_role = OrgRole.member
+    is_active = True
 
 
 class ProjectFactory(_BaseFactory):

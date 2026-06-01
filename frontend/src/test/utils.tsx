@@ -23,7 +23,7 @@ const DEFAULT_TEST_USER: User = {
   org_id: 1,
   org_role: "admin",
   is_superuser: false,
-  organization: { id: 1, name: "Тест Орг", inn: null },
+  organization: { id: 1, name: "Тест Орг", inn: null, kind: "customer" },
 };
 
 interface WrapperProps {

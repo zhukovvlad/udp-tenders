@@ -140,10 +140,137 @@ export const handlers = [
       org_id: 1,
       org_role: "admin",
       is_superuser: false,
-      organization: { id: 1, name: "Тест Орг", inn: null },
+      organization: { id: 1, name: "Тест Орг", inn: null, kind: "customer" },
     })
   ),
   http.post("/api/auth/login", () => HttpResponse.json({ status: "ok" })),
   http.post("/api/auth/logout", () => HttpResponse.json({ status: "ok" })),
   http.post("/api/auth/refresh", () => HttpResponse.json({ status: "ok" })),
+
+  // Admin (superuser)
+  http.get("/api/admin/organizations", () =>
+    HttpResponse.json([
+      {
+        id: 1,
+        name: "ООО «СтройГрад»",
+        inn: "7705123456",
+        kind: "customer",
+        created_at: "2026-05-01T10:00:00Z",
+        user_count: 3,
+        project_count: 2,
+      },
+    ])
+  ),
+  http.get("/api/admin/organizations/:id", ({ params }) =>
+    HttpResponse.json({
+      id: Number(params.id),
+      name: "ООО «СтройГрад»",
+      inn: "7705123456",
+      kind: "customer",
+      created_at: "2026-05-01T10:00:00Z",
+      users: [
+        {
+          id: 1,
+          email: "a.petrov@stroygrad.ru",
+          org_id: Number(params.id),
+          org_role: "superadmin",
+          is_superuser: false,
+          is_active: true,
+        },
+      ],
+      projects: [],
+    })
+  ),
+  http.post("/api/admin/organizations", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    return HttpResponse.json(
+      { id: 1, name: body.name ?? "ООО Новая", inn: body.inn ?? null, kind: body.kind ?? "customer" },
+      { status: 201 }
+    );
+  }),
+  http.patch("/api/admin/organizations/:id", async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(body, "name") && body.name === null) {
+      return HttpResponse.json({ detail: "Поле name не может быть null" }, { status: 422 });
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "kind") && body.kind === null) {
+      return HttpResponse.json({ detail: "Поле kind не может быть null" }, { status: 422 });
+    }
+    const inn = Object.prototype.hasOwnProperty.call(body, "inn") ? (body.inn as string | null) : "7705123456";
+    return HttpResponse.json({
+      id: Number(params.id),
+      name: (body.name as string) ?? "ООО «СтройГрад»",
+      inn,
+      kind: (body.kind as string) ?? "customer",
+    });
+  }),
+  http.post("/api/admin/organizations/:id/users", async ({ request, params }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    return HttpResponse.json(
+      {
+        id: 2,
+        email: body.email ?? "new@example.com",
+        org_id: Number(params.id),
+        org_role: body.org_role ?? "member",
+        is_superuser: false,
+        is_active: body.is_active ?? true,
+      },
+      { status: 201 }
+    );
+  }),
+  http.get("/api/admin/users", ({ request }) => {
+    const url = new URL(request.url);
+    const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+    const page = Number(url.searchParams.get("page") ?? 1) || 1;
+    const page_size = Number(url.searchParams.get("page_size") ?? 20) || 20;
+    const all = [
+      {
+        id: 1,
+        email: "a.petrov@stroygrad.ru",
+        org_id: 1,
+        org_name: "ООО «СтройГрад»",
+        org_role: "superadmin",
+        is_superuser: false,
+        is_active: true,
+      },
+    ];
+    const filtered = q
+      ? all.filter((u) => u.email.toLowerCase().includes(q) || (u.org_name ?? "").toLowerCase().includes(q))
+      : all;
+    const start = (page - 1) * page_size;
+    return HttpResponse.json({
+      items: filtered.slice(start, start + page_size),
+      total: filtered.length,
+      page,
+      page_size,
+    });
+  }),
+  http.patch("/api/admin/users/:id", async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(body, "org_role") && body.org_role === null) {
+      return HttpResponse.json({ detail: "Поле org_role не может быть null" }, { status: 422 });
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "is_active") && body.is_active === null) {
+      return HttpResponse.json({ detail: "Поле is_active не может быть null" }, { status: 422 });
+    }
+    return HttpResponse.json({
+      id: Number(params.id),
+      email: "a.petrov@stroygrad.ru",
+      org_id: 1,
+      org_role: (body.org_role as string) ?? "admin",
+      is_superuser: false,
+      is_active: (body.is_active as boolean) ?? true,
+    });
+  }),
+  http.post("/api/admin/users/:id/reset-password", ({ params }) =>
+    HttpResponse.json({ id: Number(params.id), email: "a.petrov@stroygrad.ru", password: "Xk7m-Pq9L-vf2Z" })
+  ),
+  http.post("/api/admin/organizations/:id/projects", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    return HttpResponse.json(
+      { project_id: body.project_id ?? 1, project_name: "ЖК Радуга", project_role: body.project_role ?? "customer" },
+      { status: 201 }
+    );
+  }),
+  http.delete("/api/admin/organizations/:id/projects/:projectId", () => new HttpResponse(null, { status: 204 })),
 ];

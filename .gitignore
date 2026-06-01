@@ -45,6 +45,7 @@ e2e/playwright-report/
 
 # Всякое локальное
 /backend/scripts/check_prostoy.py
+/tasks
 
 # Прячем superpowers/
 .superpowers/

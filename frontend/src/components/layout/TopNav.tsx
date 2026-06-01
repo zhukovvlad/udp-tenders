@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Building2, Users, Layers, FileSpreadsheet,
-  Settings, LogOut, Search, Bell, type LucideIcon,
+  Settings, LogOut, Search, Bell, ShieldCheck, type LucideIcon,
 } from "lucide-react";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
@@ -12,12 +12,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useCurrentUser, useLogout } from "@/hooks/useAuth";
 
-const NAV: { to: string; icon: LucideIcon; label: string; end?: boolean }[] = [
+const NAV: { to: string; icon: LucideIcon; label: string; end?: boolean; superuserOnly?: boolean }[] = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Дашборд", end: true },
   { to: "/projects",  icon: Building2,       label: "Объекты" },
   { to: "/suppliers", icon: Users,           label: "Поставщики" },
   { to: "/materials", icon: Layers,          label: "Номенклатура" },
   { to: "/reports",   icon: FileSpreadsheet, label: "Отчёты" },
+  { to: "/admin",     icon: ShieldCheck,     label: "Админ", superuserOnly: true },
 ];
 
 function getInitials(email: string): string {
@@ -36,13 +37,14 @@ export function TopNav() {
   const logout = useLogout();
 
   const initials = user ? getInitials(user.email) : "…";
+  const navItems = NAV.filter((item) => !item.superuserOnly || user?.is_superuser);
 
   return (
     <header className="sticky top-0 z-40 h-14 border-b border-border-subtle bg-surface/95 backdrop-blur">
       <div className="container-page flex h-full items-center gap-6">
         <Logo />
         <nav className="flex flex-1 flex-wrap items-center gap-0.5">
-          {NAV.map(({ to, icon: Icon, label, end }) => (
+          {navItems.map(({ to, icon: Icon, label, end }) => (
             <NavLink
               key={to}
               to={to}

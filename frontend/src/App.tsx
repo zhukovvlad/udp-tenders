@@ -17,6 +17,11 @@ import Review from "@/pages/Review";
 import SettingsPage from "@/pages/Settings";
 import SupplierPage from "@/pages/SupplierPage";
 import Suppliers from "@/pages/Suppliers";
+import AdminOrganizations from "@/pages/admin/AdminOrganizations";
+import AdminOrgCreate from "@/pages/admin/AdminOrgCreate";
+import AdminOrgDetail from "@/pages/admin/AdminOrgDetail";
+import AdminUserCreate from "@/pages/admin/AdminUserCreate";
+import AdminUsers from "@/pages/admin/AdminUsers";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,6 +43,18 @@ function ProtectedLayout() {
   const { data: user, isLoading, isError } = useCurrentUser();
   if (isLoading) return null;
   if (isError || !user) return <Navigate to="/login" replace />;
+  return <Outlet />;
+}
+
+/**
+ * Guard для маршрутов суперпользователя.
+ * Пока идёт загрузка — ничего не рендерим. Если пользователь не суперюзер —
+ * редирект на /dashboard (маршруты /admin/* недоступны не-суперюзерам).
+ */
+export function RequireSuperuser() {
+  const { data: user, isLoading } = useCurrentUser();
+  if (isLoading) return null;
+  if (!user || !user.is_superuser) return <Navigate to="/dashboard" replace />;
   return <Outlet />;
 }
 
@@ -71,6 +88,13 @@ export default function App() {
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/documents/:id" element={<Review />} />
+                <Route element={<RequireSuperuser />}>
+                  <Route path="/admin" element={<AdminOrganizations />} />
+                  <Route path="/admin/organizations/new" element={<AdminOrgCreate />} />
+                  <Route path="/admin/organizations/:id" element={<AdminOrgDetail />} />
+                  <Route path="/admin/organizations/:id/users/new" element={<AdminUserCreate />} />
+                  <Route path="/admin/users" element={<AdminUsers />} />
+                </Route>
                 <Route path="/upload" element={<Navigate to="/projects" replace />} />
                 <Route path="/material-classes" element={<Navigate to="/materials" replace />} />
                 <Route path="/reference-prices" element={<Navigate to="/projects" replace />} />

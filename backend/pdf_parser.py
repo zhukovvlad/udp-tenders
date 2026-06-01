@@ -1,12 +1,12 @@
 import base64
 import json
 import logging
-import os
 from datetime import date
 
 import httpx
 from sqlalchemy.orm import Session
 
+from config import settings
 from crud.documents import create_invoice
 from crud.materials import VALID_CALC_ROLES, get_or_create_material_class
 
@@ -106,9 +106,9 @@ SYSTEM_PROMPT = """Ты — парсер счетов-фактур и УПД (у
 """
 
 # Если переменная окружения задана пустой строкой ("OPENROUTER_BASE_URL=" в .env),
-# os.getenv вернёт "" — это даст relative URL "/chat/completions" и тихо сломает
+# settings вернёт "" — это даст relative URL "/chat/completions" и тихо сломает
 # httpx-вызовы. Используем "or", чтобы пустая строка считалась отсутствием значения.
-OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
+OPENROUTER_BASE_URL = settings.OPENROUTER_BASE_URL or "https://openrouter.ai/api/v1"
 OPENROUTER_URL = f"{OPENROUTER_BASE_URL.rstrip('/')}/chat/completions"
 
 
@@ -117,12 +117,12 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
     logger.info(f"[doc={document_id}] Старт парсинга, размер PDF: {len(file_data)} байт ({len(file_data)/1024:.1f} КБ)")
 
     try:
-        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_key = settings.OPENROUTER_API_KEY
         if not api_key:
             logger.error(f"[doc={document_id}] API-ключ OpenRouter не настроен")
             return {"error": "API-ключ OpenRouter не настроен"}
 
-        model = os.getenv("AI_MODEL", "anthropic/claude-sonnet-4.6")
+        model = settings.AI_MODEL
         logger.info(f"[doc={document_id}] Модель: {model}")
 
         pdf_base64 = base64.b64encode(file_data).decode("utf-8")
@@ -135,7 +135,7 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
         # Engine для парсинга PDF: "native" — модель видит PDF как изображения (для multimodal моделей),
         # "mistral-ocr" — OCR через Mistral ($2/1000 страниц, лучше для сканов и табличных бланков),
         # "pdf-text" — извлечение чистого текста (бесплатно, ломается на табличных формах СФ).
-        pdf_engine = os.getenv("PDF_ENGINE", "mistral-ocr")
+        pdf_engine = settings.PDF_ENGINE
 
         payload = {
             "model": model,
