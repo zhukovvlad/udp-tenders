@@ -29,7 +29,7 @@ router = APIRouter(prefix="/api/orgs", tags=["orgs"])
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
-    # Org admin может создавать только member или admin (не superadmin)
+    # Суперюзер org может назначить admin/member; admin org — только member (проверка через can_set_role)
     org_role: OrgRole = OrgRole.member
 
 

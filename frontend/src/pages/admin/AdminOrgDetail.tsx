@@ -182,59 +182,59 @@ function EditOrgForm({ org, onClose }: { org: AdminOrgDetailType; onClose: () =>
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edit-org-name">Название</Label>
-            <Input
-              id="edit-org-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-          </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="edit-org-name">Название</Label>
+        <Input
+          id="edit-org-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+        />
+      </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edit-org-inn">
-              ИНН <span className="text-fg-tertiary">(необязательно)</span>
-            </Label>
-            <Input id="edit-org-inn" value={inn} onChange={(e) => setInn(e.target.value)} />
-          </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="edit-org-inn">
+          ИНН <span className="text-fg-tertiary">(необязательно)</span>
+        </Label>
+        <Input id="edit-org-inn" value={inn} onChange={(e) => setInn(e.target.value)} />
+      </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label>Роль</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {KIND_OPTIONS.map(({ value, label, hint, icon: Icon }) => {
-                const active = kind === value;
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setKind(value)}
-                    className={cn(
-                      "rounded-md border p-3 text-left transition-colors",
-                      active ? "border-accent bg-accent/10" : "border-border-default hover:bg-surface-hover",
-                    )}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Icon size={16} className={active ? "text-accent" : "text-fg-secondary"} />
-                      <span className={cn("text-sm font-medium", active ? "text-accent" : "text-fg")}>{label}</span>
-                    </div>
-                    <p className={cn("mt-1 text-xs", active ? "text-accent" : "text-fg-secondary")}>{hint}</p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+      <div className="flex flex-col gap-1.5">
+        <Label>Роль</Label>
+        <div className="grid grid-cols-2 gap-2">
+          {KIND_OPTIONS.map(({ value, label, hint, icon: Icon }) => {
+            const active = kind === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setKind(value)}
+                className={cn(
+                  "rounded-md border p-3 text-left transition-colors",
+                  active ? "border-accent bg-accent/10" : "border-border-default hover:bg-surface-hover",
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <Icon size={16} className={active ? "text-accent" : "text-fg-secondary"} />
+                  <span className={cn("text-sm font-medium", active ? "text-accent" : "text-fg")}>{label}</span>
+                </div>
+                <p className={cn("mt-1 text-xs", active ? "text-accent" : "text-fg-secondary")}>{hint}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={onClose}>
-              Отмена
-            </Button>
-            <Button type="submit" loading={updateOrg.isPending} disabled={!name.trim()}>
-              Сохранить
-            </Button>
-          </div>
-        </form>
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="secondary" onClick={onClose}>
+          Отмена
+        </Button>
+        <Button type="submit" loading={updateOrg.isPending} disabled={!name.trim()}>
+          Сохранить
+        </Button>
+      </div>
+    </form>
   );
 }
 

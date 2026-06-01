@@ -190,10 +190,11 @@ export const handlers = [
   }),
   http.patch("/api/admin/organizations/:id", async ({ params, request }) => {
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const inn = Object.prototype.hasOwnProperty.call(body, "inn") ? (body.inn as string | null) : "7705123456";
     return HttpResponse.json({
       id: Number(params.id),
       name: (body.name as string) ?? "ООО «СтройГрад»",
-      inn: (body.inn as string | null) ?? "7705123456",
+      inn,
       kind: (body.kind as string) ?? "customer",
     });
   }),
