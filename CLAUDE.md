@@ -79,8 +79,8 @@ UDP/
 │   ├── alembic/          — migrations
 │   └── tests/            — unit/ + integration/ + fixtures/ + test_auth_coverage.py
 ├── frontend/src/
-│   ├── pages/            — Dashboard, Projects, ProjectPage, Suppliers, SupplierPage, Materials, Reports, Review, Settings, admin/ (superuser console: AdminOrganizations, AdminOrgCreate, AdminOrgDetail, AdminUserCreate, AdminUsers)
-│   ├── components/       — ui/, ui-domain/, layout/, dashboard/, projects/, invoices/, review/, admin/ (RoleBadges, PasswordField)
+│   ├── pages/            — Dashboard, Projects, ProjectPage, Suppliers, SupplierPage, Materials, Reports, Review, Settings, admin/ (superuser console: AdminOrganizations, AdminOrgCreate, AdminOrgDetail, AdminUserCreate, AdminUsers), handbook/ (Handbook, HandbookArticle, ConcreteAveragePrice, articles.ts)
+│   ├── components/       — ui/, ui-domain/, layout/, dashboard/, projects/, invoices/, review/, admin/ (RoleBadges, PasswordField), handbook/ (ConcreteAvgBreakdown)
 │   ├── lib/             — format, constants, utils, useDebounce, password (CSPRNG generatePassword + copyToClipboard)
 │   ├── services/         — api/ (axios), queries.ts (TanStack Query), queryKeys.ts
 │   └── types/            — TypeScript types per domain (common, project, invoice, materialClass, referencePrice, supplier, admin, auth)
@@ -95,7 +95,7 @@ UDP/
 
 ## Architecture principles (from route design doc)
 
-- **Entity-oriented navigation**: business entities first — Projects (Объекты), Suppliers (Поставщики), Materials (Номенклатура), Reports. No technical routes in main nav.
+- **Entity-oriented navigation**: business entities first — Projects (Объекты), Suppliers (Поставщики), Materials (Номенклатура), Reports, Handbook (Справочник). No technical routes in main nav.
 - **Three data axes**: any data point is reachable via Project, Supplier, or Material.
 - **Upload is a slide-over panel** inside Project page (`Sheet` from shadcn), not a separate route. `/upload` redirects to `/projects`.
 - **No `/documents` list in nav** — invoices are accessed through their parent entity or Reports.

@@ -130,7 +130,8 @@ UDP/
 │   │   ├── documents.py     — Document + Invoice
 │   │   ├── calculations.py  — avg_price, deviation, export-строки
 │   │   ├── suppliers.py     — Supplier + аналитика
-│   │   └── supplier_exclusions.py — исключения поставщиков из расчётов
+│   │   ├── supplier_exclusions.py — исключения поставщиков из расчётов
+│   │   └── admin.py         — суперпользовательский CRUD: орги, пользователи, матрица ролей
 │   ├── security.py          — JWT, хэширование паролей, CSRF
 │   ├── auth.py              — FastAPI-зависимости: get_current_user, роли
 │   ├── pdf_parser.py        — парсинг УПД через OpenRouter API
@@ -153,13 +154,22 @@ UDP/
 ├── frontend/src/
 │   ├── pages/               — Dashboard, Projects, ProjectPage,
 │   │                          Suppliers, SupplierPage,
-│   │                          Materials, MaterialPage, MaterialClasses,
-│   │                          ReferencePrices, Reports, Review,
-│   │                          Upload, Settings, LoginPage
+│   │                          Materials, MaterialPage,
+│   │                          Reports, Review, Settings, LoginPage,
+│   │                          admin/ (AdminOrganizations, AdminOrgDetail,
+│   │                            AdminOrgCreate, AdminUsers, AdminUserCreate),
+│   │                          handbook/ (Handbook, HandbookArticle,
+│   │                            ConcreteAveragePrice, articles.ts)
 │   ├── components/          — ui/, ui-domain/, layout/,
-│   │                          dashboard/, projects/, invoices/, review/
-│   └── services/            — API-клиент (axios), TanStack Query, queryKeys
+│   │                          dashboard/, projects/, invoices/, review/,
+│   │                          admin/, handbook/
+│   ├── services/            — API-клиент (axios), TanStack Query, queryKeys
+│   ├── lib/                 — format, constants, utils, useDebounce, password
+│   └── types/               — TypeScript-типы по доменам
 ├── docs/
+│   ├── TECH_DEBT.md         — отслеживаемый технический долг
+│   ├── testing.md           — архитектура тестов, гайд по добавлению
+│   ├── ui/routes-architecture.md — дизайн маршрутов и навигации
 │   └── setup/neon-setup.md  — инструкция по настройке БД
 └── justfile                 — команды разработки
 ```

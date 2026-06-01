@@ -9,8 +9,11 @@ export function formatPercent(value: number | null | undefined, withSign = false
   return `${sign}${value.toFixed(1)}%`;
 }
 
-export function formatNumber(value: number | null | undefined): string {
+export function formatNumber(value: number | null | undefined, fractionDigits?: number): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  if (fractionDigits !== undefined) {
+    return value.toLocaleString("ru-RU", { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits });
+  }
   return value.toLocaleString("ru-RU");
 }
 
