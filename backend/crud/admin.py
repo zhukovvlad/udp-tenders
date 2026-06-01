@@ -385,6 +385,8 @@ def link_project(
 
     role = project_role if project_role is not None else org.kind
     link = ProjectOrganization(org_id=org_id, project_id=project_id, project_role=role)
+    link.project = project
+    link.organization = org
     db.add(link)
     db.commit()
     logger.info("project_linked org_id=%s project_id=%s role=%s", org_id, project_id, role.value)
