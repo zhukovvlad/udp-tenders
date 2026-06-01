@@ -190,6 +190,12 @@ export const handlers = [
   }),
   http.patch("/api/admin/organizations/:id", async ({ params, request }) => {
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(body, "name") && body.name === null) {
+      return HttpResponse.json({ detail: "Поле name не может быть null" }, { status: 422 });
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "kind") && body.kind === null) {
+      return HttpResponse.json({ detail: "Поле kind не может быть null" }, { status: 422 });
+    }
     const inn = Object.prototype.hasOwnProperty.call(body, "inn") ? (body.inn as string | null) : "7705123456";
     return HttpResponse.json({
       id: Number(params.id),
@@ -241,6 +247,12 @@ export const handlers = [
   }),
   http.patch("/api/admin/users/:id", async ({ params, request }) => {
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(body, "org_role") && body.org_role === null) {
+      return HttpResponse.json({ detail: "Поле org_role не может быть null" }, { status: 422 });
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "is_active") && body.is_active === null) {
+      return HttpResponse.json({ detail: "Поле is_active не может быть null" }, { status: 422 });
+    }
     return HttpResponse.json({
       id: Number(params.id),
       email: "a.petrov@stroygrad.ru",

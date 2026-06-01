@@ -475,6 +475,10 @@ export function useCreateOrganization() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.admin.organizations });
     },
+    onError: (err: unknown) => {
+      const detail = (err as AxiosError<{ detail?: string }>)?.response?.data?.detail;
+      toast.error(typeof detail === "string" ? detail : err instanceof Error ? err.message : "Произошла ошибка");
+    },
   });
 }
 
@@ -500,6 +504,10 @@ export function useCreateAdminUser() {
       qc.invalidateQueries({ queryKey: qk.admin.organization(orgId) });
       qc.invalidateQueries({ queryKey: qk.admin.organizations });
       qc.invalidateQueries({ queryKey: ["admin", "users"] });
+    },
+    onError: (err: unknown) => {
+      const detail = (err as AxiosError<{ detail?: string }>)?.response?.data?.detail;
+      toast.error(typeof detail === "string" ? detail : err instanceof Error ? err.message : "Произошла ошибка");
     },
   });
 }
