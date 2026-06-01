@@ -74,7 +74,7 @@ def create_user(
             "Недостаточно прав для назначения этой роли",
         )
     if db.query(User).filter(User.email == body.email).first():
-        raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
+        raise HTTPException(status.HTTP_409_CONFLICT, "Email уже зарегистрирован")
 
     user = User(
         email=body.email,
