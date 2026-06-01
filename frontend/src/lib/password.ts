@@ -13,13 +13,23 @@ const GROUP_LEN = 4;
 /** Сгенерировать пароль вида «Xk7m-Pq9L-vf2Z» (CSPRNG). */
 export function generatePassword(): string {
   const total = GROUPS * GROUP_LEN;
-  const bytes = new Uint32Array(total);
   const cryptoObj = globalThis.crypto;
   if (!cryptoObj?.getRandomValues) {
     throw new Error("crypto.getRandomValues недоступен");
   }
-  cryptoObj.getRandomValues(bytes);
-  const chars = Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]);
+  const chars: string[] = [];
+  const alphabetLen = ALPHABET.length;
+  // Rejection sampling: исключаем modulo-bias.
+  // limit = предел, до которого [0, limit) равномерно делится на alphabetLen.
+  const limit = Math.floor(2 ** 32 / alphabetLen) * alphabetLen;
+  while (chars.length < total) {
+    const buf = new Uint32Array(total - chars.length);
+    cryptoObj.getRandomValues(buf);
+    for (const b of buf) {
+      if (b < limit) chars.push(ALPHABET[b % alphabetLen]);
+      if (chars.length === total) break;
+    }
+  }
   const groups: string[] = [];
   for (let i = 0; i < GROUPS; i++) {
     groups.push(chars.slice(i * GROUP_LEN, (i + 1) * GROUP_LEN).join(""));

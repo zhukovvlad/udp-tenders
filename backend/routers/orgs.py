@@ -133,8 +133,8 @@ def update_user(
         user = crud_admin.set_user_role_and_active(
             db,
             user_id,
-            org_role=body.org_role if body.org_role is not None else crud_admin._UNSET,
-            is_active=body.is_active if body.is_active is not None else crud_admin._UNSET,
+            org_role=body.org_role if body.org_role is not None else crud_admin.UNSET,
+            is_active=body.is_active if body.is_active is not None else crud_admin.UNSET,
         )
     except AdminError as e:
         raise HTTPException(e.status_code, e.detail) from e

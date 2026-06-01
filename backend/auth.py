@@ -125,9 +125,9 @@ def require_org_superadmin(current_user: User = Depends(get_current_user)) -> Us
     if current_user.is_superuser:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Суперюзеры управляют организациями через /api/admin")
     if current_user.org_role != OrgRole.superadmin:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Org superadmin required")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Требуется роль superadmin организации")
     if not current_user.org_id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "User has no organization")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "У пользователя нет организации")
     return current_user
 
 

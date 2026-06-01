@@ -125,9 +125,9 @@ def update_organization(
         org = crud_admin.update_organization(
             db,
             org_id,
-            name=fields.get("name", crud_admin._UNSET),
-            inn=fields.get("inn", crud_admin._UNSET),
-            kind=fields.get("kind", crud_admin._UNSET),
+            name=fields.get("name", crud_admin.UNSET),
+            inn=fields.get("inn", crud_admin.UNSET),
+            kind=fields.get("kind", crud_admin.UNSET),
         )
     except AdminError as e:
         _raise(e)
@@ -196,8 +196,8 @@ def update_user(
         user = crud_admin.set_user_role_and_active(
             db,
             user_id,
-            org_role=fields.get("org_role", crud_admin._UNSET),
-            is_active=fields.get("is_active", crud_admin._UNSET),
+            org_role=fields.get("org_role", crud_admin.UNSET),
+            is_active=fields.get("is_active", crud_admin.UNSET),
         )
     except AdminError as e:
         _raise(e)

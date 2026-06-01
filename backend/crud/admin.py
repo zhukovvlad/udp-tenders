@@ -21,7 +21,7 @@ from security import hash_password
 logger = logging.getLogger(__name__)
 
 # Sentinel: поле не передано в payload (отличается от явного None)
-_UNSET = object()
+UNSET = object()
 
 
 class AdminError(Exception):
@@ -131,18 +131,18 @@ def get_organization_detail(db: Session, org_id: int) -> dict | None:
 def update_organization(
     db: Session,
     org_id: int,
-    name=_UNSET,
-    inn=_UNSET,
-    kind=_UNSET,
+    name=UNSET,
+    inn=UNSET,
+    kind=UNSET,
 ) -> Organization:
     org = get_organization(db, org_id)
     if not org:
         raise AdminError(404, "Организация не найдена")
-    if name is not _UNSET:
+    if name is not UNSET:
         org.name = name
-    if inn is not _UNSET:
+    if inn is not UNSET:
         org.inn = inn or None
-    if kind is not _UNSET:
+    if kind is not UNSET:
         org.kind = kind
     db.commit()
     db.refresh(org)
@@ -277,8 +277,8 @@ def _count_other_active_superadmins_locked(db: Session, org_id: int, exclude_use
 def set_user_role_and_active(
     db: Session,
     user_id: int,
-    org_role=_UNSET,
-    is_active=_UNSET,
+    org_role=UNSET,
+    is_active=UNSET,
 ) -> User:
     """Сменить роль и/или статус активности пользователя (для /api/admin).
 
@@ -296,13 +296,13 @@ def set_user_role_and_active(
 
     # Снимаем роль superadmin (понижение)?
     losing_superadmin = (
-        org_role is not _UNSET
+        org_role is not UNSET
         and user.org_role == OrgRole.superadmin
         and org_role != OrgRole.superadmin
     )
     # Деактивируем активного superadmin'а?
     deactivating_superadmin = (
-        is_active is not _UNSET
+        is_active is not UNSET
         and is_active is False
         and user.org_role == OrgRole.superadmin
         and user.is_active
@@ -315,9 +315,9 @@ def set_user_role_and_active(
         if remaining == 0:
             raise AdminError(409, "Нельзя деактивировать или понизить последнего активного superadmin организации")
 
-    if org_role is not _UNSET:
+    if org_role is not UNSET:
         user.org_role = org_role
-    if is_active is not _UNSET:
+    if is_active is not UNSET:
         user.is_active = is_active
     db.commit()
     db.refresh(user)
