@@ -340,6 +340,8 @@ def reset_user_password(db: Session, user_id: int) -> tuple[User, str]:
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise AdminError(404, "Пользователь не найден")
+    if user.is_superuser:
+        raise AdminError(409, "Платформенный суперюзер не управляется через этот эндпоинт")
     new_password = secrets.token_urlsafe(12)
     user.password_hash = hash_password(new_password)
     db.commit()
