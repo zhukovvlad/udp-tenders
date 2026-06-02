@@ -917,13 +917,6 @@ export default function ProjectPage() {
             />
           </TabsContent>
 
-          {/* ────────── TAB: Ошибки ────────── */}
-          <TabsContent value="errors">
-            {projectId && (
-              <ErrorDocsTab docs={docsQ.data ?? []} />
-            )}
-          </TabsContent>
-
           <TabsContent value="suppliers" className="mt-6">
             {projectSuppliersQ.isLoading || supplierExclusionsQ.isLoading ? (
               <Skeleton className="h-32" />
@@ -1053,6 +1046,15 @@ export default function ProjectPage() {
                   </tbody>
                 </table>
               </Surface>
+            )}
+          </TabsContent>
+
+          {/* ────────── TAB: Ошибки ────────── */}
+          <TabsContent value="errors" className="mt-6">
+            {projectId && (
+              docsQ.isLoading
+                ? <Skeleton className="h-32" />
+                : <ErrorDocsTab docs={docsQ.data ?? []} />
             )}
           </TabsContent>
         </Tabs>
