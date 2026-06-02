@@ -164,6 +164,8 @@ export function useReparseDocument() {
     mutationFn: (docId: ID) => invoicesApi.reparseDocument(docId),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: qk.documents.detail(data.id) });
+      qc.invalidateQueries({ queryKey: qk.documents.list(data.project_id) });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
       toast.success("Документ переразобран");
     },
   });
