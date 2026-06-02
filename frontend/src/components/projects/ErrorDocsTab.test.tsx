@@ -23,29 +23,29 @@ const makeDoc = (overrides: Partial<DocumentSummary> = {}): DocumentSummary => (
 describe("ErrorDocsTab", () => {
   it("shows positive empty state when no error docs", () => {
     const cleanDoc = makeDoc({ status: "parsed", has_issues: false });
-    renderWithProviders(<ErrorDocsTab docs={[cleanDoc]} projectId={10} />);
+    renderWithProviders(<ErrorDocsTab docs={[cleanDoc]} />);
     expect(screen.getByText(/все документы разобраны успешно/i)).toBeInTheDocument();
   });
 
   it("renders error doc row with filename", () => {
-    renderWithProviders(<ErrorDocsTab docs={[makeDoc()]} projectId={10} />);
+    renderWithProviders(<ErrorDocsTab docs={[makeDoc()]} />);
     expect(screen.getByText("invoice-2024-01.pdf")).toBeInTheDocument();
   });
 
   it("renders has_issues doc with 'Проблемы в СФ' status", () => {
     const doc = makeDoc({ status: "parsed", has_issues: true });
-    renderWithProviders(<ErrorDocsTab docs={[doc]} projectId={10} />);
+    renderWithProviders(<ErrorDocsTab docs={[doc]} />);
     expect(screen.getByText("Проблемы в СФ")).toBeInTheDocument();
   });
 
   it("renders status=error doc with 'Ошибка парсинга' status", () => {
-    renderWithProviders(<ErrorDocsTab docs={[makeDoc()]} projectId={10} />);
+    renderWithProviders(<ErrorDocsTab docs={[makeDoc()]} />);
     expect(screen.getByText("Ошибка парсинга")).toBeInTheDocument();
   });
 
   it("opens delete confirmation dialog before deleting", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<ErrorDocsTab docs={[makeDoc()]} projectId={10} />);
+    renderWithProviders(<ErrorDocsTab docs={[makeDoc()]} />);
     await user.click(screen.getByRole("button", { name: /удалить/i }));
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
   });
@@ -59,7 +59,7 @@ describe("ErrorDocsTab", () => {
       }),
     );
     const user = userEvent.setup();
-    renderWithProviders(<ErrorDocsTab docs={[makeDoc()]} projectId={10} />);
+    renderWithProviders(<ErrorDocsTab docs={[makeDoc()]} />);
     await user.click(screen.getByRole("button", { name: /удалить/i }));
     await user.click(await screen.findByRole("button", { name: "Удалить" }));
     await waitFor(() => expect(onDelete).toHaveBeenCalledOnce());
@@ -74,7 +74,7 @@ describe("ErrorDocsTab", () => {
       }),
     );
     const user = userEvent.setup();
-    renderWithProviders(<ErrorDocsTab docs={[makeDoc({ id: 1 })]} projectId={10} />);
+    renderWithProviders(<ErrorDocsTab docs={[makeDoc({ id: 1 })]} />);
     await user.click(screen.getByRole("button", { name: /переразобрать/i }));
     await waitFor(() => expect(onReparse).toHaveBeenCalledWith("1"));
   });

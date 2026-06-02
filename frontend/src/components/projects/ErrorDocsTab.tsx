@@ -26,11 +26,9 @@ import { formatDate } from "@/lib/format";
 import { useReparseDocument, useDeleteDocument } from "@/services/queries";
 import { invoicesApi } from "@/services/api/invoices";
 import type { DocumentSummary } from "@/types/invoice";
-import type { ID } from "@/types/common";
 
 interface ErrorDocsTabProps {
   docs: DocumentSummary[];
-  projectId: ID;
 }
 
 export function ErrorDocsTab({ docs }: ErrorDocsTabProps) {
@@ -58,7 +56,7 @@ export function ErrorDocsTab({ docs }: ErrorDocsTabProps) {
   return (
     <>
       <div className="overflow-x-auto">
-        <Table className="min-w-[780px]">
+        <Table className="min-w-[780px] table-fixed">
           <TableHeader>
             <TableRow>
               <TableHead>Документ</TableHead>
@@ -142,7 +140,7 @@ export function ErrorDocsTab({ docs }: ErrorDocsTabProps) {
                               variant="ghost"
                               size="sm"
                               aria-label="Переразобрать"
-                              disabled={isReparsing}
+                              disabled={reparse.isPending}
                               onClick={() => reparse.mutate(doc.id)}
                             >
                               <RefreshCw
@@ -202,6 +200,7 @@ export function ErrorDocsTab({ docs }: ErrorDocsTabProps) {
                 if (pendingDelete) {
                   deleteDoc.mutate(pendingDelete.id, {
                     onSuccess: () => setPendingDelete(null),
+                    onError: () => setPendingDelete(null),
                   });
                 }
               }}
