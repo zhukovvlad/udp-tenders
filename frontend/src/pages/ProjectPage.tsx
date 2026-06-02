@@ -15,6 +15,7 @@ import { InvoiceTable } from "@/components/invoices/InvoiceTable";
 import { UploadSheet } from "@/components/projects/UploadSheet";
 import { DeviationChart } from "@/components/projects/DeviationChart";
 import { MonthlyTab } from "@/components/projects/MonthlyTab";
+import { ErrorDocsTab } from "@/components/projects/ErrorDocsTab";
 
 import {
   Tabs,
@@ -60,6 +61,7 @@ import {
   useProjectSuppliers,
   useSupplierExclusions,
   useToggleSupplierExclusion,
+  useDocuments,
 } from "@/services/queries";
 import { reportsApi } from "@/services/api/reports";
 import { useDebounce } from "@/lib/useDebounce";
@@ -178,6 +180,11 @@ export default function ProjectPage() {
     { enabled: hasValidProjectId },
   );
   const materialClassesQ = useMaterialClasses();
+
+  const docsQ = useDocuments(projectId ?? undefined);
+  const errorDocCount = (docsQ.data ?? []).filter(
+    (d) => d.status === "error" || d.has_issues,
+  ).length;
 
   // ── project suppliers ──
   const projectSuppliersQ = useProjectSuppliers(projectId);
@@ -388,6 +395,14 @@ export default function ProjectPage() {
               Поставщики{(projectSuppliersQ.data?.length ?? 0) > 0 ? ` · ${projectSuppliersQ.data!.length}` : ""}
             </TabsTrigger>
             <TabsTrigger value="monthly" data-testid="project-tab-monthly">По месяцам</TabsTrigger>
+            <TabsTrigger value="errors" data-testid="project-tab-errors">
+              Ошибки
+              {errorDocCount > 0 && (
+                <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold leading-none text-white">
+                  {errorDocCount}
+                </span>
+              )}
+            </TabsTrigger>
           </TabsList>
 
           {/* ────────── TAB: Обзор ────────── */}
@@ -900,6 +915,13 @@ export default function ProjectPage() {
                 setActiveTab("invoices");
               }}
             />
+          </TabsContent>
+
+          {/* ────────── TAB: Ошибки ────────── */}
+          <TabsContent value="errors">
+            {projectId && (
+              <ErrorDocsTab docs={docsQ.data ?? []} />
+            )}
           </TabsContent>
 
           <TabsContent value="suppliers" className="mt-6">
