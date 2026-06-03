@@ -214,10 +214,7 @@ def get_monthly_summary(project_id: int, db: Session = Depends(get_db)):
         )
         .join(Document, Invoice.document_id == Document.id)
         .join(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
-        .filter(
-            Document.project_id == project_id,
-            InvoiceItem.item_type == "material",
-        )
+        .filter(Document.project_id == project_id)
     )
     if excluded:
         q = q.filter(
