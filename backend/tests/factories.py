@@ -155,6 +155,6 @@ class CompensationCorridorFactory(_BaseFactory):
     class Meta:
         model = CompensationCorridor
 
-    project = factory.SubFactory(ProjectFactory)
-    material_class = factory.SubFactory(MaterialClassFactory)
+    project_id = factory.LazyAttribute(lambda _: ProjectFactory.create().id)
+    material_class_id = factory.LazyAttribute(lambda _: MaterialClassFactory.create().id)
     corridor_pct = 5.0

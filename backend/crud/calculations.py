@@ -7,6 +7,30 @@ from sqlalchemy.orm import Session
 from models import Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice
 
 
+def compute_compensation_per_unit(
+    avg_price: float,
+    ref_price: float | None,
+    corridor_pct: float | None,
+) -> float | None:
+    """Компенсация на единицу объёма (нелинейная: 0 внутри коридора, P−B(1±k) вне его).
+
+    Возвращает None если класс некомпенсируемый (corridor_pct is None) или нет базовой
+    цены (ref_price falsy). Возвращает 0.0 если цена внутри коридора.
+
+    Знак: + удорожание (доплата поставщику), − экономия (возврат заказчику).
+    """
+    if corridor_pct is None or not ref_price or ref_price <= 0:
+        return None
+    k = corridor_pct / 100.0
+    upper = ref_price * (1 + k)
+    lower = ref_price * (1 - k)
+    if avg_price > upper:
+        return round(avg_price - upper, 2)
+    if avg_price < lower:
+        return round(avg_price - lower, 2)
+    return 0.0
+
+
 def _months_in_range(start: date, end: date) -> list[tuple[date, date]]:
     """Split [start, end] into calendar month intervals clamped to the requested bounds."""
     months = []
@@ -98,6 +122,11 @@ def compute_calculations(
 
     # Names populated lazily per month and cached across months to avoid a full-table scan
     class_name_map: dict[int, str] = {}
+
+    # Corridor percentages per material class for this project (loaded once).
+    # Local import avoids a circular import at module load time.
+    from crud.compensation_corridors import get_corridor_map  # noqa: PLC0415
+    corridor_by_class: dict[int, float] = get_corridor_map(db, project_id)
 
     results: list[dict] = []
 
@@ -274,6 +303,14 @@ def compute_calculations(
                 deviation_pct = round((avg_price - ref_price) / ref_price * 100, 2)
                 deviation_amount = round((avg_price - ref_price) * qty, 2)
 
+            corridor_pct = corridor_by_class.get(cid)
+            compensation_per_unit = compute_compensation_per_unit(avg_price, ref_price, corridor_pct)
+            compensation_amount = (
+                round(compensation_per_unit * qty, 2)
+                if compensation_per_unit is not None
+                else None
+            )
+
             results.append({
                 "project_id": project_id,
                 "material_class_id": cid,
@@ -288,6 +325,9 @@ def compute_calculations(
                 "reference_price": ref_price,
                 "deviation_pct": deviation_pct,
                 "deviation_amount": deviation_amount,
+                "corridor_pct": corridor_pct,
+                "compensation_per_unit": compensation_per_unit,
+                "compensation_amount": compensation_amount,
             })
 
     return results
