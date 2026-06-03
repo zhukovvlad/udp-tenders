@@ -23,6 +23,12 @@ export interface DashboardCalculation {
   reference_price: number | null;
   deviation_pct: number | null;
   deviation_amount: number | null;
+  /** Процент коридора компенсации; null → класс некомпенсируемый. */
+  corridor_pct: number | null;
+  /** Компенсация на единицу объёма; null → не применимо, 0 → внутри коридора. */
+  compensation_per_unit: number | null;
+  /** Компенсация за период по классу (₽); null → не применимо. */
+  compensation_amount: number | null;
   material_total: number | null;
   /** Доставка + присадки (calc_role="additive") за период по классу, с НДС. */
   delivery_total: number | null;

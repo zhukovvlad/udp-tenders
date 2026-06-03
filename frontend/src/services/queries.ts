@@ -12,6 +12,7 @@ import { settingsApi } from "./api/settings";
 import { suppliersApi } from "./api/suppliers";
 import type { SupplierUpdateInput } from "./api/suppliers";
 import { adminApi } from "./api/admin";
+import { compensationCorridorsApi } from "./api/compensationCorridors";
 import { qk } from "./queryKeys";
 
 import type { ID } from "@/types/common";
@@ -445,6 +446,50 @@ export function useToggleSupplierExclusion(projectId: ID | null) {
       qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
       qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
       qc.invalidateQueries({ queryKey: qk.dashboard.monthly(projectId) });
+    },
+  });
+}
+
+// ========== Compensation corridors ==========
+
+export function useCompensationCorridors(projectId: ID | null) {
+  return useQuery({
+    queryKey: projectId
+      ? qk.compensationCorridors(projectId)
+      : ["compensation-corridors-disabled"],
+    queryFn: () => compensationCorridorsApi.list(projectId!),
+    enabled: projectId !== null,
+  });
+}
+
+export function useSetCorridor(projectId: ID | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ materialClassId, corridorPct }: { materialClassId: ID; corridorPct: number }) => {
+      if (!projectId) return Promise.resolve();
+      return compensationCorridorsApi.set(projectId, materialClassId, corridorPct);
+    },
+    onSuccess: () => {
+      if (!projectId) return;
+      qc.invalidateQueries({ queryKey: qk.compensationCorridors(projectId) });
+      qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
+      qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
+    },
+  });
+}
+
+export function useDeleteCorridor(projectId: ID | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (materialClassId: ID) => {
+      if (!projectId) return Promise.resolve();
+      return compensationCorridorsApi.remove(projectId, materialClassId);
+    },
+    onSuccess: () => {
+      if (!projectId) return;
+      qc.invalidateQueries({ queryKey: qk.compensationCorridors(projectId) });
+      qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
+      qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
     },
   });
 }

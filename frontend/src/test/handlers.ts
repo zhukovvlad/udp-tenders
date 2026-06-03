@@ -121,6 +121,15 @@ export const handlers = [
     new HttpResponse(null, { status: 204 })
   ),
 
+  // Compensation corridors
+  http.get("/api/projects/:projectId/compensation-corridors", () => HttpResponse.json([])),
+  http.put("/api/projects/:projectId/compensation-corridors/:materialClassId", () =>
+    HttpResponse.json({ material_class_id: 1, corridor_pct: 5 }),
+  ),
+  http.delete("/api/projects/:projectId/compensation-corridors/:materialClassId", () =>
+    new HttpResponse(null, { status: 204 }),
+  ),
+
   // Export
   http.get("/api/export/excel", () =>
     HttpResponse.arrayBuffer(new ArrayBuffer(8), {
