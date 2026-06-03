@@ -1,5 +1,5 @@
 """Unit-тесты helper-функций pdf_parser."""
-from pdf_parser import _calculate_completeness, _final_confidence
+from pdf_parser import _calculate_completeness, _final_confidence, _reconcile_totals
 
 
 class TestCalculateCompleteness:
@@ -62,3 +62,44 @@ class TestFinalConfidence:
 
     def test_invalid_model_conf_falls_back_to_completeness(self):
         assert _final_confidence("invalid", 0.7) == 0.7
+
+
+class TestReconcileTotals:
+    def test_matching_totals_ok(self):
+        items = [{"amount": 56000.0}, {"amount": 7500.0}]
+        ok, detail = _reconcile_totals(63500.0, items)
+        assert ok is True
+        assert detail == ""
+
+    def test_rounding_noise_within_tolerance_ok(self):
+        # 66 строк с покопеечным округлением: сумма расходится с печатным итогом на рубли
+        items = [{"amount": 73300.0} for _ in range(33)] + [{"amount": 7500.0} for _ in range(33)]
+        # фактическая сумма = 2 666 400; печатный итог на 50 ₽ больше (накопленное округление)
+        ok, detail = _reconcile_totals(2_666_450.0, items)
+        assert ok is True
+
+    def test_missing_rows_flags_incomplete(self):
+        # 60 из 66 строк: сумма сильно меньше печатного итога
+        items = [{"amount": 73300.0} for _ in range(30)] + [{"amount": 7500.0} for _ in range(30)]
+        # сумма = 2 424 000; печатный итог 2 472 124.99 → расхождение ~48k
+        ok, detail = _reconcile_totals(2_472_124.99, items)
+        assert ok is False
+        assert "Всего к оплате" in detail
+
+    def test_absent_doc_total_flags_incomplete(self):
+        ok, detail = _reconcile_totals(None, [{"amount": 100.0}])
+        assert ok is False
+        assert detail
+
+    def test_zero_doc_total_flags_incomplete(self):
+        ok, detail = _reconcile_totals(0.0, [{"amount": 100.0}])
+        assert ok is False
+
+    def test_empty_items_with_positive_total_flags(self):
+        ok, detail = _reconcile_totals(1000.0, [])
+        assert ok is False
+
+    def test_item_missing_amount_treated_as_zero(self):
+        # позиция без amount не должна ломать суммирование
+        ok, detail = _reconcile_totals(100.0, [{"amount": 100.0}, {"raw_name": "x"}])
+        assert ok is True

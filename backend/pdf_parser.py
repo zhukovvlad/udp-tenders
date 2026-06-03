@@ -137,9 +137,10 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
         # "pdf-text" — извлечение чистого текста (бесплатно, ломается на табличных формах СФ).
         pdf_engine = settings.PDF_ENGINE
 
+        max_tokens = settings.AI_MAX_TOKENS
         payload = {
             "model": model,
-            "max_tokens": 8192,
+            "max_tokens": max_tokens,
             "plugins": [
                 {
                     "id": "file-parser",
@@ -182,12 +183,20 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
 
         data = response.json()
         usage = data.get("usage", {})
+        completion_tokens = usage.get("completion_tokens", 0)
         logger.info(
             f"[doc={document_id}] OpenRouter ответ получен. "
             f"Токены: prompt={usage.get('prompt_tokens', '?')}, "
-            f"completion={usage.get('completion_tokens', '?')}, "
+            f"completion={completion_tokens}, "
             f"total={usage.get('total_tokens', '?')}"
         )
+
+        # Если completion_tokens достиг лимита — ответ скорее всего обрезан
+        if completion_tokens and completion_tokens >= max_tokens:
+            logger.error(
+                f"[doc={document_id}] Ответ модели ОБРЕЗАН: completion_tokens={completion_tokens} == max_tokens={max_tokens}. "
+                f"JSON будет невалидным. Увеличьте AI_MAX_TOKENS в .env."
+            )
 
         response_text = data["choices"][0]["message"]["content"]
         logger.debug(f"[doc={document_id}] Сырой ответ модели:\n{response_text}")
@@ -309,6 +318,36 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
     except Exception as e:
         logger.exception(f"[doc={document_id}] Неожиданная ошибка парсинга")
         return {"error": f"Ошибка парсинга: {str(e)}"}
+
+
+def _reconcile_totals(
+    doc_total_without_vat: float | None,
+    items: list[dict],
+    rel_tol: float = 0.001,
+    abs_tol: float = 1.0,
+) -> tuple[bool, str]:
+    """Сверяет сумму графы-5 (amount) извлечённых позиций с печатным итогом
+    «Всего к оплате» (без НДС) из документа.
+
+    Возвращает (True, "") если суммы сходятся в пределах допуска (накопленное
+    покопеечное округление по строкам). Возвращает (False, причина) если итог
+    не извлечён (модель не дошла до конца таблицы) или расходится сильнее допуска
+    (потеряны строки). Это детектор НЕПОЛНОГО разбора, не проверка арифметики НДС.
+    """
+    if not doc_total_without_vat or doc_total_without_vat <= 0:
+        return False, "В документе не извлечён итог «Всего к оплате» — разбор, вероятно, неполный (не дошёл до конца таблицы)"
+
+    items_sum = sum(float(item.get("amount") or 0) for item in items)
+    diff = abs(items_sum - doc_total_without_vat)
+    tolerance = max(abs_tol, doc_total_without_vat * rel_tol)
+
+    if diff > tolerance:
+        return False, (
+            f"Сумма позиций ({items_sum:.2f}) не сходится с «Всего к оплате» без НДС "
+            f"({doc_total_without_vat:.2f}), расхождение {diff:.2f} ₽ > допуска {tolerance:.2f} ₽ — "
+            f"часть строк таблицы, вероятно, не распознана"
+        )
+    return True, ""
 
 
 def _calculate_completeness(inv_data: dict) -> float:
