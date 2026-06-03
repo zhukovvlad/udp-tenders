@@ -62,6 +62,40 @@ def test_upload_invalid_json_marks_error(
     assert body["invoice_count"] == 0
 
 
+def test_upload_truncated_response_saves_no_invoices(
+    client, factories, sample_pdf_bytes, mock_openrouter,
+):
+    """finish_reason=length → parse returns error, no Invoice rows created."""
+    mock_openrouter.use_scenario("truncated_length")
+    project = factories.ProjectFactory.create()
+    response = client.post(
+        "/api/invoices/upload",
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
+        data={"project_id": project.id},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["invoice_count"] == 0
+
+
+def test_upload_incomplete_totals_saves_no_invoices(
+    client, factories, sample_pdf_bytes, mock_openrouter,
+):
+    """Item sum ≠ printed «Всего к оплате» → parse returns error, no Invoice rows created."""
+    mock_openrouter.use_scenario("incomplete_totals")
+    project = factories.ProjectFactory.create()
+    response = client.post(
+        "/api/invoices/upload",
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
+        data={"project_id": project.id},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["invoice_count"] == 0
+
+
 def test_get_document_404(client):
     response = client.get("/api/invoices/documents/9999")
     assert response.status_code == 404
