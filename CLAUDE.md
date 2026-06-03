@@ -80,7 +80,7 @@ UDP/
 │   └── tests/            — unit/ + integration/ + fixtures/ + test_auth_coverage.py
 ├── frontend/src/
 │   ├── pages/            — Dashboard, Projects, ProjectPage, Suppliers, SupplierPage, Materials, Reports, Review, Settings, admin/ (superuser console: AdminOrganizations, AdminOrgCreate, AdminOrgDetail, AdminUserCreate, AdminUsers), handbook/ (Handbook, HandbookArticle, ConcreteAveragePrice, articles.ts)
-│   ├── components/       — ui/, ui-domain/, layout/, dashboard/, projects/, invoices/, review/, admin/ (RoleBadges, PasswordField), handbook/ (ConcreteAvgBreakdown)
+│   ├── components/       — ui/, ui-domain/, layout/, dashboard/, projects/ (MonthlyTab, ErrorDocsTab, DeviationChart, UploadSheet, …), invoices/ (InvoiceTable, InvoiceKpiBar, …), review/, admin/ (RoleBadges, PasswordField), handbook/ (ConcreteAvgBreakdown)
 │   ├── lib/             — format, constants, utils, useDebounce, password (CSPRNG generatePassword + copyToClipboard)
 │   ├── services/         — api/ (axios), queries.ts (TanStack Query), queryKeys.ts
 │   └── types/            — TypeScript types per domain (common, project, invoice, materialClass, referencePrice, supplier, admin, auth)
@@ -98,7 +98,7 @@ UDP/
 - **Entity-oriented navigation**: business entities first — Projects (Объекты), Suppliers (Поставщики), Materials (Номенклатура), Reports, Handbook (Справочник). No technical routes in main nav.
 - **Three data axes**: any data point is reachable via Project, Supplier, or Material.
 - **Upload is a slide-over panel** inside Project page (`Sheet` from shadcn), not a separate route. `/upload` redirects to `/projects`.
-- **No `/documents` list in nav** — invoices are accessed through their parent entity or Reports.
+- **No `/documents` list in nav** — invoices are accessed through their parent entity or Reports. Проблемные документы доступны через таб «Ошибки» в `ProjectPage` (`ErrorDocsTab.tsx`): таб всегда виден, фильтрует `useDocuments(projectId)` по `status === "error" || has_issues`, при ошибках — красный бейдж со счётчиком, иначе позитивная accent-карточка. Действия по строке: открыть PDF, перейти к разбору (`/documents/:id`), переразобрать (`useReparseDocument`), удалить (`useDeleteDocument` + `AlertDialog`). Стиль повторяет `InvoiceTable`.
 - **Reference prices** (базовые цены) live inside Project card (tab) and Material card — no separate route.
 - **Progressive disclosure** — AI confidence percentages are hidden in tooltips; the document card is where the technical layer fully surfaces.
 
@@ -119,6 +119,8 @@ User → RefreshTokens (many, revokable, 14 days)
 `Organization.kind` (`customer`/`contractor`, реюзает enum `ProjectRole`, `SqlEnum(native_enum=False)`, NOT NULL, `server_default='customer'`) — роль организации по умолчанию. При выдаче доступа к проекту через `/api/admin/.../projects` `ProjectOrganization.project_role` берётся из `organization.kind`, но переопределяется явным значением в теле запроса. Миграция: `2026_05_30_1200-a7b8c9d0e1f2_add_organization_kind` (VARCHAR+CHECK, `server_default` заполняет существующие строки).
 
 `GET /dashboard/calculations` вычисляет данные на лету (нет кеша) через `compute_calculations()` из `crud.calculations` — единый источник истины для аналитики цен. `compute_full_deviation()` делегирует в неё же.
+
+`GET /dashboard/monthly-summary?project_id=` (роутер `dashboard.py`) питает таб «По месяцам» в `ProjectPage` (`MonthlyTab.tsx`). **Оборот по месяцам = полная стоимость всех позиций СФ с НДС** — `SUM(item.amount + COALESCE(item.vat_amount, item.amount * COALESCE(invoice.vat_rate, 20.0)/100))` по **всем** `item_type` (material + delivery + прочее), без фильтра по типу. Это намеренно отличается от методологии avg_price (которая работает только с `material`-позициями): здесь нужен полный оборот по счёту, как он выставлен поставщиком. Применяет тот же фильтр исключённых поставщиков (`excluded_supplier_ids`).
 
 Все три функции расчёта (`compute_calculations`, `compute_full_deviation`, `compute_export_rows`) принимают параметр `excluded_supplier_ids: set[int] | None`. Если передан непустой set, инвойсы исключённых поставщиков фильтруются через `or_(Invoice.supplier_id.is_(None), Invoice.supplier_id.notin_(excluded))` — инвойсы без поставщика всегда включаются. `get_project_summary` в `dashboard.py` также применяет этот фильтр ко всем агрегатам (оборот, объём м³, кол-во счетов).
 
