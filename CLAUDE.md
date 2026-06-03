@@ -124,6 +124,10 @@ User → RefreshTokens (many, revokable, 14 days)
 
 `GET /api/export/excel?project_id=&period_start=&period_end=&material_class_id=` генерирует openpyxl-файл через `compute_export_rows()` из `crud.calculations` → `routers/export.py`. Возвращает `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`. **16 колонок (A–P):** дата, номер СФ, поставщик, объём м³, базовая цена, ставка НДС, материал/доставка/прочее без НДС, итого без НДС (формула), те же три с НДС (формулы), итого с НДС (формула), откл. % и откл. ₽ (формулы). Месячные строки с агрегатами через SUMPRODUCT-формулы, разделители между месяцами, grand total на класс. Кнопка «Экспорт» в `ProjectPage.tsx` использует `periodStart`/`periodEnd` напрямую (не debounced) — правильно для действия по кнопке.
 
+### Parse completeness guard
+
+`pdf_parser.parse_invoice_pdf` отклоняет разбор (возвращает `{"error": ...}`, строки не сохраняются) в двух случаях: (1) `finish_reason == "length"` в ответе API — модель упёрлась в лимит токенов и ответ обрезан; (2) `_reconcile_totals` обнаруживает расхождение между `SUM(item.amount)` и извлечённым из документа полем `doc_total_without_vat` («Всего к оплате» без НДС) сверх допуска `max(1 ₽, 0.1%)`. Это предотвращает тихое сохранение неполного счёта (например, 60 из 66 строк) под высоким confidence. `AI_MAX_TOKENS=64000` — верхний предел вывода claude-sonnet-4.6, чтобы длинные СФ помещались в один ответ. Ещё не реализовано: постраничный chunking для СФ на 100+ строк и сжатие OCR-промпта — см. TECH_DEBT.md.
+
 ### Методология расчёта avg_price
 
 Средняя цена (`avg_price`) вычисляется **с НДС** — чтобы сравнение с базовыми ценами было корректным (базовые цены вводятся пользователем тоже с НДС).
