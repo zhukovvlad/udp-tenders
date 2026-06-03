@@ -96,6 +96,8 @@ _COLUMNS = [
     ("Итого с НДС, ₽/м³",           18, _FMT_MONEY,      "right"),   # N 14  formula =K+L+M
     ("Откл. от плана, %",            16, _FMT_PCT,        "right"),   # O 15  formula
     ("Откл. от плана, ₽",           18, _FMT_MONEY,      "right"),   # P 16  formula
+    ("Коридор, %",                  11, _FMT_PCT_RATE,  "center"),  # Q 17  static (decimal)
+    ("Компенсация, ₽",              18, _FMT_MONEY,      "right"),   # R 18  Python value
 ]
 _N_COLS = len(_COLUMNS)
 
@@ -117,6 +119,7 @@ def _write_grand_total_row(
     data_font: Font,
     data_ranges: list[tuple[int, int]],
     dev_total_py: float,
+    comp_total: float | None = None,
 ) -> None:
     """Write the class-level grand total row across multiple non-contiguous month data ranges."""
     r = row_num
@@ -154,6 +157,9 @@ def _write_grand_total_row(
     denom = "+".join(f"SUMPRODUCT((E{s}:E{e}>0)*E{s}:E{e}*D{s}:D{e})" for s, e in data_ranges)
     _c(15, f'=IFERROR(P{r}/({denom}),"")', font=_dev_font(dev_total_py, bold=True, size=12), fmt=_FMT_PCT)
 
+    _c(17, None)  # Коридор % — not aggregated at class level
+    _c(18, comp_total, font=_dev_font(comp_total or 0, bold=True, size=12), fmt=_FMT_MONEY)
+
     ws.row_dimensions[r].height = 24
 
 
@@ -162,6 +168,8 @@ def _write_class_section(
     class_name: str,
     rows: list[dict],
     start_row: int,
+    comp_by_class_month: dict[tuple[int, int, int], dict] | None = None,
+    material_class_id: int | None = None,
 ) -> int:
     """Write one material-class section with per-month breakdown.
 
@@ -264,6 +272,13 @@ def _write_class_section(
         _hc(16, f'=IF(COUNT(P{s}:P{e})=0,"",SUM(P{s}:P{e}))', font=_dev_font(month_dev, bold=True), fmt=_FMT_MONEY)
         _hc(15, f'=IFERROR(P{rh}/SUMPRODUCT((E{s}:E{e}>0)*E{s}:E{e}*D{s}:D{e}),"")',
             font=_dev_font(month_dev, bold=True), fmt=_FMT_PCT)
+        # Columns Q/R: corridor % and monthly compensation (Python values, nonlinear → not formulaic)
+        month_key = (material_class_id, year, month)
+        month_comp = (comp_by_class_month or {}).get(month_key, {})
+        _corridor = month_comp.get("corridor_pct")
+        _comp_amt = month_comp.get("compensation_amount")
+        _hc(17, (_corridor / 100.0) if _corridor is not None else None, fmt=_FMT_PCT_RATE)
+        _hc(18, _comp_amt, font=_dev_font(_comp_amt or 0, bold=True), fmt=_FMT_MONEY)
         ws.row_dimensions[rh].height = 18
         cur += 1
 
@@ -337,6 +352,15 @@ def _write_class_section(
 
     # ── Class grand total ────────────────────────────────────────────────────
     grand_dev = sum(r["deviation_amount"] for r in rows if r["deviation_amount"] is not None)
+    class_comp_total: float | None = None
+    if comp_by_class_month and material_class_id is not None:
+        monthly_comp_amounts = [
+            v["compensation_amount"]
+            for (cid, _y, _m), v in comp_by_class_month.items()
+            if cid == material_class_id and v["compensation_amount"] is not None
+        ]
+        if monthly_comp_amounts:
+            class_comp_total = sum(monthly_comp_amounts)
     _write_grand_total_row(
         ws, cur,
         label=f"ИТОГО по {class_name}",
@@ -345,6 +369,7 @@ def _write_class_section(
         data_font=_font(bold=True, color="1F4E79", size=12),
         data_ranges=data_ranges,
         dev_total_py=grand_dev,
+        comp_total=class_comp_total,
     )
     cur += 1
 
@@ -374,6 +399,20 @@ def export_excel(
         db, project_id, period_start, period_end, material_class_id,
         excluded_supplier_ids=excluded or None,
     )
+
+    from crud.calculations import compute_calculations  # noqa: PLC0415
+    monthly_rows = compute_calculations(
+        db, project_id, period_start, period_end, material_class_id,
+        excluded_supplier_ids=excluded or None,
+    )
+    # (class_id, year, month) → {"corridor_pct": float|None, "compensation_amount": float|None}
+    comp_by_class_month: dict[tuple[int, int, int], dict] = {
+        (m["material_class_id"], m["period_start"].year, m["period_start"].month): {
+            "corridor_pct": m["corridor_pct"],
+            "compensation_amount": m["compensation_amount"],
+        }
+        for m in monthly_rows
+    }
 
     # Actual displayed period from data
     if rows:
@@ -435,13 +474,23 @@ def export_excel(
         )
     else:
         for class_name, group in groupby(rows, key=lambda r: r["material_class_name"]):
-            cur = _write_class_section(ws, class_name, list(group), cur)
+            group_rows = list(group)
+            cur = _write_class_section(
+                ws, class_name, group_rows, cur,
+                comp_by_class_month=comp_by_class_month,
+                material_class_id=group_rows[0]["material_class_id"],
+            )
 
     # ── Footer ────────────────────────────────────────────────────────────────
     footer_cell = ws.cell(
         row=cur + 1,
         column=1,
-        value="* Стоимость доставки и прочих включений распределена пропорционально объёму м³ каждого класса материала в рамках каждой СФ.",
+        value=(
+            "* Стоимость доставки и прочих включений распределена пропорционально объёму м³ "
+            "каждого класса материала в рамках каждой СФ.  "
+            "** Компенсация считается от средней цены за месяц и показана в строках месяца и итога; "
+            "по отдельным СФ не определяется."
+        ),
     )
     footer_cell.font = _font(color="888888", size=8)
     footer_cell.alignment = _align(h="left", wrap=True)
