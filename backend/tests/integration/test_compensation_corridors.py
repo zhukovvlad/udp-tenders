@@ -99,3 +99,48 @@ def test_compute_calculations_no_corridor_means_none(db_session, factories):
     assert row["corridor_pct"] is None
     assert row["compensation_per_unit"] is None
     assert row["compensation_amount"] is None
+
+
+def test_put_and_list_corridor_via_api(client, db_session, factories):
+    project = ProjectFactory.create()
+    mc = MaterialClassFactory.create(material_type="concrete", name="В25")
+
+    r = client.put(
+        f"/api/projects/{project.id}/compensation-corridors/{mc.id}",
+        json={"corridor_pct": 5.0},
+    )
+    assert r.status_code == 200
+
+    r = client.get(f"/api/projects/{project.id}/compensation-corridors")
+    assert r.status_code == 200
+    body = r.json()
+    assert body == [
+        {
+            "material_class_id": mc.id,
+            "material_class_name": "В25",
+            "material_type": "concrete",
+            "corridor_pct": 5.0,
+        }
+    ]
+
+
+def test_put_corridor_rejects_out_of_range(client, db_session, factories):
+    project = ProjectFactory.create()
+    mc = MaterialClassFactory.create(material_type="concrete", name="В25")
+    r = client.put(
+        f"/api/projects/{project.id}/compensation-corridors/{mc.id}",
+        json={"corridor_pct": 150.0},
+    )
+    assert r.status_code == 422
+
+
+def test_delete_corridor_via_api(client, db_session, factories):
+    project = ProjectFactory.create()
+    mc = MaterialClassFactory.create(material_type="concrete", name="В25")
+    client.put(
+        f"/api/projects/{project.id}/compensation-corridors/{mc.id}",
+        json={"corridor_pct": 5.0},
+    )
+    r = client.delete(f"/api/projects/{project.id}/compensation-corridors/{mc.id}")
+    assert r.status_code == 204
+    assert client.get(f"/api/projects/{project.id}/compensation-corridors").json() == []

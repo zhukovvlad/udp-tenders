@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from crud.compensation_corridors import delete_corridor, get_corridors, set_corridor
 from crud.projects import create_project, delete_project, get_projects, update_project
 from crud.supplier_exclusions import get_excluded_supplier_ids, set_supplier_excluded
 from database import get_db
-from models import Document, Invoice, Project, Supplier
+from models import Document, Invoice, MaterialClass, Project, Supplier
 
 router = APIRouter()
 
@@ -18,6 +19,10 @@ class ProjectCreate(BaseModel):
 
 class ExclusionCreate(BaseModel):
     reason: str | None = None
+
+
+class CorridorUpsert(BaseModel):
+    corridor_pct: float = Field(ge=0, le=100)
 
 
 @router.get("")
@@ -102,5 +107,54 @@ def remove_supplier_exclusion(
     if not db.query(Project).filter(Project.id == project_id).first():
         raise HTTPException(status_code=404, detail="Проект не найден")
     set_supplier_excluded(db, project_id, supplier_id, excluded=False)
+    return Response(status_code=204)
+
+
+@router.get("/{project_id}/compensation-corridors")
+def list_compensation_corridors(project_id: int, db: Session = Depends(get_db)):
+    """Коридоры компенсации проекта с именами классов материалов."""
+    if not db.query(Project).filter(Project.id == project_id).first():
+        raise HTTPException(status_code=404, detail="Проект не найден")
+    corridors = get_corridors(db, project_id)
+    class_ids = [c.material_class_id for c in corridors]
+    name_map = {
+        mc.id: (mc.name, mc.material_type)
+        for mc in db.query(MaterialClass).filter(MaterialClass.id.in_(class_ids)).all()
+    }
+    return [
+        {
+            "material_class_id": c.material_class_id,
+            "material_class_name": name_map.get(c.material_class_id, ("?", "?"))[0],
+            "material_type": name_map.get(c.material_class_id, ("?", "?"))[1],
+            "corridor_pct": c.corridor_pct,
+        }
+        for c in corridors
+    ]
+
+
+@router.put("/{project_id}/compensation-corridors/{material_class_id}")
+def upsert_compensation_corridor(
+    project_id: int,
+    material_class_id: int,
+    data: CorridorUpsert,
+    db: Session = Depends(get_db),
+):
+    if not db.query(Project).filter(Project.id == project_id).first():
+        raise HTTPException(status_code=404, detail="Проект не найден")
+    if not db.query(MaterialClass).filter(MaterialClass.id == material_class_id).first():
+        raise HTTPException(status_code=404, detail="Класс материала не найден")
+    set_corridor(db, project_id, material_class_id, data.corridor_pct)
+    return {"material_class_id": material_class_id, "corridor_pct": data.corridor_pct}
+
+
+@router.delete("/{project_id}/compensation-corridors/{material_class_id}", status_code=204)
+def delete_compensation_corridor(
+    project_id: int,
+    material_class_id: int,
+    db: Session = Depends(get_db),
+):
+    if not db.query(Project).filter(Project.id == project_id).first():
+        raise HTTPException(status_code=404, detail="Проект не найден")
+    delete_corridor(db, project_id, material_class_id)
     return Response(status_code=204)
 
