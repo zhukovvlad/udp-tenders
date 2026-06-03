@@ -16,7 +16,7 @@ Target user: тендерный менеджер (procurement/tender manager) in
 | Auth | pyjwt (HS256), pwdlib[argon2] — httpOnly cookies, double-submit CSRF, refresh token rotation |
 | Database | PostgreSQL via **Neon** (serverless) — `postgresql+psycopg://` DSN |
 | File storage | MinIO (S3-compatible), local binary `minio.exe` |
-| PDF parsing | OpenRouter API (`OPENROUTER_API_KEY`) — Mistral OCR / Claude Vision |
+| PDF parsing | OpenRouter API (`OPENROUTER_API_KEY`) — Claude Vision (`PDF_ENGINE=native`, default); `mistral-ocr` доступен но даёт нестабильные результаты на длинных табличных СФ (66+ строк) |
 | Frontend | React 18, TypeScript, Vite, shadcn/ui, Tailwind CSS v4, Recharts |
 | State / data | TanStack Query v5, axios |
 | Testing (BE) | pytest 8, pytest-asyncio (auto mode), respx, factory_boy |
@@ -126,7 +126,7 @@ User → RefreshTokens (many, revokable, 14 days)
 
 ### Parse completeness guard
 
-`pdf_parser.parse_invoice_pdf` отклоняет разбор (возвращает `{"error": ...}`, строки не сохраняются) в двух случаях: (1) `finish_reason == "length"` в ответе API — модель упёрлась в лимит токенов и ответ обрезан; (2) `_reconcile_totals` обнаруживает расхождение между `SUM(item.amount)` и извлечённым из документа полем `doc_total_without_vat` («Всего к оплате» без НДС) сверх допуска `max(1 ₽, 0.1%)`. Это предотвращает тихое сохранение неполного счёта (например, 60 из 66 строк) под высоким confidence. `AI_MAX_TOKENS=64000` — верхний предел вывода claude-sonnet-4.6, чтобы длинные СФ помещались в один ответ. Ещё не реализовано: постраничный chunking для СФ на 100+ строк и сжатие OCR-промпта — см. TECH_DEBT.md.
+`pdf_parser.parse_invoice_pdf` отклоняет разбор (возвращает `{"error": ...}`, строки не сохраняются) в двух случаях: (1) `finish_reason == "length"` в ответе API — модель упёрлась в лимит токенов и ответ обрезан; (2) `_reconcile_totals` обнаруживает расхождение между `SUM(item.amount)` и извлечённым из документа полем `doc_total_without_vat` («Всего к оплате» без НДС) сверх допуска `max(1 ₽, 0.1%)`. Это предотвращает тихое сохранение неполного счёта (например, 60 из 66 строк) под высоким confidence. `AI_MAX_TOKENS=64000` — верхний предел вывода claude-sonnet-4.6. Промпт содержит обязательный шаг самопроверки: модель должна сверить `SUM(amount)` с `doc_total_without_vat` и найти пропущенные строки перед закрытием JSON. **`PDF_ENGINE=native` (текущий дефолт)**: Claude смотрит на PDF как на изображения, prompt ~10k токенов — стабильнее на длинных СФ. `mistral-ocr` даёт ~24k токенов промпта (повторяющиеся шапки страниц) и нестабилен на СФ с 60+ одинаковыми строками — модель пропускает или дублирует строки даже при `finish_reason=stop`. Ещё не реализовано: постраничный chunking для СФ на 100+ строк — см. TECH_DEBT.md.
 
 ### Методология расчёта avg_price
 
