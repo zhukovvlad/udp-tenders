@@ -9,6 +9,7 @@ import factory
 from factory.alchemy import SQLAlchemyModelFactory
 
 from models import (
+    CompensationCorridor,
     Document,
     Invoice,
     InvoiceItem,
@@ -148,3 +149,12 @@ class InvoiceItemFactory(_BaseFactory):
     # рассинхронизацию при override quantity. Тесты могут передать amount явно.
     amount = factory.LazyAttribute(lambda obj: obj.quantity * obj.unit_price)
     vat_amount = factory.LazyAttribute(lambda obj: round(obj.amount * 0.20, 2))
+
+
+class CompensationCorridorFactory(_BaseFactory):
+    class Meta:
+        model = CompensationCorridor
+
+    project = factory.SubFactory(ProjectFactory)
+    material_class = factory.SubFactory(MaterialClassFactory)
+    corridor_pct = 5.0
