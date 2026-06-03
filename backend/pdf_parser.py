@@ -187,14 +187,24 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
         data = response.json()
         usage = data.get("usage", {})
         completion_tokens = usage.get("completion_tokens", 0)
+        finish_reason = (data.get("choices") or [{}])[0].get("finish_reason")
         logger.info(
             f"[doc={document_id}] OpenRouter ответ получен. "
             f"Токены: prompt={usage.get('prompt_tokens', '?')}, "
             f"completion={completion_tokens}, "
-            f"total={usage.get('total_tokens', '?')}"
+            f"total={usage.get('total_tokens', '?')}, "
+            f"finish_reason={finish_reason}"
         )
 
-        # Если completion_tokens достиг лимита — ответ скорее всего обрезан
+        # finish_reason="length" → модель упёрлась в лимит токенов, ответ обрезан.
+        if finish_reason == "length":
+            logger.error(
+                f"[doc={document_id}] Ответ ОБРЕЗАН по лимиту токенов (finish_reason=length). "
+                f"Часть позиций потеряна. Увеличьте AI_MAX_TOKENS."
+            )
+            return {"error": "Ответ модели обрезан по лимиту токенов — часть позиций счёта потеряна. Попробуйте повторить разбор."}
+
+        # Резервный guard: completion_tokens достиг лимита (модель не вернула finish_reason)
         if completion_tokens and completion_tokens >= max_tokens:
             logger.error(
                 f"[doc={document_id}] Ответ модели ОБРЕЗАН: completion_tokens={completion_tokens} == max_tokens={max_tokens}. "
@@ -297,6 +307,18 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
             except (ValueError, TypeError) as e:
                 logger.error(f"[doc={document_id}] СФ №{inv_number}: некорректная дата '{inv_data.get('date')}': {e}")
                 continue
+
+            doc_total = inv_data.get("doc_total_without_vat")
+            try:
+                doc_total = float(doc_total) if doc_total is not None else None
+            except (TypeError, ValueError):
+                doc_total = None
+            reconciled, reconcile_detail = _reconcile_totals(doc_total, items)
+            if not reconciled:
+                logger.error(
+                    f"[doc={document_id}] СФ №{inv_number}: разбор НЕПОЛНЫЙ — {reconcile_detail}"
+                )
+                return {"error": f"Разбор счёта №{inv_number} неполный: {reconcile_detail}"}
 
             invoice = create_invoice(
                 db,
