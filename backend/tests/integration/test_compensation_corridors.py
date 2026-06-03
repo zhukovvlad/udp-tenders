@@ -144,3 +144,21 @@ def test_delete_corridor_via_api(client, db_session, factories):
     r = client.delete(f"/api/projects/{project.id}/compensation-corridors/{mc.id}")
     assert r.status_code == 204
     assert client.get(f"/api/projects/{project.id}/compensation-corridors").json() == []
+
+
+def test_dashboard_calculations_exposes_compensation(client, db_session, factories):
+    project = ProjectFactory.create()
+    mc = MaterialClassFactory.create(material_type="concrete", name="В25")
+    ReferencePriceFactory.create(
+        project=project, material_class=mc, price=100.0,
+        period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
+    )
+    CompensationCorridorFactory.create(project_id=project.id, material_class_id=mc.id, corridor_pct=5.0)
+    _make_invoice_with_item(db_session, project, mc, qty=2.0, unit_price=110.0, inv_date=date(2026, 3, 15))
+
+    r = client.get(f"/api/dashboard/calculations?project_id={project.id}")
+    assert r.status_code == 200
+    row = next(x for x in r.json() if x["material_class_id"] == mc.id)
+    assert row["corridor_pct"] == 5.0
+    assert row["compensation_per_unit"] == 5.0
+    assert row["compensation_amount"] == 10.0

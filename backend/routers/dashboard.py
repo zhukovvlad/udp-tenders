@@ -188,6 +188,9 @@ def list_calculations(
             "reference_price": r["reference_price"],
             "deviation_pct": r["deviation_pct"],
             "deviation_amount": r["deviation_amount"],
+            "corridor_pct": r["corridor_pct"],
+            "compensation_per_unit": r["compensation_per_unit"],
+            "compensation_amount": r["compensation_amount"],
         }
         for r in rows
     ]
