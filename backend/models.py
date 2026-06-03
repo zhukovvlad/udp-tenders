@@ -214,6 +214,29 @@ class ProjectSupplierExclusion(Base):
     created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
 
 
+class CompensationCorridor(Base):
+    """Коридор компенсации: допуск (%) вокруг базовой цены, в пределах которого
+    удорожание/удешевление не компенсируется. Задаётся per (проект × класс материала),
+    не периодичен (действует весь срок договора).
+
+    Семантика: нет строки → класс некомпенсируемый; corridor_pct=0 → компенсируется
+    любое отклонение (нет мёртвой зоны); corridor_pct=X → допуск ±X%.
+    """
+    __tablename__ = "compensation_corridors"
+
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    material_class_id = Column(
+        Integer, ForeignKey("material_classes.id", ondelete="CASCADE"), primary_key=True
+    )
+    corridor_pct = Column(Float, nullable=False)  # 5.0 = ±5%; хранится в процентах, не в долях
+    created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
+    updated_at = Column(
+        DateTime,
+        server_default=sa_text("(now() AT TIME ZONE 'utc')"),
+        onupdate=lambda: datetime.now(UTC).replace(tzinfo=None),
+    )
+
+
 class Invoice(Base):
     __tablename__ = "invoices"
 
