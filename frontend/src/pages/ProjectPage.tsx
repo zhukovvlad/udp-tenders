@@ -16,6 +16,7 @@ import { UploadSheet } from "@/components/projects/UploadSheet";
 import { DeviationChart } from "@/components/projects/DeviationChart";
 import { MonthlyTab } from "@/components/projects/MonthlyTab";
 import { ErrorDocsTab } from "@/components/projects/ErrorDocsTab";
+import { CorridorsTab } from "@/components/projects/CorridorsTab";
 
 import {
   Tabs,
@@ -391,6 +392,7 @@ export default function ProjectPage() {
               Счета{invoices.length > 0 ? ` · ${invoices.length}` : ""}
             </TabsTrigger>
             <TabsTrigger value="prices" data-testid="project-tab-prices">Базовые цены</TabsTrigger>
+            <TabsTrigger value="corridors" data-testid="project-tab-corridors">Коридоры</TabsTrigger>
             <TabsTrigger value="suppliers" data-testid="project-tab-suppliers">
               Поставщики{(projectSuppliersQ.data?.length ?? 0) > 0 ? ` · ${projectSuppliersQ.data!.length}` : ""}
             </TabsTrigger>
@@ -537,6 +539,7 @@ export default function ProjectPage() {
                       </TableHead>
                       <TableHead className="font-medium text-right">Откл.%</TableHead>
                       <TableHead className="font-medium text-right">Откл.₽</TableHead>
+                      <TableHead className="font-medium text-right">Компенсация</TableHead>
                       <TableHead className="font-medium text-right">Объём</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -594,6 +597,22 @@ export default function ProjectPage() {
                         >
                           {c.deviation_amount !== null
                             ? formatMoney(c.deviation_amount)
+                            : "—"}
+                        </TableCell>
+                        <TableCell
+                          className={
+                            "text-right font-mono " +
+                            (c.compensation_amount == null
+                              ? "text-fg-secondary"
+                              : c.compensation_amount > 0
+                              ? "text-danger-text"
+                              : c.compensation_amount < 0
+                              ? "text-accent-text"
+                              : "text-fg-secondary")
+                          }
+                        >
+                          {c.compensation_amount !== null
+                            ? formatMoney(c.compensation_amount)
                             : "—"}
                         </TableCell>
                         <TableCell className="text-right font-mono text-fg-secondary">
@@ -904,6 +923,10 @@ export default function ProjectPage() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+          </TabsContent>
+          {/* ────────── TAB: Коридоры ────────── */}
+          <TabsContent value="corridors" className="mt-6">
+            {projectId !== null && <CorridorsTab projectId={projectId} />}
           </TabsContent>
           {/* ────────── TAB: По месяцам ────────── */}
           <TabsContent value="monthly">
