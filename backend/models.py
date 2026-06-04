@@ -9,6 +9,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -162,7 +163,7 @@ class ReferencePrice(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     material_class_id = Column(Integer, ForeignKey("material_classes.id"), nullable=False)
-    price = Column(Float, nullable=False)
+    price = Column(Numeric(19, 4), nullable=False)
     period_start = Column(Date, nullable=False)
     period_end = Column(Date, nullable=False)
     source = Column(String)
@@ -228,7 +229,7 @@ class CompensationCorridor(Base):
     material_class_id = Column(
         Integer, ForeignKey("material_classes.id", ondelete="CASCADE"), primary_key=True
     )
-    corridor_pct = Column(Float, nullable=False)  # 5.0 = ±5%; хранится в процентах, не в долях
+    corridor_pct = Column(Numeric(5, 2), nullable=False)  # 5.00 = ±5%; хранится в процентах, не в долях
     created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
     updated_at = Column(
         DateTime,
@@ -247,7 +248,7 @@ class Invoice(Base):
     date = Column(Date, nullable=False)
     supplier_name = Column(String)
     supplier_inn = Column(String)
-    vat_rate = Column(Float, default=20.0)
+    vat_rate = Column(Numeric(5, 2), default=20.0)
     ai_confidence = Column(Float)
     verified = Column(Boolean, default=False, nullable=False)
     verified_at = Column(DateTime, nullable=True)
@@ -266,11 +267,11 @@ class InvoiceItem(Base):
     raw_name = Column(String)
     item_type = Column(String, nullable=False)
     material_class_id = Column(Integer, ForeignKey("material_classes.id"), nullable=True)
-    quantity = Column(Float, nullable=False)
+    quantity = Column(Numeric(15, 4), nullable=False)
     unit = Column(String)
-    unit_price = Column(Float, nullable=False)
-    amount = Column(Float, nullable=False)
-    vat_amount = Column(Float)
+    unit_price = Column(Numeric(19, 4), nullable=False)
+    amount = Column(Numeric(15, 2), nullable=False)
+    vat_amount = Column(Numeric(15, 2))
 
     invoice = relationship("Invoice", back_populates="items")
     material_class = relationship("MaterialClass", back_populates="invoice_items")
