@@ -1,8 +1,7 @@
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Union
 
 
-def money_round(value: Union[Decimal, float, str, int], places: int = 2) -> Decimal:
+def money_round(value: Decimal | float | str | int, places: int = 2) -> Decimal:
     """Округляет финансовые значения по правилам РФ (ROUND_HALF_UP, 0.5 → вверх).
 
     Арифметическое (не банковское) округление — для сверки с УПД/1С/ФНС.

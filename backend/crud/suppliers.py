@@ -1,5 +1,4 @@
 import logging
-
 from decimal import Decimal
 
 from sqlalchemy import case, func, literal, text
