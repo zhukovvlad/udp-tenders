@@ -327,7 +327,7 @@ def _compute_supplier_project_deviation(
         return None, None
 
     # Объём base-материала по каждому счёту (знаменатель пропорции)
-    base_qty_per_invoice: dict[int, float] = {}
+    base_qty_per_invoice: dict[int, Decimal] = {}
     for row in (
         db.query(
             InvoiceItem.invoice_id,
@@ -342,10 +342,10 @@ def _compute_supplier_project_deviation(
         .group_by(InvoiceItem.invoice_id)
         .all()
     ):
-        base_qty_per_invoice[row.invoice_id] = float(row.total_qty)
+        base_qty_per_invoice[row.invoice_id] = row.total_qty
 
     # Shared costs (доставка + присадки) по счёту, с НДС
-    shared_per_invoice: dict[int, float] = {}
+    shared_per_invoice: dict[int, Decimal] = {}
 
     for row in (
         db.query(
@@ -367,7 +367,7 @@ def _compute_supplier_project_deviation(
         .all()
     ):
         shared_per_invoice[row.invoice_id] = (
-            shared_per_invoice.get(row.invoice_id, 0.0) + float(row.total_with_vat)
+            shared_per_invoice.get(row.invoice_id, Decimal("0")) + row.total_with_vat
         )
 
     for row in (
@@ -392,7 +392,7 @@ def _compute_supplier_project_deviation(
         .all()
     ):
         shared_per_invoice[row.invoice_id] = (
-            shared_per_invoice.get(row.invoice_id, 0.0) + float(row.total_with_vat)
+            shared_per_invoice.get(row.invoice_id, Decimal("0")) + row.total_with_vat
         )
 
     # Агрегируем contribution по классу — локальный импорт для избежания кругового импорта
@@ -424,8 +424,9 @@ def _compute_supplier_project_deviation(
         if ref.material_class_id not in ref_by_class:
             ref_by_class[ref.material_class_id] = ref
 
-    total_deviation: float = 0.0
-    reference_total: float = 0.0
+    from finance import money_round  # noqa: PLC0415
+    total_deviation: Decimal = Decimal("0")
+    reference_total: Decimal = Decimal("0")
     any_ref = False
 
     for cid, contrib in class_contrib.items():
@@ -440,11 +441,11 @@ def _compute_supplier_project_deviation(
             total_deviation += (avg_price - ref.price) * qty
             reference_total += ref.price * qty
 
-    if not any_ref or reference_total == 0.0:
+    if not any_ref or reference_total == 0:
         return None, None
 
-    deviation_amount = round(total_deviation, 2)
-    deviation_pct = round(total_deviation / reference_total * 100, 2)
+    deviation_amount = money_round(total_deviation, 2)
+    deviation_pct = money_round(total_deviation / reference_total * 100, 2)
     return deviation_pct, deviation_amount
 
 
