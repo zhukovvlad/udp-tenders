@@ -152,13 +152,15 @@ deviation_amount = (avg_price − ref_price) × qty
 **Оборот в supplier-агрегатах** считается аналогично:
 `SUM(amount + COALESCE(vat_amount, amount * COALESCE(vat_rate, 20.0) / 100))`
 
-**VAT guard:** `Invoice.vat_rate` не имеет `NOT NULL` в БД (см. TECH_DEBT.md), поэтому во всех SQL-выражениях используется `COALESCE(vat_rate, 20.0)` как fallback.
+**VAT guard:** `Invoice.vat_rate` не имеет `NOT NULL` в БД (см. TECH_DEBT.md), поэтому во всех SQL-выражениях используется `COALESCE(vat_rate, literal(Decimal("20.0")))` — type-bound Decimal literal, чтобы COALESCE оставался типа NUMERIC внутри DB-выражения (не смешивался с float).
+
+**Decimal layer:** Финансовые колонки в БД — `Numeric` (не `Float`). Точность по колонкам: `ReferencePrice.price` — NUMERIC(19,4), `Invoice.vat_rate` — NUMERIC(5,2), `InvoiceItem.quantity` — NUMERIC(15,4), `InvoiceItem.unit_price` — NUMERIC(19,4), `InvoiceItem.amount` и `vat_amount` — NUMERIC(15,2), `CompensationCorridor.corridor_pct` — NUMERIC(5,2). SQLAlchemy возвращает эти колонки как `decimal.Decimal`. Весь расчётный слой (`crud/calculations.py`, `crud/suppliers.py`) работает в `Decimal` end-to-end. Округление — `money_round` из `backend/finance.py` (ROUND_HALF_UP, RU-арифметика). Нормализация на входе (LLM→DB): `_dec(value)` в `crud/documents.py` через `Decimal(str(value))` отсекает бинарную погрешность float. API-payloads (`price`, `corridor_pct`) — `Decimal`-поля Pydantic. Сериализация: `DecimalJSONResponse` в `main.py` (`default_response_class`) конвертирует Decimal→float при отдаче JSON; фронтенд-контракт (числа) не изменился.
 
 **DateTime serialization:** все `DateTime`-колонки хранятся как **naive UTC** (без timezone). При ручной сериализации в JSON добавляй суффикс `"Z"`: `dt.isoformat() + "Z"`. Это сигнализирует браузеру о UTC и исключает сдвиг даты у пользователей не в UTC. Pydantic-схемы с `datetime` обрабатывают это автоматически — правило актуально для dict-ответов (например, в `crud/admin.py`).
 
 ### Коридор компенсации
 
-`CompensationCorridor(project_id PK, material_class_id PK, corridor_pct FLOAT)` — допуск (%) вокруг базовой цены на уровне `(проект × класс материала)`. Не периодичен (действует весь срок договора). Семантика трёх состояний:
+`CompensationCorridor(project_id PK, material_class_id PK, corridor_pct NUMERIC(5,2))` — допуск (%) вокруг базовой цены на уровне `(проект × класс материала)`. Не периодичен (действует весь срок договора). Семантика трёх состояний:
 - **нет строки** → класс некомпенсируемый, компенсация не считается;
 - **`corridor_pct = 0`** → компенсируется любое отклонение, мёртвой зоны нет (≡ текущему deviation);
 - **`corridor_pct = X`** → допуск ±X%, компенсация только за пределами коридора.
@@ -175,7 +177,7 @@ P < B*(1-k):  comp = P - B*(1-k)    # − экономия
 
 - **Где считается:** `compute_calculations` в `crud/calculations.py` — единый источник истины. Чистая формула изолирована в `compute_compensation_per_unit(avg_price, ref_price, corridor_pct)` (unit-тестируема без БД).
 - **Три новых поля в dict строки расчётов:** `corridor_pct`, `compensation_per_unit`, `compensation_amount`. `None` = не применимо/нет базы, `0.0` = внутри коридора.
-- **API:** `GET/PUT/DELETE /api/projects/{id}/compensation-corridors[/{material_class_id}]`. PUT — идемпотентный upsert; тело `{corridor_pct: float}`, валидация 0 ≤ % ≤ 100 (422 иначе). DELETE идемпотентен.
+- **API:** `GET/PUT/DELETE /api/projects/{id}/compensation-corridors[/{material_class_id}]`. PUT — идемпотентный upsert; тело `{corridor_pct: Decimal}`, валидация 0 ≤ % ≤ 100 (422 иначе). DELETE идемпотентен.
 - **Excel:** 2 новых колонки в конце (Q «Коридор, %», R «Компенсация, ₽»). Компенсация — Python-значение (не формула), заполняется только в строках месяца и итога по классу; строки СФ — пусто.
 - **Frontend:** таб «Коридоры» в `ProjectPage` (`CorridorsTab.tsx`). Колонка «Компенсация» в табе расчётов рядом с «Откл.₽». DELETE без подтверждения (класс легко вернуть).
 
