@@ -1,10 +1,11 @@
 """Tests for the Excel export: compute_export_rows() logic and /api/export/excel endpoint.
 
-Layout overview (16 columns A–P):
+Layout overview (18 columns A–R):
   A=Date  B=Number  C=Supplier  D=Qty  E=RefPrice  F=VATrate
   G=MatExcl  H=DelivExcl  I=OtherExcl  J=formula:G+H+I
   K=formula:G*(1+F)  L=formula:H*(1+F)  M=formula:I*(1+F)  N=formula:K+L+M
   O=formula:deviation%  P=formula:deviation₽
+  Q=corridor%  R=compensation₽
 """
 from __future__ import annotations
 
@@ -606,7 +607,7 @@ class TestExportEndpoint:
 
     # ── Column layout ────────────────────────────────────────────────────────
 
-    def test_sheet_has_exactly_16_columns(self, client, factories):
+    def test_sheet_has_exactly_18_columns(self, client, factories):
         project = factories.ProjectFactory.create()
         mc = factories.MaterialClassFactory.create(calc_role="base")
         doc = factories.DocumentFactory.create(project=project)
@@ -617,7 +618,7 @@ class TestExportEndpoint:
             "&period_start=2026-03-01&period_end=2026-03-31"
         )
         ws = load_workbook(BytesIO(resp.content)).active
-        assert ws.max_column == 16
+        assert ws.max_column == 18
 
     def test_formula_columns_contain_excel_formulas(self, client, factories):
         """Columns J(10), K(11), L(12), M(13), N(14), O(15), P(16) in a data row
