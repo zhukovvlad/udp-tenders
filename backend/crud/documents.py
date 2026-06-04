@@ -1,9 +1,16 @@
 from datetime import date
+from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
 from crud.suppliers import get_or_create_supplier
 from models import Document, Invoice, InvoiceItem
+
+
+def _dec(value) -> Decimal | None:
+    """LLM/JSON float → Decimal через str() (отсекает бинарную погрешность float). None-safe."""
+    return None if value is None else Decimal(str(value))
+
 
 # --- Documents ---
 
@@ -65,7 +72,7 @@ def create_invoice(db: Session, document_id: int, number: str, invoice_date: dat
         date=invoice_date,
         supplier_name=_name,
         supplier_inn=_inn,
-        vat_rate=vat_rate,
+        vat_rate=_dec(vat_rate),
         ai_confidence=confidence,
     )
     db.add(invoice)
@@ -77,11 +84,11 @@ def create_invoice(db: Session, document_id: int, number: str, invoice_date: dat
             raw_name=item["raw_name"],
             item_type=item["item_type"],
             material_class_id=item.get("material_class_id"),
-            quantity=item["quantity"],
+            quantity=_dec(item["quantity"]),
             unit=item.get("unit"),
-            unit_price=item["unit_price"],
-            amount=item["amount"],
-            vat_amount=item.get("vat_amount"),
+            unit_price=_dec(item["unit_price"]),
+            amount=_dec(item["amount"]),
+            vat_amount=_dec(item.get("vat_amount")),
         )
         db.add(db_item)
 
