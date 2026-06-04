@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -22,7 +24,7 @@ class ExclusionCreate(BaseModel):
 
 
 class CorridorUpsert(BaseModel):
-    corridor_pct: float = Field(ge=0, le=100)
+    corridor_pct: Decimal = Field(ge=0, le=100)
 
 
 @router.get("")

@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from io import BytesIO
 from itertools import groupby
 from urllib.parse import quote
@@ -277,7 +278,7 @@ def _write_class_section(
         month_comp = (comp_by_class_month or {}).get(month_key, {})
         _corridor = month_comp.get("corridor_pct")
         _comp_amt = month_comp.get("compensation_amount")
-        _hc(17, (_corridor / 100.0) if _corridor is not None else None, fmt=_FMT_PCT_RATE)
+        _hc(17, (_corridor / Decimal("100")) if _corridor is not None else None, fmt=_FMT_PCT_RATE)
         _hc(18, _comp_amt, font=_dev_font(_comp_amt or 0, bold=True), fmt=_FMT_MONEY)
         ws.row_dimensions[rh].height = 18
         cur += 1

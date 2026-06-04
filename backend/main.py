@@ -1,6 +1,9 @@
+import json
 import logging
 import time
 from contextlib import asynccontextmanager
+from decimal import Decimal
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,7 +35,27 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="УПД Трекер цен", version="2.0.0", lifespan=lifespan)
+def _decimal_encoder(obj: Any) -> Any:
+    if isinstance(obj, Decimal):
+        return float(obj)
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
+
+class DecimalJSONResponse(JSONResponse):
+    """Стандартный JSONResponse с поддержкой Decimal → float для dict-ответов."""
+    def render(self, content: Any) -> bytes:
+        return json.dumps(
+            content, ensure_ascii=False, allow_nan=False,
+            separators=(",", ":"), default=_decimal_encoder,
+        ).encode("utf-8")
+
+
+app = FastAPI(
+    title="УПД Трекер цен",
+    version="2.0.0",
+    lifespan=lifespan,
+    default_response_class=DecimalJSONResponse,
+)
 
 app.add_middleware(
     CORSMiddleware,

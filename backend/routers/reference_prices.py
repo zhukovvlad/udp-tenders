@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
@@ -12,7 +13,7 @@ router = APIRouter()
 class ReferencePriceCreate(BaseModel):
     project_id: int
     material_class_id: int
-    price: float
+    price: Decimal
     period_start: date
     period_end: date
     source: str | None = None
@@ -42,7 +43,7 @@ def create_reference_price_route(data: ReferencePriceCreate, db: Session = Depen
     return {"id": rp.id}
 
 class ReferencePriceUpdate(BaseModel):
-    price: float | None = None
+    price: Decimal | None = None
     period_start: date | None = None
     period_end: date | None = None
     source: str | None = None
