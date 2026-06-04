@@ -9,27 +9,26 @@ from models import Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice
 
 
 def compute_compensation_per_unit(
-    avg_price: float,
-    ref_price: float | None,
-    corridor_pct: float | None,
-) -> float | None:
-    """Компенсация на единицу объёма (нелинейная: 0 внутри коридора, P−B(1±k) вне его).
+    avg_price,
+    ref_price,
+    corridor_pct,
+):
+    """Компенсация на единицу объёма (нелинейная). Все величины — Decimal.
 
-    Возвращает None если класс некомпенсируемый (corridor_pct is None) или нет базовой
-    цены (ref_price falsy). Возвращает 0.0 если цена внутри коридора.
-
-    Знак: + удорожание (доплата поставщику), − экономия (возврат заказчику).
+    None если класс некомпенсируемый (corridor_pct is None) или нет базовой цены.
+    Decimal("0") если внутри коридора. Знак: + удорожание, − экономия.
     """
+    from finance import money_round  # noqa: PLC0415
     if corridor_pct is None or not ref_price or ref_price <= 0:
         return None
-    k = corridor_pct / 100.0
-    upper = ref_price * (1 + k)
-    lower = ref_price * (1 - k)
+    k = corridor_pct / Decimal("100")
+    upper = ref_price * (Decimal("1") + k)
+    lower = ref_price * (Decimal("1") - k)
     if avg_price > upper:
-        return round(avg_price - upper, 2)
+        return money_round(avg_price - upper, 2)
     if avg_price < lower:
-        return round(avg_price - lower, 2)
-    return 0.0
+        return money_round(avg_price - lower, 2)
+    return Decimal("0")
 
 
 def _months_in_range(start: date, end: date) -> list[tuple[date, date]]:
@@ -62,21 +61,21 @@ def _aggregate_by_class(
     for row in base_rows:
         cid = row.material_class_id
         inv_id = row.invoice_id
-        qty_base_in_inv = base_qty_per_invoice.get(inv_id, 0.0)
+        qty_base_in_inv = base_qty_per_invoice.get(inv_id, Decimal("0"))
         if qty_base_in_inv <= 0:
             continue
-        share = float(row.qty) / qty_base_in_inv
-        shared = shared_per_invoice.get(inv_id, 0.0) * share
+        share = row.qty / qty_base_in_inv   # Decimal / Decimal → Decimal
+        shared = shared_per_invoice.get(inv_id, Decimal("0")) * share
         if cid not in class_contrib:
             class_contrib[cid] = {
-                "mat_with_vat": 0.0,
-                "shared_with_vat": 0.0,
-                "qty": 0.0,
+                "mat_with_vat": Decimal("0"),
+                "shared_with_vat": Decimal("0"),
+                "qty": Decimal("0"),
                 "invoice_ids": set(),
             }
-        class_contrib[cid]["mat_with_vat"] += float(row.mat_total) + float(row.mat_vat)
+        class_contrib[cid]["mat_with_vat"] += row.mat_total + row.mat_vat
         class_contrib[cid]["shared_with_vat"] += shared
-        class_contrib[cid]["qty"] += float(row.qty)
+        class_contrib[cid]["qty"] += row.qty
         class_contrib[cid]["invoice_ids"].add(inv_id)
     return class_contrib
 
@@ -186,7 +185,7 @@ def compute_calculations(
             continue
 
         # Суммарный объём base-материалов по каждому счёту (знаменатель пропорции)
-        base_qty_per_invoice: dict[int, float] = {}
+        base_qty_per_invoice: dict[int, Decimal] = {}
         for row in (
             db.query(
                 InvoiceItem.invoice_id,
@@ -201,10 +200,10 @@ def compute_calculations(
             .group_by(InvoiceItem.invoice_id)
             .all()
         ):
-            base_qty_per_invoice[row.invoice_id] = float(row.total_qty)
+            base_qty_per_invoice[row.invoice_id] = row.total_qty
 
         # Доставка по каждому счёту (amount + VAT)
-        delivery_per_invoice: dict[int, float] = {}
+        delivery_per_invoice: dict[int, Decimal] = {}
         for row in (
             db.query(
                 InvoiceItem.invoice_id,
@@ -224,10 +223,10 @@ def compute_calculations(
             .group_by(InvoiceItem.invoice_id)
             .all()
         ):
-            delivery_per_invoice[row.invoice_id] = float(row.total_with_vat)
+            delivery_per_invoice[row.invoice_id] = row.total_with_vat
 
         # Присадки (calc_role="additive") по каждому счёту (amount + VAT)
-        additive_per_invoice: dict[int, float] = {}
+        additive_per_invoice: dict[int, Decimal] = {}
         for row in (
             db.query(
                 InvoiceItem.invoice_id,
@@ -249,11 +248,11 @@ def compute_calculations(
             .group_by(InvoiceItem.invoice_id)
             .all()
         ):
-            additive_per_invoice[row.invoice_id] = float(row.total_with_vat)
+            additive_per_invoice[row.invoice_id] = row.total_with_vat
 
         # Объединяем доставку и присадки в один словарь shared costs per invoice
         shared_per_invoice = {
-            inv_id: delivery_per_invoice.get(inv_id, 0.0) + additive_per_invoice.get(inv_id, 0.0)
+            inv_id: delivery_per_invoice.get(inv_id, Decimal("0")) + additive_per_invoice.get(inv_id, Decimal("0"))
             for inv_id in set(delivery_per_invoice) | set(additive_per_invoice)
         }
         # Агрегируем contribution по классу через все счета месяца
@@ -289,6 +288,7 @@ def compute_calculations(
             if ref.material_class_id not in ref_by_class:
                 ref_by_class[ref.material_class_id] = ref
 
+        from finance import money_round  # noqa: PLC0415
         for cid, contrib in class_contrib.items():
             qty = contrib["qty"]
             if qty <= 0:
@@ -297,17 +297,17 @@ def compute_calculations(
             avg_price = (contrib["mat_with_vat"] + contrib["shared_with_vat"]) / qty
 
             ref = ref_by_class.get(cid)
-            ref_price = ref.price if ref else None
+            ref_price = ref.price if ref else None  # Decimal | None
             deviation_pct = None
             deviation_amount = None
             if ref_price and ref_price > 0:
-                deviation_pct = round((avg_price - ref_price) / ref_price * 100, 2)
-                deviation_amount = round((avg_price - ref_price) * qty, 2)
+                deviation_pct = money_round((avg_price - ref_price) / ref_price * 100, 2)
+                deviation_amount = money_round((avg_price - ref_price) * qty, 2)
 
             corridor_pct = corridor_by_class.get(cid)
             compensation_per_unit = compute_compensation_per_unit(avg_price, ref_price, corridor_pct)
             compensation_amount = (
-                round(compensation_per_unit * qty, 2)
+                money_round(compensation_per_unit * qty, 2)
                 if compensation_per_unit is not None
                 else None
             )
@@ -318,10 +318,10 @@ def compute_calculations(
                 "material_class_name": class_name_map.get(cid, "?"),
                 "period_start": month_start,
                 "period_end": month_end,
-                "material_total": round(contrib["mat_with_vat"], 2),
-                "delivery_total": round(contrib["shared_with_vat"], 2),  # доставка + присадки
-                "total_qty": round(qty, 3),
-                "avg_price": round(avg_price, 2),
+                "material_total": money_round(contrib["mat_with_vat"], 2),
+                "delivery_total": money_round(contrib["shared_with_vat"], 2),
+                "total_qty": money_round(qty, 3),
+                "avg_price": money_round(avg_price, 2),
                 "invoice_count": len(contrib["invoice_ids"]),
                 "reference_price": ref_price,
                 "deviation_pct": deviation_pct,
@@ -445,7 +445,7 @@ def compute_export_rows(
     invoice_ids = list({r.invoice_id for r in base_rows})
 
     # ── Total base qty per invoice (denominator for proportional allocation) ──
-    total_base_qty_per_inv: dict[int, float] = {}
+    total_base_qty_per_inv: dict[int, Decimal] = {}
     for r in (
         db.query(
             InvoiceItem.invoice_id,
@@ -460,11 +460,11 @@ def compute_export_rows(
         .group_by(InvoiceItem.invoice_id)
         .all()
     ):
-        total_base_qty_per_inv[r.invoice_id] = float(r.total_qty)
+        total_base_qty_per_inv[r.invoice_id] = r.total_qty
 
     # ── Delivery cost per invoice: excl VAT and with VAT ──
-    delivery_per_inv: dict[int, float] = {}
-    delivery_excl_per_inv: dict[int, float] = {}
+    delivery_per_inv: dict[int, Decimal] = {}
+    delivery_excl_per_inv: dict[int, Decimal] = {}
     for r in (
         db.query(
             InvoiceItem.invoice_id,
@@ -484,12 +484,12 @@ def compute_export_rows(
         .group_by(InvoiceItem.invoice_id)
         .all()
     ):
-        delivery_per_inv[r.invoice_id] = float(r.total_with_vat)
-        delivery_excl_per_inv[r.invoice_id] = float(r.excl_vat)
+        delivery_per_inv[r.invoice_id] = r.total_with_vat
+        delivery_excl_per_inv[r.invoice_id] = r.excl_vat
 
     # ── Additive (calc_role="additive") cost per invoice: excl VAT and with VAT ──
-    additive_per_inv: dict[int, float] = {}
-    additive_excl_per_inv: dict[int, float] = {}
+    additive_per_inv: dict[int, Decimal] = {}
+    additive_excl_per_inv: dict[int, Decimal] = {}
     for r in (
         db.query(
             InvoiceItem.invoice_id,
@@ -511,8 +511,8 @@ def compute_export_rows(
         .group_by(InvoiceItem.invoice_id)
         .all()
     ):
-        additive_per_inv[r.invoice_id] = float(r.total_with_vat)
-        additive_excl_per_inv[r.invoice_id] = float(r.excl_vat)
+        additive_per_inv[r.invoice_id] = r.total_with_vat
+        additive_excl_per_inv[r.invoice_id] = r.excl_vat
 
     # ── Material class names ──
     class_ids = list({r.material_class_id for r in base_rows})
@@ -550,24 +550,25 @@ def compute_export_rows(
         return None
 
     # ── Build result rows ──
+    from finance import money_round  # noqa: PLC0415
     rows: list[dict] = []
     for br in base_rows:
         inv_id = br.invoice_id
         cid = br.material_class_id
-        qty = float(br.qty)
+        qty = br.qty  # Decimal
         if qty <= 0:
             continue
 
-        total_base_qty = total_base_qty_per_inv.get(inv_id, 0.0)
-        share = qty / total_base_qty if total_base_qty > 0 else 0.0
+        total_base_qty = total_base_qty_per_inv.get(inv_id, Decimal("0"))
+        share = qty / total_base_qty if total_base_qty > 0 else Decimal("0")
 
-        mat_with_vat = float(br.mat_total) + float(br.mat_vat)
-        delivery_alloc = delivery_per_inv.get(inv_id, 0.0) * share
-        additive_alloc = additive_per_inv.get(inv_id, 0.0) * share
-        delivery_excl_alloc = delivery_excl_per_inv.get(inv_id, 0.0) * share
-        additive_excl_alloc = additive_excl_per_inv.get(inv_id, 0.0) * share
+        mat_with_vat = br.mat_total + br.mat_vat
+        delivery_alloc = delivery_per_inv.get(inv_id, Decimal("0")) * share
+        additive_alloc = additive_per_inv.get(inv_id, Decimal("0")) * share
+        delivery_excl_alloc = delivery_excl_per_inv.get(inv_id, Decimal("0")) * share
+        additive_excl_alloc = additive_excl_per_inv.get(inv_id, Decimal("0")) * share
 
-        mat_per_m3_excl_vat = float(br.mat_total) / qty
+        mat_per_m3_excl_vat = br.mat_total / qty
         mat_per_m3 = mat_with_vat / qty
         delivery_per_m3_excl_vat = delivery_excl_alloc / qty
         delivery_per_m3 = delivery_alloc / qty
@@ -576,15 +577,15 @@ def compute_export_rows(
         total_per_m3 = mat_per_m3 + delivery_per_m3 + other_per_m3
 
         inv = invoice_map[inv_id]
-        vat_rate_decimal = (inv.vat_rate if inv.vat_rate is not None else 20.0) / 100.0
-        ref_price = _ref_price(cid, inv.date)
+        vat_rate_decimal = (inv.vat_rate if inv.vat_rate is not None else Decimal("20")) / Decimal("100")
+        ref_price = _ref_price(cid, inv.date)  # Decimal | None
         deviation_pct = (
-            round((total_per_m3 - ref_price) / ref_price * 100, 2)
+            money_round((total_per_m3 - ref_price) / ref_price * 100, 2)
             if ref_price and ref_price > 0
             else None
         )
         deviation_amount = (
-            round((total_per_m3 - ref_price) * qty, 2)
+            money_round((total_per_m3 - ref_price) * qty, 2)
             if ref_price and ref_price > 0
             else None
         )
@@ -596,16 +597,16 @@ def compute_export_rows(
             "invoice_date": inv.date,
             "invoice_number": inv.number,
             "supplier_name": inv.supplier_name or "—",
-            "qty": round(qty, 6),
+            "qty": money_round(qty, 6),
             "ref_price": ref_price,
-            "mat_per_m3_excl_vat": round(mat_per_m3_excl_vat, 6),
-            "vat_rate": vat_rate_decimal,              # decimal: 0.20 → shows as 20% in Excel
-            "mat_per_m3": round(mat_per_m3, 6),
-            "delivery_per_m3_excl_vat": round(delivery_per_m3_excl_vat, 6),
-            "delivery_per_m3": round(delivery_per_m3, 6),
-            "other_per_m3_excl_vat": round(other_per_m3_excl_vat, 6),
-            "other_per_m3": round(other_per_m3, 6),
-            "total_per_m3": round(total_per_m3, 6),
+            "mat_per_m3_excl_vat": money_round(mat_per_m3_excl_vat, 6),
+            "vat_rate": vat_rate_decimal,              # Decimal: 0.20 → shows as 20% in Excel
+            "mat_per_m3": money_round(mat_per_m3, 6),
+            "delivery_per_m3_excl_vat": money_round(delivery_per_m3_excl_vat, 6),
+            "delivery_per_m3": money_round(delivery_per_m3, 6),
+            "other_per_m3_excl_vat": money_round(other_per_m3_excl_vat, 6),
+            "other_per_m3": money_round(other_per_m3, 6),
+            "total_per_m3": money_round(total_per_m3, 6),
             "deviation_pct": deviation_pct,
             "deviation_amount": deviation_amount,
         })
