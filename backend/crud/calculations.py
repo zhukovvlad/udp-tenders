@@ -1,7 +1,8 @@
 from calendar import monthrange
 from datetime import date
+from decimal import Decimal
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, literal, or_
 from sqlalchemy.orm import Session
 
 from models import Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice
@@ -161,7 +162,7 @@ def compute_calculations(
                 func.sum(InvoiceItem.amount).label("mat_total"),
                 func.sum(func.coalesce(
                     InvoiceItem.vat_amount,
-                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100
+                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100
                 )).label("mat_vat"),
                 func.sum(InvoiceItem.quantity).label("qty"),
             )
@@ -211,7 +212,7 @@ def compute_calculations(
                     InvoiceItem.amount +
                     func.coalesce(
                         InvoiceItem.vat_amount,
-                        InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100
+                        InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100
                     )
                 ).label("total_with_vat"),
             )
@@ -234,7 +235,7 @@ def compute_calculations(
                     InvoiceItem.amount +
                     func.coalesce(
                         InvoiceItem.vat_amount,
-                        InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100
+                        InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100
                     )
                 ).label("total_with_vat"),
             )
@@ -421,7 +422,7 @@ def compute_export_rows(
             func.sum(InvoiceItem.amount).label("mat_total"),
             func.sum(func.coalesce(
                 InvoiceItem.vat_amount,
-                InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100,
+                InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100,
             )).label("mat_vat"),
             func.sum(InvoiceItem.quantity).label("qty"),
         )
@@ -471,7 +472,7 @@ def compute_export_rows(
             func.sum(
                 InvoiceItem.amount + func.coalesce(
                     InvoiceItem.vat_amount,
-                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100,
+                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100,
                 )
             ).label("total_with_vat"),
         )
@@ -496,7 +497,7 @@ def compute_export_rows(
             func.sum(
                 InvoiceItem.amount + func.coalesce(
                     InvoiceItem.vat_amount,
-                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100,
+                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100,
                 )
             ).label("total_with_vat"),
         )

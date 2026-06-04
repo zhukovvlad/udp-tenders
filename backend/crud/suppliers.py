@@ -1,6 +1,8 @@
 import logging
 
-from sqlalchemy import case, func, text
+from decimal import Decimal
+
+from sqlalchemy import case, func, literal, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, aliased
 
@@ -183,7 +185,7 @@ def get_suppliers_with_stats(db: Session) -> list[dict]:
     Категории выводятся из классов материалов, которые поставлял данный поставщик.
     """
     turnover_label = func.coalesce(
-        func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)),
+        func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100)),
         0,
     ).label("turnover")
     rows = (
@@ -242,7 +244,7 @@ def get_supplier_detail(db: Session, supplier_id: int) -> dict | None:
     agg = (
         db.query(
             func.count(Invoice.id.distinct()).label("invoice_count"),
-            func.coalesce(func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)), 0).label("turnover"),
+            func.coalesce(func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100)), 0).label("turnover"),
             func.count(Document.project_id.distinct()).label("project_count"),
             func.min(Invoice.date).label("first_invoice_date"),
         )
@@ -307,7 +309,7 @@ def _compute_supplier_project_deviation(
             func.sum(InvoiceItem.amount).label("mat_total"),
             func.sum(func.coalesce(
                 InvoiceItem.vat_amount,
-                InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100
+                InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100
             )).label("mat_vat"),
             func.sum(InvoiceItem.quantity).label("qty"),
         )
@@ -352,7 +354,7 @@ def _compute_supplier_project_deviation(
                 InvoiceItem.amount +
                 func.coalesce(
                     InvoiceItem.vat_amount,
-                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100
+                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100
                 )
             ).label("total_with_vat"),
         )
@@ -375,7 +377,7 @@ def _compute_supplier_project_deviation(
                 InvoiceItem.amount +
                 func.coalesce(
                     InvoiceItem.vat_amount,
-                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100
+                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100
                 )
             ).label("total_with_vat"),
         )
@@ -454,7 +456,7 @@ def get_supplier_project_stats(db: Session, supplier_id: int) -> list[dict]:
         0,
     ).label("volume_m3")
     turnover_expr = func.coalesce(
-        func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)),
+        func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100)),
         0,
     ).label("turnover")
 
