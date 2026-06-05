@@ -171,7 +171,7 @@ def test_monthly_summary_aggregates_by_month(client, factories):
     factories.InvoiceItemFactory.create(
         invoice=inv_jan, item_type="material", quantity=5.0, amount=40000.0,
     )
-    # delivery не должна попасть в оборот и объём
+    # delivery входит и в оборот, и в total_qty (агрегаты monthly-summary без фильтра по типу)
     factories.InvoiceItemFactory.create(
         invoice=inv_jan, item_type="delivery", quantity=1.0, amount=3000.0,
     )
@@ -189,8 +189,10 @@ def test_monthly_summary_aggregates_by_month(client, factories):
     assert set(rows.keys()) == {(2026, 1), (2026, 3)}
 
     jan = rows[(2026, 1)]
-    assert jan["total_amount"] == 48000.0  # 40000 + 20% VAT
-    assert jan["total_qty"] == 5.0
+    # оборот = все позиции с НДС: material (40000+8000) + delivery (3000+600) = 51600
+    assert jan["total_amount"] == 51600.0
+    # total_qty суммирует quantity по всем item_type (material 5 + delivery 1 = 6)
+    assert jan["total_qty"] == 6.0
     assert jan["invoice_count"] == 1
 
     mar = rows[(2026, 3)]
