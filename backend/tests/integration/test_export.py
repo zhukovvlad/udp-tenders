@@ -125,10 +125,10 @@ class TestComputeExportRows:
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
         r = rows[0]
-        assert r["mat_per_m3_excl_vat"] == pytest.approx(5000.0)
+        assert float(r["mat_per_m3_excl_vat"]) == pytest.approx(5000.0)
         # with VAT: (500_000 + 100_000) / 100 = 6000
-        assert r["mat_per_m3"] == pytest.approx(6000.0)
-        assert r["vat_rate"] == pytest.approx(0.20)
+        assert float(r["mat_per_m3"]) == pytest.approx(6000.0)
+        assert float(r["vat_rate"]) == pytest.approx(0.20)
 
     def test_vat_amount_fallback_to_invoice_rate_when_null(self, db_session, factories):
         """When InvoiceItem.vat_amount is NULL, VAT is computed via invoice.vat_rate (20%)."""
@@ -146,9 +146,9 @@ class TestComputeExportRows:
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
         r = rows[0]
-        assert r["mat_per_m3_excl_vat"] == pytest.approx(6000.0)
+        assert float(r["mat_per_m3_excl_vat"]) == pytest.approx(6000.0)
         # computed VAT = 60_000 × 20% = 12_000 → total = 72_000 / 10 = 7200
-        assert r["mat_per_m3"] == pytest.approx(7200.0)
+        assert float(r["mat_per_m3"]) == pytest.approx(7200.0)
 
     def test_vat_rate_none_falls_back_to_20_percent(self, db_session, factories):
         """COALESCE(vat_rate, 20.0) — invoice with NULL vat_rate treated as 20%."""
@@ -165,7 +165,7 @@ class TestComputeExportRows:
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
-        assert rows[0]["mat_per_m3"] == pytest.approx(7200.0)
+        assert float(rows[0]["mat_per_m3"]) == pytest.approx(7200.0)
 
     def test_total_per_m3_equals_mat_plus_delivery_plus_other(self, db_session, factories):
         project = factories.ProjectFactory.create()
@@ -185,8 +185,8 @@ class TestComputeExportRows:
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
         r = rows[0]
-        assert r["total_per_m3"] == pytest.approx(
-            r["mat_per_m3"] + r["delivery_per_m3"] + r["other_per_m3"]
+        assert float(r["total_per_m3"]) == pytest.approx(
+            float(r["mat_per_m3"] + r["delivery_per_m3"] + r["other_per_m3"])
         )
 
     # ── Delivery proportional allocation ────────────────────────────────────
@@ -201,8 +201,8 @@ class TestComputeExportRows:
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
-        assert rows[0]["delivery_per_m3"] == pytest.approx(0.0)
-        assert rows[0]["delivery_per_m3_excl_vat"] == pytest.approx(0.0)
+        assert float(rows[0]["delivery_per_m3"]) == pytest.approx(0.0)
+        assert float(rows[0]["delivery_per_m3_excl_vat"]) == pytest.approx(0.0)
 
     def test_delivery_allocated_proportionally_to_base_qty(self, db_session, factories):
         """Delivery is split 75/25 when base qtys are 75 and 25 m³."""
@@ -233,11 +233,11 @@ class TestComputeExportRows:
 
         # Each class: per-m³ delivery = same rate regardless of share (same unit price)
         # mc1: 75% × 120_000 / 75 = 1200; mc2: 25% × 120_000 / 25 = 1200
-        assert row25["delivery_per_m3"] == pytest.approx(1200.0)
-        assert row30["delivery_per_m3"] == pytest.approx(1200.0)
+        assert float(row25["delivery_per_m3"]) == pytest.approx(1200.0)
+        assert float(row30["delivery_per_m3"]) == pytest.approx(1200.0)
         # excl VAT: 75% × 100_000 / 75 = 1000
-        assert row25["delivery_per_m3_excl_vat"] == pytest.approx(1000.0)
-        assert row30["delivery_per_m3_excl_vat"] == pytest.approx(1000.0)
+        assert float(row25["delivery_per_m3_excl_vat"]) == pytest.approx(1000.0)
+        assert float(row30["delivery_per_m3_excl_vat"]) == pytest.approx(1000.0)
 
     # ── Additive (calc_role="additive") allocation ───────────────────────────
 
@@ -251,8 +251,8 @@ class TestComputeExportRows:
             db_session, project.id,
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
-        assert rows[0]["other_per_m3"] == pytest.approx(0.0)
-        assert rows[0]["other_per_m3_excl_vat"] == pytest.approx(0.0)
+        assert float(rows[0]["other_per_m3"]) == pytest.approx(0.0)
+        assert float(rows[0]["other_per_m3_excl_vat"]) == pytest.approx(0.0)
 
     def test_additive_allocated_to_base_class_proportionally(self, db_session, factories):
         """Additive (calc_role='additive', item_type='material') is allocated as 'other'."""
@@ -279,8 +279,8 @@ class TestComputeExportRows:
         r = rows[0]
         # mc_base is the only base class → share = 1.0 → all additive goes to it
         # other_per_m3 = (20_000 + 4_000) / 100 = 240
-        assert r["other_per_m3"] == pytest.approx(240.0)
-        assert r["other_per_m3_excl_vat"] == pytest.approx(200.0)  # 20_000 / 100
+        assert float(r["other_per_m3"]) == pytest.approx(240.0)
+        assert float(r["other_per_m3_excl_vat"]) == pytest.approx(200.0)  # 20_000 / 100
 
     # ── Deviation calculation ────────────────────────────────────────────────
 
@@ -337,8 +337,8 @@ class TestComputeExportRows:
         )
         r = rows[0]
         assert r["ref_price"] == 6000.0
-        assert r["deviation_pct"] == pytest.approx(0.0)
-        assert r["deviation_amount"] == pytest.approx(0.0)
+        assert float(r["deviation_pct"]) == pytest.approx(0.0)
+        assert float(r["deviation_amount"]) == pytest.approx(0.0)
 
     def test_deviation_positive_and_correct_when_above_plan(self, db_session, factories):
         """total_per_m3 = 7200 vs ref = 5000 → dev = +44%, dev₽ = (7200-5000)×10 = 22_000."""
@@ -359,8 +359,8 @@ class TestComputeExportRows:
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
         r = rows[0]
-        assert r["deviation_pct"] == pytest.approx(44.0)
-        assert r["deviation_amount"] == pytest.approx(22_000.0)
+        assert float(r["deviation_pct"]) == pytest.approx(44.0)
+        assert float(r["deviation_amount"]) == pytest.approx(22_000.0)
 
     def test_deviation_negative_when_below_plan(self, db_session, factories):
         """total_per_m3 = 4800 vs ref = 6000 → dev = -20%, dev₽ = (4800-6000)×10 = -12_000."""
@@ -382,8 +382,8 @@ class TestComputeExportRows:
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
         r = rows[0]
-        assert r["deviation_pct"] == pytest.approx(-20.0)
-        assert r["deviation_amount"] == pytest.approx(-12_000.0)
+        assert float(r["deviation_pct"]) == pytest.approx(-20.0)
+        assert float(r["deviation_amount"]) == pytest.approx(-12_000.0)
 
     # ── Filtering and sorting ────────────────────────────────────────────────
 
@@ -834,7 +834,7 @@ class TestExportEndpoint:
         ws = load_workbook(BytesIO(resp.content)).active
         data_row = _find_data_row(ws)
         assert data_row is not None
-        assert ws.cell(row=data_row, column=7).value == pytest.approx(5000.0)
+        assert float(ws.cell(row=data_row, column=7).value) == pytest.approx(5000.0)
 
     def test_ref_price_appears_in_column_e(self, client, factories):
         project = factories.ProjectFactory.create()
@@ -853,4 +853,4 @@ class TestExportEndpoint:
         ws = load_workbook(BytesIO(resp.content)).active
         data_row = _find_data_row(ws)
         assert data_row is not None
-        assert ws.cell(row=data_row, column=5).value == pytest.approx(7500.0)
+        assert float(ws.cell(row=data_row, column=5).value) == pytest.approx(7500.0)

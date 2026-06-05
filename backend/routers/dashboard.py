@@ -1,8 +1,9 @@
 from calendar import monthrange
 from datetime import date
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import distinct, extract, func, or_
+from sqlalchemy import distinct, extract, func, literal, or_
 from sqlalchemy.orm import Session
 
 from crud.calculations import compute_calculations, compute_full_deviation
@@ -35,7 +36,7 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db)):
     totals_by_type = _excl_filter(
         db.query(
             InvoiceItem.item_type,
-            func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)).label("amount"),
+            func.sum(InvoiceItem.amount + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100)).label("amount"),
         )
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .join(Document, Invoice.document_id == Document.id)
@@ -210,7 +211,7 @@ def get_monthly_summary(project_id: int, db: Session = Depends(get_db)):
             month_expr.label("month"),
             func.sum(
                 InvoiceItem.amount
-                + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, 20.0) / 100)
+                + func.coalesce(InvoiceItem.vat_amount, InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100)
             ).label("total_amount"),
             func.sum(InvoiceItem.quantity).label("total_qty"),
             func.count(distinct(Invoice.id)).label("invoice_count"),
