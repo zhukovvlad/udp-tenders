@@ -1,11 +1,17 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, model_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from crud.compensation_corridors import delete_corridor, get_corridors, set_corridor
+from crud.compensation_corridors import (
+    build_resolved_matrix,
+    delete_class_corridor,
+    delete_type_corridor,
+    set_class_corridor,
+    set_type_corridor,
+)
 from crud.projects import create_project, delete_project, get_projects, update_project
 from crud.supplier_exclusions import get_excluded_supplier_ids, set_supplier_excluded
 from database import get_db
@@ -24,7 +30,18 @@ class ExclusionCreate(BaseModel):
 
 
 class CorridorUpsert(BaseModel):
-    corridor_pct: Decimal = Field(ge=0, le=100)
+    is_compensable: bool
+    corridor_pct: Decimal | None = None
+
+    @model_validator(mode="after")
+    def validate_pct_logic(self) -> "CorridorUpsert":
+        if self.is_compensable and self.corridor_pct is None:
+            raise ValueError("corridor_pct обязателен, если is_compensable=True")
+        if not self.is_compensable:
+            self.corridor_pct = None
+        if self.corridor_pct is not None and not (0 <= self.corridor_pct <= 100):
+            raise ValueError("corridor_pct должен быть от 0 до 100")
+        return self
 
 
 @router.get("")
@@ -112,30 +129,44 @@ def remove_supplier_exclusion(
     return Response(status_code=204)
 
 
-@router.get("/{project_id}/compensation-corridors")
-def list_compensation_corridors(project_id: int, db: Session = Depends(get_db)):
-    """Коридоры компенсации проекта с именами классов материалов."""
+# --- Corridors (fallback hierarchy) ---
+
+
+@router.get("/{project_id}/corridors")
+def list_corridors(project_id: int, db: Session = Depends(get_db)):
+    """Resolved corridor matrix: all material types + classes with resolved status."""
     if not db.query(Project).filter(Project.id == project_id).first():
         raise HTTPException(status_code=404, detail="Проект не найден")
-    corridors = get_corridors(db, project_id)
-    class_ids = [c.material_class_id for c in corridors]
-    name_map = {
-        mc.id: (mc.name, mc.material_type)
-        for mc in db.query(MaterialClass).filter(MaterialClass.id.in_(class_ids)).all()
-    }
-    return [
-        {
-            "material_class_id": c.material_class_id,
-            "material_class_name": name_map.get(c.material_class_id, ("?", "?"))[0],
-            "material_type": name_map.get(c.material_class_id, ("?", "?"))[1],
-            "corridor_pct": c.corridor_pct,
-        }
-        for c in corridors
-    ]
+    return build_resolved_matrix(db, project_id)
 
 
-@router.put("/{project_id}/compensation-corridors/{material_class_id}")
-def upsert_compensation_corridor(
+@router.put("/{project_id}/corridors/type/{material_type}")
+def upsert_type_corridor(
+    project_id: int,
+    material_type: str,
+    data: CorridorUpsert,
+    db: Session = Depends(get_db),
+):
+    if not db.query(Project).filter(Project.id == project_id).first():
+        raise HTTPException(status_code=404, detail="Проект не найден")
+    set_type_corridor(db, project_id, material_type, data.is_compensable, data.corridor_pct)
+    return {"material_type": material_type, "is_compensable": data.is_compensable, "corridor_pct": data.corridor_pct}
+
+
+@router.delete("/{project_id}/corridors/type/{material_type}", status_code=204)
+def remove_type_corridor(
+    project_id: int,
+    material_type: str,
+    db: Session = Depends(get_db),
+):
+    if not db.query(Project).filter(Project.id == project_id).first():
+        raise HTTPException(status_code=404, detail="Проект не найден")
+    delete_type_corridor(db, project_id, material_type)
+    return Response(status_code=204)
+
+
+@router.put("/{project_id}/corridors/class/{material_class_id}")
+def upsert_class_corridor(
     project_id: int,
     material_class_id: int,
     data: CorridorUpsert,
@@ -145,18 +176,18 @@ def upsert_compensation_corridor(
         raise HTTPException(status_code=404, detail="Проект не найден")
     if not db.query(MaterialClass).filter(MaterialClass.id == material_class_id).first():
         raise HTTPException(status_code=404, detail="Класс материала не найден")
-    set_corridor(db, project_id, material_class_id, data.corridor_pct)
-    return {"material_class_id": material_class_id, "corridor_pct": data.corridor_pct}
+    set_class_corridor(db, project_id, material_class_id, data.is_compensable, data.corridor_pct)
+    return {"material_class_id": material_class_id, "is_compensable": data.is_compensable, "corridor_pct": data.corridor_pct}
 
 
-@router.delete("/{project_id}/compensation-corridors/{material_class_id}", status_code=204)
-def delete_compensation_corridor(
+@router.delete("/{project_id}/corridors/class/{material_class_id}", status_code=204)
+def remove_class_corridor(
     project_id: int,
     material_class_id: int,
     db: Session = Depends(get_db),
 ):
     if not db.query(Project).filter(Project.id == project_id).first():
         raise HTTPException(status_code=404, detail="Проект не найден")
-    delete_corridor(db, project_id, material_class_id)
+    delete_class_corridor(db, project_id, material_class_id)
     return Response(status_code=204)
 
