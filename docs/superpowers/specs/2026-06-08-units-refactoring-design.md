@@ -1,7 +1,7 @@
 # Спецификация: справочники единиц измерения и типов материалов
 
 **Дата:** 2026-06-08
-**Статус:** утверждён · ревизия R3 (после ревью + сверки с corridor-fallback)
+**Статус:** утверждён · ревизия R4 (финальная перед реализацией)
 **Scope:** backend schema + normalization + calculations + API + migration + tests
 
 ---
@@ -58,6 +58,25 @@
 4. **§4.2 — порядок гейтов.** Dimension guard и corridor resolution ортогональны:
    сначала guard, затем (для прошедших) резолвер.
 5. **§7 Step 2 — `Decimal("0.001")`** вместо float-литерала в сиде (точность Numeric).
+
+---
+
+## 0c. Изменения ревизии R4 (финальная вычитка)
+
+1. **§7 Step 5 — down для `material_classes` дописан по образцу коридора (баг).** Был
+   только ADD COLUMN + бэкфилл, не хватало DROP `material_type_id` (и его INDEX) +
+   `SET NOT NULL` на восстановленном `material_type`. Теперь симметричен с коридором.
+2. **§7 Step 1 / Step 4 — явные `CREATE INDEX` в SQL миграции.** INDEX на
+   `material_type_id` и `normalized_unit_id` были заявлены в §3.2 и §10, но отсутствовали
+   в SQL. Добавлены в Step 4 (после ужесточения NOT NULL).
+3. **§7 Step 3 — предохранитель 2 читает старую строковую колонку `mc.material_type`**
+   вместо JOIN через ещё-не-бэкфиленный `material_type_id` (timing bug: JOIN по NULL →
+   пустой результат → проверка пропускает что угодно).
+4. **§3.2 / §5.2 — валидация 2 ref_price при `default_unit_id IS NULL`.** Для
+   `material_type='other'` (нет `default_unit`) валидация размерности пропускается —
+   допустима любая базовая единица. Иначе `None.dimension` → crash или ложный 422.
+5. **§3.1 — `material_types.default_unit_id` ON DELETE RESTRICT** (было не указано).
+6. **§7 — унификация переменных** в псевдокоде (`TON_ID`, `M3_ID` — получены из flush).
 
 ---
 
@@ -169,7 +188,7 @@ NFKC снимает целый класс вариантов написания 
 | `id` | int PK | |
 | `code` | str, UNIQUE | `concrete` / `rebar` / `other` |
 | `name` | str | «Бетон», «Арматура», «Прочее» |
-| `default_unit_id` | FK → `units_of_measure`, nullable | подсказка для UI, **не** источник истины для цен |
+| `default_unit_id` | FK → `units_of_measure`, nullable, ON DELETE RESTRICT | подсказка для UI, **не** источник истины для цен |
 
 ### 3.2. Изменяемые таблицы
 
@@ -191,7 +210,9 @@ NFKC снимает целый класс вариантов написания 
 - Валидация 1: `unit_id` должен быть базовой единицей (`base_unit_id IS NULL`)
 - Валидация 2: размерность `unit_id` совпадает с ожидаемой для `material_type`
   класса (через `material_type.default_unit.dimension`) — fail early при вводе цены,
-  а не молчаливый dimension mismatch на этапе расчёта
+  а не молчаливый dimension mismatch на этапе расчёта.
+  **При `default_unit_id IS NULL`** (material_type='other') валидация 2 пропускается —
+  допустима любая базовая единица
 
 **`compensation_corridors`** (поверх структуры из `corridor-fallback`; логика без изменений):
 - Таблица уже имеет суррогатный `id` PK, `is_compensable`, nullable `corridor_pct`,
@@ -343,7 +364,9 @@ GET /api/material-types       → list[MaterialType]   (id, code, name, default_
 - Новое обязательное поле `unit_id: int`
 - Валидация 1: `unit_id` должен быть базовой единицей (`base_unit_id IS NULL`) — 422 иначе
 - Валидация 2: размерность `unit_id` совпадает с размерностью `default_unit`
-  типа материала класса — 422 иначе (иначе расчёт молча заблокируется guard'ом)
+  типа материала класса — 422 иначе (иначе расчёт молча заблокируется guard'ом).
+  При `default_unit IS NULL` (material_type='other') — пропускается, допустима любая
+  базовая единица
 
 **`GET /api/dashboard/calculations`**:
 - Дополнительные поля: `unit_symbol` (символ базовой единицы), `dimension_mismatch: bool`
@@ -453,9 +476,10 @@ other    = insert(code="other",    name="Прочее",   default_unit_id=None)
 # Предохранитель 1: SELECT DISTINCT material_type FROM material_classes
 # Если есть значения вне {concrete, rebar, other} → миграция FAIL
 
-# Предохранитель 2: SELECT DISTINCT mt.code
+# Предохранитель 2: читаем старую строковую колонку (material_type_id ещё NULL):
+# SELECT DISTINCT mc.material_type
 #   FROM reference_prices rp JOIN material_classes mc ON rp.material_class_id = mc.id
-# Должен быть только 'concrete' (все ref_prices = M3)
+# assert result ⊆ {'concrete'} — иначе бэкфилл «всем M3» неверен
 
 # material_classes.material_type_id ← маппинг строк
 op.execute("""
@@ -464,7 +488,7 @@ op.execute("""
   )
 """)
 
-# reference_prices.unit_id ← M3 для всех
+# reference_prices.unit_id ← M3 для всех (M3_ID получен из flush в Step 2)
 op.execute(f"UPDATE reference_prices SET unit_id = {M3_ID}")
 
 # compensation_corridors.material_type_id ← маппинг строк
@@ -509,6 +533,12 @@ ALTER TABLE material_classes
 ALTER TABLE reference_prices
   ALTER COLUMN unit_id SET NOT NULL;
 
+-- Индексы (заявлены в §3.2, создаём после ужесточения NOT NULL):
+CREATE INDEX ix_material_classes_material_type_id
+  ON material_classes(material_type_id);
+CREATE INDEX ix_invoice_items_normalized_unit_id
+  ON invoice_items(normalized_unit_id);
+
 -- compensation_corridors: конвертация таргета String → FK.
 -- ОБА частичных индекса завязаны на material_type (один — ключом, другой — предикатом
 -- WHERE material_type IS NULL), поэтому дропаем и пересоздаём оба, иначе DROP COLUMN
@@ -536,11 +566,14 @@ CREATE UNIQUE INDEX uq_corridor_project_class
 > не-M3 ref_prices — перед down их `unit_id` нужно выгрузить отдельно.
 
 ```sql
--- Восстановить строковые поля из справочников ДО DROP таблиц:
+-- Восстановить material_classes (симметрично с коридором):
 ALTER TABLE material_classes ADD COLUMN material_type VARCHAR;
 UPDATE material_classes SET material_type = (
   SELECT code FROM material_types WHERE id = material_type_id
 );
+ALTER TABLE material_classes ALTER COLUMN material_type SET NOT NULL;
+DROP INDEX ix_material_classes_material_type_id;
+ALTER TABLE material_classes DROP COLUMN material_type_id;
 
 -- Откат compensation_corridors к строковой структуре corridor-fallback
 -- (НЕ к до-fallback композитному PK — это зона ответственности down самого fallback):
@@ -562,6 +595,7 @@ CREATE UNIQUE INDEX uq_corridor_project_class
 
 -- Откат invoice_items:
 ALTER TABLE invoice_items RENAME COLUMN raw_unit TO unit;
+DROP INDEX ix_invoice_items_normalized_unit_id;
 ALTER TABLE invoice_items DROP COLUMN normalized_unit_id, normalized_quantity, normalized_unit_price;
 ALTER TABLE invoice_items DROP CONSTRAINT ck_item_type;
 
@@ -665,6 +699,7 @@ DROP TABLE material_types;
 | Down-миграция теряет не-M3 ref_prices | Восстановление строковых полей до DROP; лосси для unit_id — задокументировано |
 | Инвариант не ловит неверный multiplier | Корректность multiplier закрыта unit-тестами, не инвариантом |
 | Нарезка миграции на коммиты разъединяет бэкфилл и DROP | Step 3 (бэкфилл) и Step 4 (DROP) — одна миграция Alembic |
+| Предохранитель 2 проходит вхолостую при timing bug | Читаем старую строковую `mc.material_type`, не JOIN через `material_type_id` (R4) |
 
 ---
 
