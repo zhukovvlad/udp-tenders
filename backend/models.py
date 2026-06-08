@@ -294,7 +294,7 @@ class ProjectSupplierExclusion(Base):
 class CompensationCorridor(Base):
     """Corridor rule for a project: type-level default or class-level override.
 
-    Exactly one of material_type / material_class_id is set (chk_corridor_target_exclusive).
+    Exactly one of material_type_id / material_class_id is set (chk_corridor_target_exclusive).
     is_compensable=true requires corridor_pct (chk_corridor_pct_required_if_compensable).
     Whitelist default: no row → not compensable.
     Fallback: class-level → type-level → no row.
@@ -337,6 +337,8 @@ class CompensationCorridor(Base):
             unique=True, postgresql_where=sa_text("material_type_id IS NULL"),
         ),
     )
+
+    material_type = relationship("MaterialType")
 
 
 class Invoice(Base):
