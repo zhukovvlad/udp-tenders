@@ -12,7 +12,8 @@ import { settingsApi } from "./api/settings";
 import { suppliersApi } from "./api/suppliers";
 import type { SupplierUpdateInput } from "./api/suppliers";
 import { adminApi } from "./api/admin";
-import { compensationCorridorsApi } from "./api/compensationCorridors";
+import { corridorsApi } from "./api/compensationCorridors";
+import type { CorridorUpsertPayload } from "@/types/compensationCorridor";
 import { qk } from "./queryKeys";
 
 import type { ID } from "@/types/common";
@@ -450,44 +451,74 @@ export function useToggleSupplierExclusion(projectId: ID | null) {
   });
 }
 
-// ========== Compensation corridors ==========
+// ========== Corridors (fallback hierarchy) ==========
 
-export function useCompensationCorridors(projectId: ID | null) {
+export function useCorridors(projectId: ID | null) {
   return useQuery({
-    queryKey: projectId
-      ? qk.compensationCorridors(projectId)
-      : ["compensation-corridors-disabled"],
-    queryFn: () => compensationCorridorsApi.list(projectId!),
+    queryKey: projectId ? qk.corridors(projectId) : ["corridors-disabled"],
+    queryFn: () => corridorsApi.getMatrix(projectId!),
     enabled: projectId !== null,
   });
 }
 
-export function useSetCorridor(projectId: ID | null) {
+export function useSetTypeCorridor(projectId: ID | null) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ materialClassId, corridorPct }: { materialClassId: ID; corridorPct: number }) => {
+    mutationFn: ({ materialType, payload }: { materialType: string; payload: CorridorUpsertPayload }) => {
       if (!projectId) return Promise.resolve();
-      return compensationCorridorsApi.set(projectId, materialClassId, corridorPct);
+      return corridorsApi.setType(projectId, materialType, payload);
     },
     onSuccess: () => {
       if (!projectId) return;
-      qc.invalidateQueries({ queryKey: qk.compensationCorridors(projectId) });
+      qc.invalidateQueries({ queryKey: qk.corridors(projectId) });
       qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
       qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
     },
   });
 }
 
-export function useDeleteCorridor(projectId: ID | null) {
+export function useDeleteTypeCorridor(projectId: ID | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (materialType: string) => {
+      if (!projectId) return Promise.resolve();
+      return corridorsApi.deleteType(projectId, materialType);
+    },
+    onSuccess: () => {
+      if (!projectId) return;
+      qc.invalidateQueries({ queryKey: qk.corridors(projectId) });
+      qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
+      qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
+    },
+  });
+}
+
+export function useSetClassCorridor(projectId: ID | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ materialClassId, payload }: { materialClassId: ID; payload: CorridorUpsertPayload }) => {
+      if (!projectId) return Promise.resolve();
+      return corridorsApi.setClass(projectId, materialClassId, payload);
+    },
+    onSuccess: () => {
+      if (!projectId) return;
+      qc.invalidateQueries({ queryKey: qk.corridors(projectId) });
+      qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
+      qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
+    },
+  });
+}
+
+export function useDeleteClassCorridor(projectId: ID | null) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (materialClassId: ID) => {
       if (!projectId) return Promise.resolve();
-      return compensationCorridorsApi.remove(projectId, materialClassId);
+      return corridorsApi.deleteClass(projectId, materialClassId);
     },
     onSuccess: () => {
       if (!projectId) return;
-      qc.invalidateQueries({ queryKey: qk.compensationCorridors(projectId) });
+      qc.invalidateQueries({ queryKey: qk.corridors(projectId) });
       qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
       qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
     },

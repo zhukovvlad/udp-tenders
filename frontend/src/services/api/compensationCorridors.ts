@@ -1,21 +1,26 @@
 import api from "@/lib/api";
 import type { ID } from "@/types/common";
-import type { CompensationCorridor } from "@/types/compensationCorridor";
+import type { CorridorMatrix, CorridorUpsertPayload } from "@/types/compensationCorridor";
 
-export const compensationCorridorsApi = {
-  async list(projectId: ID): Promise<CompensationCorridor[]> {
-    const { data } = await api.get<CompensationCorridor[]>(
-      `/projects/${projectId}/compensation-corridors`,
-    );
+export const corridorsApi = {
+  async getMatrix(projectId: ID): Promise<CorridorMatrix> {
+    const { data } = await api.get<CorridorMatrix>(`/projects/${projectId}/corridors`);
     return data;
   },
-  async set(projectId: ID, materialClassId: ID, corridorPct: number): Promise<void> {
-    await api.put(
-      `/projects/${projectId}/compensation-corridors/${materialClassId}`,
-      { corridor_pct: corridorPct },
-    );
+
+  async setType(projectId: ID, materialType: string, payload: CorridorUpsertPayload): Promise<void> {
+    await api.put(`/projects/${projectId}/corridors/type/${materialType}`, payload);
   },
-  async remove(projectId: ID, materialClassId: ID): Promise<void> {
-    await api.delete(`/projects/${projectId}/compensation-corridors/${materialClassId}`);
+
+  async deleteType(projectId: ID, materialType: string): Promise<void> {
+    await api.delete(`/projects/${projectId}/corridors/type/${materialType}`);
+  },
+
+  async setClass(projectId: ID, materialClassId: ID, payload: CorridorUpsertPayload): Promise<void> {
+    await api.put(`/projects/${projectId}/corridors/class/${materialClassId}`, payload);
+  },
+
+  async deleteClass(projectId: ID, materialClassId: ID): Promise<void> {
+    await api.delete(`/projects/${projectId}/corridors/class/${materialClassId}`);
   },
 };
