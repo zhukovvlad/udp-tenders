@@ -1,7 +1,7 @@
 # Спецификация: справочники единиц измерения и типов материалов
 
 **Дата:** 2026-06-08
-**Статус:** утверждён · ревизия R2 (после ревью)
+**Статус:** утверждён · ревизия R3 (после ревью + сверки с corridor-fallback)
 **Scope:** backend schema + normalization + calculations + API + migration + tests
 
 ---
@@ -31,6 +31,33 @@
 8. **Прочее:** индексы на `normalized_unit_id` и `material_type_id`; поведение
    `item_type='other'` в delivery distribution; опциональный триггер иммутабельности
    `to_base_multiplier`; раздел «Открытые вопросы» → закрыты.
+
+---
+
+## 0b. Изменения ревизии R3 (сверка с `corridor-fallback`)
+
+> **Зависимость:** этот рефакторинг применяется **после** плана `corridor-fallback`
+> (ревизия `d0e1f2a3b4c5`), который уже перестроил `compensation_corridors`:
+> суррогатный `id` PK, таргет `material_type` (String) **XOR** `material_class_id`,
+> `is_compensable` + nullable `corridor_pct`, два частичных уникальных индекса, CHECK
+> `chk_corridor_target_exclusive` и `chk_corridor_pct_required_if_compensable`,
+> резолвер class→type→no-row (whitelist). **Логика коридоров не меняется** — меняется
+> только колонка таргета: `material_type` (String) → `material_type_id` (FK).
+
+1. **§3.2 / §7 — конвертация таргета коридора String→FK расписана полностью.** Раз
+   `material_classes.material_type` уезжает в FK, оставить коридор на строке нельзя:
+   резолвер сматчивал бы строковый ключ коридора с id-ключом класса. Поэтому FK на
+   `material_type_id` — условие согласованности резолвера, не косметика (усиливает ADR #2).
+2. **§7 — пересоздаются ОБА частичных индекса.** `uq_corridor_project_class` имеет
+   предикат `WHERE material_type IS NULL` — он ссылается на дропаемую строковую колонку,
+   поэтому оба индекса (и CHECK) надо пересоздать на `material_type_id`, не только
+   `uq_corridor_project_type`.
+3. **§4.2 / §6 — правка резолвера.** `get_corridor_map` / `resolve_corridor` меняют ключ
+   type-уровня со строки на `material_type_id`; интеграция в `calculations.py` подаёт
+   `class.material_type_id`. Сам алгоритм (class→type→no-row, whitelist) — без изменений.
+4. **§4.2 — порядок гейтов.** Dimension guard и corridor resolution ортогональны:
+   сначала guard, затем (для прошедших) резолвер.
+5. **§7 Step 2 — `Decimal("0.001")`** вместо float-литерала в сиде (точность Numeric).
 
 ---
 
@@ -166,11 +193,19 @@ NFKC снимает целый класс вариантов написания 
   класса (через `material_type.default_unit.dimension`) — fail early при вводе цены,
   а не молчаливый dimension mismatch на этапе расчёта
 
-**`compensation_corridors`:**
-- DROP `material_type` (String)
-- ADD `material_type_id` FK → `material_types`, nullable, ON DELETE RESTRICT
-- UPDATE CHECK: `chk_corridor_target_exclusive` → `(material_type_id IS NOT NULL AND material_class_id IS NULL) OR (material_type_id IS NULL AND material_class_id IS NOT NULL)`
-- REBUILD INDEX: `uq_corridor_project_type` → на `material_type_id`
+**`compensation_corridors`** (поверх структуры из `corridor-fallback`; логика без изменений):
+- Таблица уже имеет суррогатный `id` PK, `is_compensable`, nullable `corridor_pct`,
+  CHECK `chk_corridor_pct_required_if_compensable` и два частичных уникальных индекса —
+  **это не трогаем**.
+- DROP `material_type` (String) → ADD `material_type_id` FK → `material_types`, nullable,
+  ON DELETE RESTRICT (бэкфилл строки→id перед дропом, см. §7).
+- Пересоздать CHECK `chk_corridor_target_exclusive` на `material_type_id`:
+  `(material_type_id IS NOT NULL AND material_class_id IS NULL) OR (material_type_id IS NULL AND material_class_id IS NOT NULL)`.
+- Пересоздать **оба** частичных индекса на `material_type_id` (у `uq_corridor_project_class`
+  предикат `WHERE material_type IS NULL` ссылается на дропаемую колонку — иначе DROP COLUMN
+  не пройдёт / снесёт индекс по CASCADE):
+  - `uq_corridor_project_type` — `(project_id, material_type_id) WHERE material_class_id IS NULL`
+  - `uq_corridor_project_class` — `(project_id, material_class_id) WHERE material_type_id IS NULL`
 
 ---
 
@@ -218,6 +253,16 @@ normalize_unit_key(raw) → NFKC + collapse spaces + lower + rstrip('.')
 2. `item.normalized_unit.dimension != reference_price.unit.dimension` → НЕ считать, пометить на ручную проверку
 
 Оба случая — честный флаг, не тихий неверный расчёт.
+
+> **Порядок гейтов.** Dimension guard и corridor resolution ортогональны и идут строго
+> по порядку: (1) guard по размерности — при mismatch строка уходит на ручной флаг
+> **независимо** от компенсируемости; (2) для прошедших guard — `resolve_corridor`
+> (class→type→no-row, whitelist) из `corridor-fallback`.
+>
+> **Правка резолвера (R3).** Алгоритм резолвера не меняется, но ключ type-уровня в
+> `get_corridor_map` / `resolve_corridor` переходит со строки `material_type` на
+> `material_type_id`, а интеграция в `calculations.py` подаёт `class.material_type_id`
+> (старая строка `material_classes.material_type` к этому моменту удалена).
 
 ### 4.3. Delivery distribution (обновлённая логика)
 
@@ -331,6 +376,11 @@ material_type_row = db.query(MaterialType).filter_by(code=item["material_type"])
 
 Неизвестный `material_type` от парсера → `has_issues`, класс материала не создаётся автоматически.
 
+> **Резолвер коридора (R3).** После того как `material_classes.material_type` (String)
+> заменён на `material_type_id`, существующий резолвер из `corridor-fallback`
+> (`get_corridor_map` / `resolve_corridor`) сматчивает type-уровень по `material_type_id`,
+> а не по строке. Логика class→type→no-row + whitelist остаётся прежней.
+
 ---
 
 ## 7. Миграция (Alembic)
@@ -372,13 +422,14 @@ ALTER TABLE compensation_corridors
 ### Step 2: Seed справочников (data migration)
 
 ```python
-# Базовые единицы первыми (flush), затем производные с их id
-TON = insert(code="TON", name="Тонна",     symbol="т",  dimension="mass",   base_unit_id=None, multiplier=1)
-KG  = insert(code="KG",  name="Килограмм", symbol="кг", dimension="mass",   base_unit_id=TON,  multiplier=0.001)
-M3  = insert(code="M3",  name="Куб. метр", symbol="м³", dimension="volume", base_unit_id=None, multiplier=1)
-L   = insert(code="L",   name="Литр",      symbol="л",  dimension="volume", base_unit_id=M3,   multiplier=0.001)
-M   = insert(code="M",   name="Метр",      symbol="м",  dimension="length", base_unit_id=None, multiplier=1)
-PCS = insert(code="PCS", name="Штука",     symbol="шт", dimension="count",  base_unit_id=None, multiplier=1)
+# Базовые единицы первыми (flush), затем производные с их id.
+# multiplier — Decimal/строкой, НЕ float (0.001 во float неточен → ломает Numeric-аудит).
+TON = insert(code="TON", name="Тонна",     symbol="т",  dimension="mass",   base_unit_id=None, multiplier=Decimal("1"))
+KG  = insert(code="KG",  name="Килограмм", symbol="кг", dimension="mass",   base_unit_id=TON,  multiplier=Decimal("0.001"))
+M3  = insert(code="M3",  name="Куб. метр", symbol="м³", dimension="volume", base_unit_id=None, multiplier=Decimal("1"))
+L   = insert(code="L",   name="Литр",      symbol="л",  dimension="volume", base_unit_id=M3,   multiplier=Decimal("0.001"))
+M   = insert(code="M",   name="Метр",      symbol="м",  dimension="length", base_unit_id=None, multiplier=Decimal("1"))
+PCS = insert(code="PCS", name="Штука",     symbol="шт", dimension="count",  base_unit_id=None, multiplier=Decimal("1"))
 
 # Алиасы — собрать из distinct-ключей: {normalize_unit_key(u) for u in raw_units}
 # (NFKC уже объединил м³↔м3, поэтому отдельные строки под них не нужны).
@@ -458,11 +509,22 @@ ALTER TABLE material_classes
 ALTER TABLE reference_prices
   ALTER COLUMN unit_id SET NOT NULL;
 
-ALTER TABLE compensation_corridors
-  DROP COLUMN material_type;
-  -- material_type_id остаётся nullable (уровень fallback)
-  -- UPDATE CHECK: chk_corridor_target_exclusive
-  -- REBUILD INDEX: uq_corridor_project_type
+-- compensation_corridors: конвертация таргета String → FK.
+-- ОБА частичных индекса завязаны на material_type (один — ключом, другой — предикатом
+-- WHERE material_type IS NULL), поэтому дропаем и пересоздаём оба, иначе DROP COLUMN
+-- упадёт или снесёт uq_corridor_project_class по CASCADE.
+DROP INDEX uq_corridor_project_type;
+DROP INDEX uq_corridor_project_class;
+ALTER TABLE compensation_corridors DROP CONSTRAINT chk_corridor_target_exclusive;
+ALTER TABLE compensation_corridors DROP COLUMN material_type;   -- material_type_id уже забэкфилен (Step 3)
+ALTER TABLE compensation_corridors ADD CONSTRAINT chk_corridor_target_exclusive CHECK (
+  (material_type_id IS NOT NULL AND material_class_id IS NULL) OR
+  (material_type_id IS NULL     AND material_class_id IS NOT NULL));
+CREATE UNIQUE INDEX uq_corridor_project_type
+  ON compensation_corridors(project_id, material_type_id)  WHERE material_class_id IS NULL;
+CREATE UNIQUE INDEX uq_corridor_project_class
+  ON compensation_corridors(project_id, material_class_id) WHERE material_type_id IS NULL;
+-- chk_corridor_pct_required_if_compensable и суррогатный id PK — НЕ трогаем.
 ```
 
 ### Step 5: Down-миграция (обратимость)
@@ -480,10 +542,23 @@ UPDATE material_classes SET material_type = (
   SELECT code FROM material_types WHERE id = material_type_id
 );
 
+-- Откат compensation_corridors к строковой структуре corridor-fallback
+-- (НЕ к до-fallback композитному PK — это зона ответственности down самого fallback):
+DROP INDEX uq_corridor_project_type;
+DROP INDEX uq_corridor_project_class;
+ALTER TABLE compensation_corridors DROP CONSTRAINT chk_corridor_target_exclusive;
 ALTER TABLE compensation_corridors ADD COLUMN material_type VARCHAR;
 UPDATE compensation_corridors SET material_type = (
   SELECT code FROM material_types WHERE id = material_type_id
 ) WHERE material_type_id IS NOT NULL;
+ALTER TABLE compensation_corridors DROP COLUMN material_type_id;
+ALTER TABLE compensation_corridors ADD CONSTRAINT chk_corridor_target_exclusive CHECK (
+  (material_type IS NOT NULL AND material_class_id IS NULL) OR
+  (material_type IS NULL     AND material_class_id IS NOT NULL));
+CREATE UNIQUE INDEX uq_corridor_project_type
+  ON compensation_corridors(project_id, material_type)     WHERE material_class_id IS NULL;
+CREATE UNIQUE INDEX uq_corridor_project_class
+  ON compensation_corridors(project_id, material_class_id) WHERE material_type IS NULL;
 
 -- Откат invoice_items:
 ALTER TABLE invoice_items RENAME COLUMN raw_unit TO unit;
@@ -589,6 +664,7 @@ DROP TABLE material_types;
 | Delivery distribution DivisionByZero | Edge case: `amount=0` → 0 доставки, явно в коде и тестах |
 | Down-миграция теряет не-M3 ref_prices | Восстановление строковых полей до DROP; лосси для unit_id — задокументировано |
 | Инвариант не ловит неверный multiplier | Корректность multiplier закрыта unit-тестами, не инвариантом |
+| Нарезка миграции на коммиты разъединяет бэкфилл и DROP | Step 3 (бэкфилл) и Step 4 (DROP) — одна миграция Alembic |
 
 ---
 
@@ -603,7 +679,11 @@ DROP TABLE material_types;
 - [ ] Delivery: моно-dimension → по qty, mixed → по amount, zero-amount → без деления на 0
 - [ ] `item_type='other'` вне delivery distribution, но входит в оборот (monthly summary, supplier)
 - [ ] `item_type` валидируется CHECK constraint (`ck_item_type`)
-- [ ] `CompensationCorridor.material_type_id` — FK, не строка
+- [ ] `CompensationCorridor.material_type_id` — FK, не строка; **оба** частичных индекса
+      (`uq_corridor_project_type`, `uq_corridor_project_class`) и CHECK
+      `chk_corridor_target_exclusive` пересозданы на `material_type_id`
+- [ ] Логика коридоров (class→type→no-row, `is_compensable`, whitelist) не изменилась;
+      резолвер сматчивает type-уровень по `material_type_id`
 - [ ] `reference_prices.unit_id` — NOT NULL, только базовые единицы, dimension совпадает с material_type
 - [ ] Миграция up проходит без потери данных; down обратим по структуре (лосси для не-M3 `unit_id`, см. §7 Step 5)
 - [ ] Предохранители в миграции: неизвестные значения → fail
@@ -618,7 +698,7 @@ DROP TABLE material_types;
 ## 11. Ключевые решения (ADR)
 
 1. **item_type остаётся** — ортогональная ось к `material_type` (роль строки в расчёте vs семейство материала). Переезжает на Enum + CHECK.
-2. **CompensationCorridor.material_type → material_type_id FK** — избежание split-brain (FK + строка в одном рефакторинге).
+2. **CompensationCorridor.material_type → material_type_id FK** — раз `material_classes.material_type` уезжает в FK, строковый таргет коридора рассинхронит резолвер (строка vs id); FK — условие согласованности `resolve_corridor`, не косметика. Логика коридоров (class→type→no-row, whitelist, is_compensable) из `corridor-fallback` сохраняется.
 3. **Write-time нормализация** — единственный корректный подход для финансовой системы (аудируемость, детерминистичность, иммутабельность истории).
 4. **Delivery distribution: qty для моно-dimension, amount для mixed** — физический смысл в строительной логистике (фрахт зависит от объёма/массы, не от стоимости груза).
 5. **Неизвестная единица → has_issues, не error** — гранулярность (49 из 50 строк считаются), не блокировка всего документа.
