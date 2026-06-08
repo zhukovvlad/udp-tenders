@@ -447,12 +447,13 @@ ALTER TABLE compensation_corridors
 ```python
 # Базовые единицы первыми (flush), затем производные с их id.
 # multiplier — Decimal/строкой, НЕ float (0.001 во float неточен → ломает Numeric-аудит).
-TON = insert(code="TON", name="Тонна",     symbol="т",  dimension="mass",   base_unit_id=None, multiplier=Decimal("1"))
-KG  = insert(code="KG",  name="Килограмм", symbol="кг", dimension="mass",   base_unit_id=TON,  multiplier=Decimal("0.001"))
-M3  = insert(code="M3",  name="Куб. метр", symbol="м³", dimension="volume", base_unit_id=None, multiplier=Decimal("1"))
-L   = insert(code="L",   name="Литр",      symbol="л",  dimension="volume", base_unit_id=M3,   multiplier=Decimal("0.001"))
-M   = insert(code="M",   name="Метр",      symbol="м",  dimension="length", base_unit_id=None, multiplier=Decimal("1"))
-PCS = insert(code="PCS", name="Штука",     symbol="шт", dimension="count",  base_unit_id=None, multiplier=Decimal("1"))
+# Переменные *_ID — id строки после flush, используются в бэкфилле (Step 3) и алиасах.
+TON_ID = insert(code="TON", name="Тонна",     symbol="т",  dimension="mass",   base_unit_id=None, multiplier=Decimal("1"))
+KG_ID  = insert(code="KG",  name="Килограмм", symbol="кг", dimension="mass",   base_unit_id=TON_ID, multiplier=Decimal("0.001"))
+M3_ID  = insert(code="M3",  name="Куб. метр", symbol="м³", dimension="volume", base_unit_id=None, multiplier=Decimal("1"))
+L_ID   = insert(code="L",   name="Литр",      symbol="л",  dimension="volume", base_unit_id=M3_ID,  multiplier=Decimal("0.001"))
+M_ID   = insert(code="M",   name="Метр",      symbol="м",  dimension="length", base_unit_id=None, multiplier=Decimal("1"))
+PCS_ID = insert(code="PCS", name="Штука",     symbol="шт", dimension="count",  base_unit_id=None, multiplier=Decimal("1"))
 
 # Алиасы — собрать из distinct-ключей: {normalize_unit_key(u) for u in raw_units}
 # (NFKC уже объединил м³↔м3, поэтому отдельные строки под них не нужны).
@@ -503,8 +504,14 @@ op.execute("""
 # корректно воспроизвести в SQL через lower(trim(...)) — иначе бэкфилл разойдётся
 # с рантаймом. Поэтому маппим через distinct-значения в Python (их единицы — не
 # строки): строим карту normalize_unit_key(raw) → unit_id, затем bulk-апдейт.
+# aliases_by_key — карта нормализованный ключ → {unit_id, base_id, multiplier},
+# строится из засеянных алиасов (Step 2):
+aliases_by_key = {
+    row.raw_text: row for row in conn.execute("SELECT raw_text, unit_id, ... FROM unit_aliases JOIN units_of_measure ...")
+}
+
 distinct_raw = {r[0] for r in conn.execute("SELECT DISTINCT raw_unit FROM invoice_items")}
-key_to_unit = {}                       # normalized_key → (unit_id, base_id, multiplier)
+key_to_unit = {}                       # исходный raw → (unit_id, base_id, multiplier)
 for raw in distinct_raw:
     alias = aliases_by_key.get(normalize_unit_key(raw or ""))
     if alias:
