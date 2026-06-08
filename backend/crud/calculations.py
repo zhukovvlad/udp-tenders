@@ -122,11 +122,12 @@ def compute_calculations(
 
     # Names populated lazily per month and cached across months to avoid a full-table scan
     class_name_map: dict[int, str] = {}
+    class_type_map: dict[int, str] = {}
 
-    # Corridor percentages per material class for this project (loaded once).
+    # Corridor map for this project (loaded once, resolved in Python per class).
     # Local import avoids a circular import at module load time.
-    from crud.compensation_corridors import get_corridor_map  # noqa: PLC0415
-    corridor_by_class: dict[int, float] = get_corridor_map(db, project_id)
+    from crud.compensation_corridors import get_corridor_map, resolve_corridor  # noqa: PLC0415
+    corridor_by_class, corridor_by_type = get_corridor_map(db, project_id)
 
     results: list[dict] = []
 
@@ -265,6 +266,7 @@ def compute_calculations(
         if missing_ids:
             for mc in db.query(MaterialClass).filter(MaterialClass.id.in_(missing_ids)).all():
                 class_name_map[mc.id] = mc.name
+                class_type_map[mc.id] = mc.material_type
 
         # Базовые цены, перекрывающие месяц, последняя по классу
         ref_rows = (
@@ -304,13 +306,19 @@ def compute_calculations(
                 deviation_pct = money_round((avg_price - ref_price) / ref_price * 100, 2)
                 deviation_amount = money_round((avg_price - ref_price) * qty, 2)
 
-            corridor_pct = corridor_by_class.get(cid)
-            compensation_per_unit = compute_compensation_per_unit(avg_price, ref_price, corridor_pct)
-            compensation_amount = (
-                money_round(compensation_per_unit * qty, 2)
-                if compensation_per_unit is not None
-                else None
+            compensable, corridor_pct = resolve_corridor(
+                corridor_by_class, corridor_by_type, cid, class_type_map.get(cid, ""),
             )
+            if not compensable:
+                compensation_per_unit = None
+                compensation_amount = None
+            else:
+                compensation_per_unit = compute_compensation_per_unit(avg_price, ref_price, corridor_pct)
+                compensation_amount = (
+                    money_round(compensation_per_unit * qty, 2)
+                    if compensation_per_unit is not None
+                    else None
+                )
 
             results.append({
                 "project_id": project_id,

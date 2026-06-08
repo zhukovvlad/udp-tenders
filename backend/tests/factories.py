@@ -4,6 +4,7 @@
 фикстуру `db_session`. Фабрики привязываются к session через `_register_session`.
 """
 from datetime import date
+from decimal import Decimal
 
 import factory
 from factory.alchemy import SQLAlchemyModelFactory
@@ -156,5 +157,7 @@ class CompensationCorridorFactory(_BaseFactory):
         model = CompensationCorridor
 
     project_id = factory.LazyAttribute(lambda _: ProjectFactory.create().id)
+    material_type = None
     material_class_id = factory.LazyAttribute(lambda _: MaterialClassFactory.create().id)
-    corridor_pct = 5.0
+    is_compensable = True
+    corridor_pct = Decimal("5.00")

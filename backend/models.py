@@ -3,11 +3,13 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -216,25 +218,48 @@ class ProjectSupplierExclusion(Base):
 
 
 class CompensationCorridor(Base):
-    """Коридор компенсации: допуск (%) вокруг базовой цены, в пределах которого
-    удорожание/удешевление не компенсируется. Задаётся per (проект × класс материала),
-    не периодичен (действует весь срок договора).
+    """Corridor rule for a project: type-level default or class-level override.
 
-    Семантика: нет строки → класс некомпенсируемый; corridor_pct=0 → компенсируется
-    любое отклонение (нет мёртвой зоны); corridor_pct=X → допуск ±X%.
+    Exactly one of material_type / material_class_id is set (chk_corridor_target_exclusive).
+    is_compensable=true requires corridor_pct (chk_corridor_pct_required_if_compensable).
+    Whitelist default: no row → not compensable.
+    Fallback: class-level → type-level → no row.
     """
     __tablename__ = "compensation_corridors"
 
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    material_type = Column(String, nullable=True)
     material_class_id = Column(
-        Integer, ForeignKey("material_classes.id", ondelete="CASCADE"), primary_key=True
+        Integer, ForeignKey("material_classes.id", ondelete="CASCADE"), nullable=True
     )
-    corridor_pct = Column(Numeric(5, 2), nullable=False)  # 5.00 = ±5%; хранится в процентах, не в долях
+    is_compensable = Column(Boolean, nullable=False, default=False)
+    corridor_pct = Column(Numeric(5, 2), nullable=True)
     created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
     updated_at = Column(
         DateTime,
         server_default=sa_text("(now() AT TIME ZONE 'utc')"),
         onupdate=lambda: datetime.now(UTC).replace(tzinfo=None),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "(material_type IS NOT NULL AND material_class_id IS NULL) OR "
+            "(material_type IS NULL AND material_class_id IS NOT NULL)",
+            name="chk_corridor_target_exclusive",
+        ),
+        CheckConstraint(
+            "(is_compensable IS FALSE) OR (is_compensable IS TRUE AND corridor_pct IS NOT NULL)",
+            name="chk_corridor_pct_required_if_compensable",
+        ),
+        Index(
+            "uq_corridor_project_type", "project_id", "material_type",
+            unique=True, postgresql_where=sa_text("material_class_id IS NULL"),
+        ),
+        Index(
+            "uq_corridor_project_class", "project_id", "material_class_id",
+            unique=True, postgresql_where=sa_text("material_type IS NULL"),
+        ),
     )
 
 
