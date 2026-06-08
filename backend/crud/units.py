@@ -26,9 +26,9 @@ def normalize_unit_key(raw: str | None) -> str:
 # --- Invariant guard --------------------------------------------------------
 
 def invariant_holds(
-    quantity: Decimal,
-    unit_price: Decimal,
-    amount: Decimal,
+    quantity: Decimal | None,
+    unit_price: Decimal | None,
+    amount: Decimal | None,
     tol_abs: Decimal = Decimal("1"),
     tol_rel: Decimal = Decimal("0.001"),
 ) -> bool:
@@ -108,6 +108,8 @@ def normalize_item(
     entry = aliases.get(normalize_unit_key(raw_unit))
     if entry is None:
         return None
+    if entry.multiplier == 0:
+        return None
     return NormalizationResult(
         normalized_unit_id=entry.base_unit_id,
         normalized_quantity=quantity * entry.multiplier,
@@ -130,7 +132,7 @@ def load_alias_map(db) -> dict[str, AliasEntry]:
         if unit is None:
             continue
         base = units.get(unit.base_unit_id) if unit.base_unit_id else unit
-        out[alias.raw_text] = AliasEntry(
+        out[normalize_unit_key(alias.raw_text)] = AliasEntry(
             base_unit_id=base.id,
             multiplier=unit.to_base_multiplier,
             dimension=base.dimension,

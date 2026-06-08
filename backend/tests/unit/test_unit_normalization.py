@@ -46,3 +46,8 @@ class TestInvariantHolds:
     def test_just_over_rel_tolerance(self):
         # 1000 * 1 = 1000; 0.1% = 1.0; amount off by 1.01 → fail
         assert invariant_holds(Decimal("1000"), Decimal("1"), Decimal("1001.01")) is False
+
+    def test_none_inputs_return_false(self):
+        assert invariant_holds(None, Decimal("1"), Decimal("1")) is False
+        assert invariant_holds(Decimal("1"), None, Decimal("1")) is False
+        assert invariant_holds(Decimal("1"), Decimal("1"), None) is False
