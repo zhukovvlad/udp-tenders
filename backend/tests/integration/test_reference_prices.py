@@ -28,6 +28,8 @@ def test_list_reference_prices_includes_relations(client, factories):
     assert len(body) == 1
     assert "project_name" in body[0]
     assert "material_class_name" in body[0]
+    # material_type must be the bare code string, not the nested MaterialType object
+    assert body[0]["material_type"] == "concrete"
 
 
 def test_filter_by_project(client, factories):
@@ -135,5 +137,6 @@ def test_update_reference_price_response_includes_relations(client, factories):
     body = response.json()
     assert "project_name" in body
     assert "material_class_name" in body
-    assert "material_type" in body
+    # material_type must be the bare code string, not the nested MaterialType object
+    assert body["material_type"] == "concrete"
 
