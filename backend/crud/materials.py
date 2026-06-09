@@ -2,19 +2,34 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from models import InvoiceItem, MaterialClass, ReferencePrice
+from models import InvoiceItem, MaterialClass, MaterialType, ReferencePrice
 
 logger = logging.getLogger(__name__)
 
 VALID_CALC_ROLES = {"base", "additive", "exclude"}
 
 
+class UnknownMaterialType(ValueError):
+    """Raised when a material_type code is not in the material_types table."""
+
+
+def _material_type_id_by_code(db: Session, code: str) -> int:
+    mt = db.query(MaterialType).filter(MaterialType.code == code).first()
+    if mt is None:
+        raise UnknownMaterialType(code)
+    return mt.id
+
+
 # --- Material Classes ---
 
 def get_material_classes(db: Session, material_type: str = None):
-    q = db.query(MaterialClass).order_by(MaterialClass.material_type, MaterialClass.name)
+    q = (
+        db.query(MaterialClass)
+        .join(MaterialType, MaterialClass.material_type_id == MaterialType.id)
+        .order_by(MaterialType.code, MaterialClass.name)
+    )
     if material_type:
-        q = q.filter(MaterialClass.material_type == material_type)
+        q = q.filter(MaterialType.code == material_type)
     return q.all()
 
 
@@ -27,11 +42,12 @@ def get_or_create_material_class(
 ) -> MaterialClass:
     if calc_role not in VALID_CALC_ROLES:
         raise ValueError(f"Unknown calc_role {calc_role!r}; allowed: {sorted(VALID_CALC_ROLES)}")
+    material_type_id = _material_type_id_by_code(db, material_type)
     mc = db.query(MaterialClass).filter(
-        MaterialClass.name == name, MaterialClass.material_type == material_type
+        MaterialClass.name == name, MaterialClass.material_type_id == material_type_id
     ).first()
     if not mc:
-        mc = MaterialClass(name=name, material_type=material_type, calc_role=calc_role)
+        mc = MaterialClass(name=name, material_type_id=material_type_id, calc_role=calc_role)
         db.add(mc)
         db.commit()
         db.refresh(mc)
