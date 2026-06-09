@@ -99,7 +99,7 @@ def _serialize_document(doc) -> dict:
                         ),
                         "material_class_id": item.material_class_id,
                         "quantity": item.quantity,
-                        "unit": item.unit,
+                        "unit": item.raw_unit,
                         "unit_price": item.unit_price,
                         "amount": item.amount,
                         "vat_amount": item.vat_amount,
@@ -288,7 +288,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
             item.item_type = item_data.item_type
             item.material_class_id = item_data.material_class_id
             item.quantity = item_data.quantity
-            item.unit = item_data.unit
+            item.raw_unit = item_data.unit
             item.unit_price = item_data.unit_price
             item.amount = item_data.amount
             item.vat_amount = item_data.vat_amount
@@ -299,7 +299,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                 item_type=item_data.item_type,
                 material_class_id=item_data.material_class_id,
                 quantity=item_data.quantity,
-                unit=item_data.unit,
+                raw_unit=item_data.unit,
                 unit_price=item_data.unit_price,
                 amount=item_data.amount,
                 vat_amount=item_data.vat_amount,
