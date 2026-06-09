@@ -1,6 +1,6 @@
 import logging
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from models import InvoiceItem, MaterialClass, MaterialType, ReferencePrice
 
@@ -22,9 +22,10 @@ def _material_type_id_by_code(db: Session, code: str) -> int:
 
 # --- Material Classes ---
 
-def get_material_classes(db: Session, material_type: str = None):
+def get_material_classes(db: Session, material_type: str | None = None) -> list[MaterialClass]:
     q = (
         db.query(MaterialClass)
+        .options(joinedload(MaterialClass.material_type))
         .join(MaterialType, MaterialClass.material_type_id == MaterialType.id)
         .order_by(MaterialType.code, MaterialClass.name)
     )
