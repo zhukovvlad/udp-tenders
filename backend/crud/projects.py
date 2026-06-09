@@ -2,7 +2,7 @@ from datetime import date
 
 from sqlalchemy.orm import Session, joinedload
 
-from models import Project, ReferencePrice
+from models import MaterialClass, Project, ReferencePrice
 
 # Sentinel: field was not provided in the update payload (differs from explicit None)
 _UNSET = object()
@@ -49,7 +49,8 @@ def delete_project(db: Session, project_id: int):
 def get_reference_prices(db: Session, project_id: int = None, material_class_id: int = None):
     q = db.query(ReferencePrice).options(
         joinedload(ReferencePrice.project),
-        joinedload(ReferencePrice.material_class),
+        joinedload(ReferencePrice.material_class).joinedload(MaterialClass.material_type),
+        joinedload(ReferencePrice.unit),
     )
     if project_id is not None:
         q = q.filter(ReferencePrice.project_id == project_id)
@@ -60,7 +61,10 @@ def get_reference_prices(db: Session, project_id: int = None, material_class_id:
 
 def create_reference_price(db: Session, project_id: int, material_class_id: int,
                            price: float, period_start: date, period_end: date,
-                           source: str | None = None, unit_id: int | None = None) -> ReferencePrice:
+                           source: str | None = None, *, unit_id: int) -> ReferencePrice:
+    # unit_id is NOT NULL in the DB; require it explicitly (keyword-only) so a
+    # missing unit surfaces as a clear TypeError at the call site, not an
+    # IntegrityError at commit. The sole caller (reference_prices router) validates it first.
     rp = ReferencePrice(
         project_id=project_id, material_class_id=material_class_id,
         unit_id=unit_id,

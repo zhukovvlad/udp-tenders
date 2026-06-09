@@ -35,14 +35,19 @@ def _register_session(session) -> None:
     _session_holder["session"] = session
 
 
-def _unit_id(code: str) -> int:
+def _require_session():
     session = _session_holder["session"]
-    return session.query(UnitOfMeasure).filter_by(code=code).one().id
+    if session is None:
+        raise RuntimeError("Session не зарегистрирована. Используй фикстуру `factories`.")
+    return session
+
+
+def _unit_id(code: str) -> int:
+    return _require_session().query(UnitOfMeasure).filter_by(code=code).one().id
 
 
 def _material_type_id(code: str) -> int:
-    session = _session_holder["session"]
-    return session.query(MaterialType).filter_by(code=code).one().id
+    return _require_session().query(MaterialType).filter_by(code=code).one().id
 
 
 class _BaseFactory(SQLAlchemyModelFactory):
@@ -158,20 +163,22 @@ class InvoiceItemFactory(_BaseFactory):
     invoice = factory.SubFactory(InvoiceFactory)
     raw_name = "Бетон В25"
     item_type = "material"
-    quantity = 5.0
+    quantity = Decimal("5")
     raw_unit = "м3"
     # ВНИМАНИЕ: дефолт нормализации рассчитан на м³ (multiplier=1, normalized == raw).
     # При override raw_unit на другую единицу (напр. "кг") нужно ЯВНО задать
     # normalized_unit_id / normalized_quantity / normalized_unit_price —
     # иначе фикстура будет несогласованной (кг → тонны, multiplier 0.001).
     normalized_unit_id = factory.LazyAttribute(lambda _: _unit_id("M3"))
-    normalized_quantity = factory.LazyAttribute(lambda obj: obj.quantity)
-    unit_price = 8000.0
-    normalized_unit_price = factory.LazyAttribute(lambda obj: obj.unit_price)
+    normalized_quantity = factory.LazyAttribute(lambda obj: Decimal(str(obj.quantity)))
+    unit_price = Decimal("8000.0")
+    # Денежные поля — Decimal, чтобы Numeric-колонки не получали float-артефактов.
+    # Decimal(str(...)) делает арифметику устойчивой к int/float/Decimal override в тестах.
+    normalized_unit_price = factory.LazyAttribute(lambda obj: Decimal(str(obj.unit_price)))
     # amount и vat_amount выводятся из quantity * unit_price — это предотвращает
     # рассинхронизацию при override quantity. Тесты могут передать amount явно.
-    amount = factory.LazyAttribute(lambda obj: obj.quantity * obj.unit_price)
-    vat_amount = factory.LazyAttribute(lambda obj: round(obj.amount * 0.20, 2))
+    amount = factory.LazyAttribute(lambda obj: Decimal(str(obj.quantity)) * Decimal(str(obj.unit_price)))
+    vat_amount = factory.LazyAttribute(lambda obj: round(Decimal(str(obj.amount)) * Decimal("0.20"), 2))
 
 
 class CompensationCorridorFactory(_BaseFactory):

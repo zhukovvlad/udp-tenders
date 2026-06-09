@@ -4,7 +4,7 @@
 
 ## Стек
 Backend: Python 3.12+, FastAPI, SQLAlchemy (sync), Alembic, pydantic-settings; auth — pyjwt HS256 + argon2, httpOnly cookies, CSRF.
-Frontend: React 18, TS (strict), Vite, shadcn/ui, Tailwind v4, Recharts, TanStack Query v5.
+Frontend: React 19, TS (strict), Vite, shadcn/ui, Tailwind v4, Recharts, TanStack Query v5.
 PostgreSQL (Neon) · MinIO (S3) · OpenRouter API (Claude Vision, `PDF_ENGINE=native`).
 
 ## Команды — только через `just`, никогда `cd backend && ...`
