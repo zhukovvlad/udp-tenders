@@ -5,7 +5,7 @@ from decimal import Decimal
 from sqlalchemy import func, literal, or_
 from sqlalchemy.orm import Session
 
-from models import Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice
+from models import Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice, UnitOfMeasure
 
 
 def compute_compensation_per_unit(
@@ -70,40 +70,44 @@ def _months_in_range(start: date, end: date) -> list[tuple[date, date]]:
     return months
 
 
-def _aggregate_by_class(
-    base_rows,
-    base_qty_per_invoice: dict[int, float],
-    shared_per_invoice: dict[int, float],
-) -> dict[int, dict]:
-    """Distribute shared costs proportionally across base material classes per invoice.
+def _aggregate_by_class(base_rows, shared_per_invoice: dict[int, Decimal]) -> dict[int, dict]:
+    """Distribute shared costs across base classes per invoice using dimension-aware shares.
 
-    Args:
-        base_rows: query rows with fields (invoice_id, material_class_id, mat_total, mat_vat, qty).
-        base_qty_per_invoice: total base qty per invoice — denominator for proportional share.
-        shared_per_invoice: combined delivery + additive cost (with VAT) per invoice.
-
-    Returns dict[class_id -> {mat_with_vat, shared_with_vat, qty, invoice_ids}].
+    base_rows: rows with (invoice_id, material_class_id, mat_total, mat_vat, qty, dimension, symbol).
+      qty is the SUM of normalized_quantity; mat_total is SUM(amount) excl VAT.
+    Returns dict[class_id -> {mat_with_vat, shared_with_vat, qty, dimensions, symbol, invoice_ids}].
     """
-    class_contrib: dict[int, dict] = {}
+    from collections import defaultdict
+
+    rows_by_invoice: dict[int, list] = defaultdict(list)
     for row in base_rows:
-        cid = row.material_class_id
-        inv_id = row.invoice_id
-        qty_base_in_inv = base_qty_per_invoice.get(inv_id, Decimal("0"))
-        if qty_base_in_inv <= 0:
-            continue
-        share = row.qty / qty_base_in_inv   # Decimal / Decimal → Decimal
-        shared = shared_per_invoice.get(inv_id, Decimal("0")) * share
-        if cid not in class_contrib:
-            class_contrib[cid] = {
-                "mat_with_vat": Decimal("0"),
-                "shared_with_vat": Decimal("0"),
-                "qty": Decimal("0"),
-                "invoice_ids": set(),
-            }
-        class_contrib[cid]["mat_with_vat"] += row.mat_total + row.mat_vat
-        class_contrib[cid]["shared_with_vat"] += shared
-        class_contrib[cid]["qty"] += row.qty
-        class_contrib[cid]["invoice_ids"].add(inv_id)
+        rows_by_invoice[row.invoice_id].append(row)
+
+    class_contrib: dict[int, dict] = {}
+    for inv_id, rows in rows_by_invoice.items():
+        shares = compute_shared_shares(rows)            # one share per class_id
+        shared_total = shared_per_invoice.get(inv_id, Decimal("0"))
+        # Per-ROW accumulation: material, qty, dimensions (a class may have >1 row when
+        # it spans dimensions — these MUST sum across rows).
+        for row in rows:
+            cid = row.material_class_id
+            if cid not in class_contrib:
+                class_contrib[cid] = {
+                    "mat_with_vat": Decimal("0"),
+                    "shared_with_vat": Decimal("0"),
+                    "qty": Decimal("0"),
+                    "dimensions": set(),   # >1 ⇒ intra-class dimension mix (guarded downstream)
+                    "symbol": row.symbol,
+                    "invoice_ids": set(),
+                }
+            class_contrib[cid]["mat_with_vat"] += row.mat_total + row.mat_vat
+            class_contrib[cid]["qty"] += row.qty
+            class_contrib[cid]["dimensions"].add(row.dimension)
+            class_contrib[cid]["invoice_ids"].add(inv_id)
+        # Per-CLASS shared accrual: exactly ONCE per (invoice, class). Iterating over
+        # `rows` here would double-count a class that has >1 row (shares is per-class).
+        for cid, share in shares.items():
+            class_contrib[cid]["shared_with_vat"] += shared_total * share
     return class_contrib
 
 
@@ -115,12 +119,7 @@ def compute_calculations(
     material_class_id: int | None = None,
     excluded_supplier_ids: set[int] | None = None,
 ) -> list[dict]:
-    """Live-вычисление расчётов по проекту помесячно без записи в БД.
-
-    Если period_start/period_end не заданы — определяет диапазон по MIN/MAX дат инвойсов.
-    Возвращает [] если нет инвойсов или нет материальных позиций с классом.
-    Строки с total_qty == 0 пропускаются.
-    """
+    """Live monthly calculations per material class (normalized units). See spec §4."""
     if period_start is None or period_end is None:
         bounds_q = (
             db.query(func.min(Invoice.date), func.max(Invoice.date))
@@ -129,10 +128,7 @@ def compute_calculations(
         )
         if excluded_supplier_ids:
             bounds_q = bounds_q.filter(
-                or_(
-                    Invoice.supplier_id.is_(None),
-                    Invoice.supplier_id.notin_(excluded_supplier_ids),
-                )
+                or_(Invoice.supplier_id.is_(None), Invoice.supplier_id.notin_(excluded_supplier_ids))
             )
         bounds = bounds_q.first()
         if not bounds or not bounds[0]:
@@ -147,19 +143,16 @@ def compute_calculations(
     if not months:
         return []
 
-    # Names populated lazily per month and cached across months to avoid a full-table scan
     class_name_map: dict[int, str] = {}
-    class_type_map: dict[int, int] = {}
+    class_type_id_map: dict[int, int] = {}
 
-    # Corridor map for this project (loaded once, resolved in Python per class).
-    # Local import avoids a circular import at module load time.
     from crud.compensation_corridors import get_corridor_map, resolve_corridor  # noqa: PLC0415
     corridor_by_class, corridor_by_type = get_corridor_map(db, project_id)
 
+    from finance import money_round  # noqa: PLC0415
     results: list[dict] = []
 
     for month_start, month_end in months:
-        # Все счета проекта за месяц
         invoice_ids_month_q = (
             db.query(Invoice.id)
             .join(Document, Invoice.document_id == Document.id)
@@ -171,18 +164,15 @@ def compute_calculations(
         )
         if excluded_supplier_ids:
             invoice_ids_month_q = invoice_ids_month_q.filter(
-                or_(
-                    Invoice.supplier_id.is_(None),
-                    Invoice.supplier_id.notin_(excluded_supplier_ids),
-                )
+                or_(Invoice.supplier_id.is_(None), Invoice.supplier_id.notin_(excluded_supplier_ids))
             )
         invoice_ids_month = [row[0] for row in invoice_ids_month_q.all()]
         if not invoice_ids_month:
             continue
 
-        # --- По каждому счёту: объём base-материалов по классам ---
-        # Знаменатель пропорции = только calc_role="base" внутри счёта
-        base_per_invoice_q = (
+        # Base material rows per (invoice, class) — ALL base classes (no class filter here),
+        # only normalized rows. Joined to units for dimension/symbol.
+        base_rows = (
             db.query(
                 InvoiceItem.invoice_id,
                 InvoiceItem.material_class_id,
@@ -191,76 +181,54 @@ def compute_calculations(
                     InvoiceItem.vat_amount,
                     InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100
                 )).label("mat_vat"),
-                func.sum(InvoiceItem.quantity).label("qty"),
+                func.sum(InvoiceItem.normalized_quantity).label("qty"),
+                UnitOfMeasure.dimension.label("dimension"),
+                UnitOfMeasure.symbol.label("symbol"),
             )
             .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
             .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
+            .join(UnitOfMeasure, InvoiceItem.normalized_unit_id == UnitOfMeasure.id)
             .filter(
                 InvoiceItem.invoice_id.in_(invoice_ids_month),
                 InvoiceItem.item_type == "material",
+                InvoiceItem.normalized_unit_id.isnot(None),
                 MaterialClass.calc_role == "base",
             )
-        )
-        if material_class_id is not None:
-            base_per_invoice_q = base_per_invoice_q.filter(
-                InvoiceItem.material_class_id == material_class_id
+            .group_by(
+                InvoiceItem.invoice_id, InvoiceItem.material_class_id,
+                UnitOfMeasure.dimension, UnitOfMeasure.symbol,
             )
-        base_rows = base_per_invoice_q.group_by(
-            InvoiceItem.invoice_id, InvoiceItem.material_class_id
-        ).all()
-
+            .all()
+        )
         if not base_rows:
             continue
 
-        # Суммарный объём base-материалов по каждому счёту (знаменатель пропорции)
-        base_qty_per_invoice: dict[int, Decimal] = {}
-        for row in (
-            db.query(
-                InvoiceItem.invoice_id,
-                func.sum(InvoiceItem.quantity).label("total_qty"),
-            )
-            .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
-            .filter(
-                InvoiceItem.invoice_id.in_(invoice_ids_month),
-                InvoiceItem.item_type == "material",
-                MaterialClass.calc_role == "base",
-            )
-            .group_by(InvoiceItem.invoice_id)
-            .all()
-        ):
-            base_qty_per_invoice[row.invoice_id] = row.total_qty
-
-        # Доставка по каждому счёту (amount + VAT)
+        # Delivery per invoice (amount + VAT), item_type=delivery
         delivery_per_invoice: dict[int, Decimal] = {}
         for row in (
             db.query(
                 InvoiceItem.invoice_id,
                 func.sum(
-                    InvoiceItem.amount +
-                    func.coalesce(
+                    InvoiceItem.amount + func.coalesce(
                         InvoiceItem.vat_amount,
                         InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100
                     )
                 ).label("total_with_vat"),
             )
             .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
-            .filter(
-                InvoiceItem.invoice_id.in_(invoice_ids_month),
-                InvoiceItem.item_type == "delivery",
-            )
+            .filter(InvoiceItem.invoice_id.in_(invoice_ids_month), InvoiceItem.item_type == "delivery")
             .group_by(InvoiceItem.invoice_id)
             .all()
         ):
             delivery_per_invoice[row.invoice_id] = row.total_with_vat
 
-        # Присадки (calc_role="additive") по каждому счёту (amount + VAT)
+        # Additives (material + calc_role=additive), normalized rows only
         additive_per_invoice: dict[int, Decimal] = {}
         for row in (
             db.query(
                 InvoiceItem.invoice_id,
                 func.sum(
-                    InvoiceItem.amount +
-                    func.coalesce(
+                    InvoiceItem.amount + func.coalesce(
                         InvoiceItem.vat_amount,
                         InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100
                     )
@@ -278,26 +246,24 @@ def compute_calculations(
         ):
             additive_per_invoice[row.invoice_id] = row.total_with_vat
 
-        # Объединяем доставку и присадки в один словарь shared costs per invoice
         shared_per_invoice = {
             inv_id: delivery_per_invoice.get(inv_id, Decimal("0")) + additive_per_invoice.get(inv_id, Decimal("0"))
             for inv_id in set(delivery_per_invoice) | set(additive_per_invoice)
         }
-        # Агрегируем contribution по классу через все счета месяца
-        class_contrib = _aggregate_by_class(base_rows, base_qty_per_invoice, shared_per_invoice)
 
+        class_contrib = _aggregate_by_class(base_rows, shared_per_invoice)
         class_ids = list(class_contrib.keys())
 
-        # Подгружаем имена классов, которых ещё нет в кеше
         missing_ids = [cid for cid in class_ids if cid not in class_name_map]
         if missing_ids:
             for mc in db.query(MaterialClass).filter(MaterialClass.id.in_(missing_ids)).all():
                 class_name_map[mc.id] = mc.name
-                class_type_map[mc.id] = mc.material_type_id
+                class_type_id_map[mc.id] = mc.material_type_id
 
-        # Базовые цены, перекрывающие месяц, последняя по классу
+        # Reference prices overlapping the month, latest per class, joined to unit dimension
         ref_rows = (
-            db.query(ReferencePrice)
+            db.query(ReferencePrice, UnitOfMeasure.dimension.label("ref_dim"))
+            .join(UnitOfMeasure, ReferencePrice.unit_id == UnitOfMeasure.id)
             .filter(
                 ReferencePrice.project_id == project_id,
                 ReferencePrice.material_class_id.in_(class_ids),
@@ -312,39 +278,45 @@ def compute_calculations(
             )
             .all()
         )
-        ref_by_class: dict[int, ReferencePrice] = {}
-        for ref in ref_rows:
+        ref_by_class: dict[int, tuple] = {}
+        for ref, ref_dim in ref_rows:
             if ref.material_class_id not in ref_by_class:
-                ref_by_class[ref.material_class_id] = ref
+                ref_by_class[ref.material_class_id] = (ref, ref_dim)
 
-        from finance import money_round  # noqa: PLC0415
         for cid, contrib in class_contrib.items():
+            if material_class_id is not None and cid != material_class_id:
+                continue
             qty = contrib["qty"]
             if qty <= 0:
                 continue
-            # avg_price с НДС — корректно для сравнения с базовыми ценами (тоже с НДС)
             avg_price = (contrib["mat_with_vat"] + contrib["shared_with_vat"]) / qty
 
-            ref = ref_by_class.get(cid)
-            ref_price = ref.price if ref else None  # Decimal | None
+            ref_tuple = ref_by_class.get(cid)
+            ref = ref_tuple[0] if ref_tuple else None
+            ref_dim = ref_tuple[1] if ref_tuple else None
+            ref_price = ref.price if ref else None
+            # class_dim is None when the class spans >1 dimension → guard blocks (intra mix).
+            class_dim = next(iter(contrib["dimensions"])) if len(contrib["dimensions"]) == 1 else None
+            intra_mismatch = len(contrib["dimensions"]) > 1
+            mismatch = intra_mismatch or (ref is not None and not dimension_matches(class_dim, ref_dim))
+
             deviation_pct = None
             deviation_amount = None
-            if ref_price and ref_price > 0:
+            if ref_price and ref_price > 0 and not mismatch:
                 deviation_pct = money_round((avg_price - ref_price) / ref_price * 100, 2)
                 deviation_amount = money_round((avg_price - ref_price) * qty, 2)
 
             compensable, corridor_pct = resolve_corridor(
-                corridor_by_class, corridor_by_type, cid, class_type_map.get(cid, 0),
+                corridor_by_class, corridor_by_type, cid, class_type_id_map.get(cid),
             )
-            if not compensable:
+            if not compensable or mismatch:
                 compensation_per_unit = None
                 compensation_amount = None
             else:
                 compensation_per_unit = compute_compensation_per_unit(avg_price, ref_price, corridor_pct)
                 compensation_amount = (
                     money_round(compensation_per_unit * qty, 2)
-                    if compensation_per_unit is not None
-                    else None
+                    if compensation_per_unit is not None else None
                 )
 
             results.append({
@@ -357,6 +329,8 @@ def compute_calculations(
                 "delivery_total": money_round(contrib["shared_with_vat"], 2),
                 "total_qty": money_round(qty, 3),
                 "avg_price": money_round(avg_price, 2),
+                "unit_symbol": contrib["symbol"],
+                "dimension_mismatch": mismatch,
                 "invoice_count": len(contrib["invoice_ids"]),
                 "reference_price": ref_price,
                 "deviation_pct": deviation_pct,
