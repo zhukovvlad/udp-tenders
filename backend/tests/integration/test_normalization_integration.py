@@ -62,3 +62,38 @@ class TestCreateInvoiceNormalization:
         assert item.raw_unit == "бухта"
         assert item.normalized_unit_id is None
         assert item.normalized_quantity is None
+
+
+class TestInvoiceEditRenormalization:
+    def test_edit_renormalizes_and_warns_on_unknown_unit(self, client, factories):
+        inv = factories.InvoiceFactory.create()
+        item = factories.InvoiceItemFactory.create(invoice=inv, raw_unit="т", quantity=2)
+        payload = {
+            "number": inv.number, "date": inv.date.isoformat(),
+            "supplier_name": None, "supplier_inn": None, "vat_rate": 20.0,
+            "items": [{
+                "id": item.id, "raw_name": "Арматура", "item_type": "material",
+                "material_class_id": None, "quantity": 2, "raw_unit": "бухта",
+                "unit_price": 100, "amount": 200, "vat_amount": None,
+            }],
+        }
+        resp = client.put(f"/api/invoices/{inv.id}", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert any(w["code"] == "unknown_unit" for w in body.get("warnings", []))
+
+    def test_edit_known_unit_no_warning(self, client, factories):
+        inv = factories.InvoiceFactory.create()
+        item = factories.InvoiceItemFactory.create(invoice=inv)
+        payload = {
+            "number": inv.number, "date": inv.date.isoformat(),
+            "supplier_name": None, "supplier_inn": None, "vat_rate": 20.0,
+            "items": [{
+                "id": item.id, "raw_name": "Бетон", "item_type": "material",
+                "material_class_id": None, "quantity": 3, "raw_unit": "м3",
+                "unit_price": 8000, "amount": 24000, "vat_amount": None,
+            }],
+        }
+        resp = client.put(f"/api/invoices/{inv.id}", json=payload)
+        assert resp.status_code == 200
+        assert resp.json().get("warnings", []) == []

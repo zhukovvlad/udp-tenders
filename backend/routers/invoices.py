@@ -1,14 +1,16 @@
 import logging
 import uuid
 from datetime import UTC, date, datetime
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from crud.documents import create_document, delete_document, get_document, get_documents
 from crud.suppliers import get_or_create_supplier
+from crud.units import load_alias_map, normalize_item
 from database import get_db
 from models import Invoice, InvoiceItem, MaterialClass
 from s3 import delete_file, download_file, ensure_bucket, upload_file
@@ -18,12 +20,15 @@ router = APIRouter()
 
 
 class InvoiceItemEdit(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: int | None = None  # None для новой позиции
     raw_name: str
     item_type: str  # material / delivery / other
     material_class_id: int | None = None
     quantity: float
-    unit: str | None = None
+    # Accept both "raw_unit" (new) and legacy "unit" during the FE/BE transition.
+    raw_unit: str | None = Field(default=None, validation_alias=AliasChoices("raw_unit", "unit"))
     unit_price: float
     amount: float
     vat_amount: float | None = None
@@ -40,8 +45,8 @@ class InvoiceUpdate(BaseModel):
 
 def _doc_has_issues(doc) -> bool:
     """Документ требует проверки, если есть позиции, по которым нельзя считать аналитику:
-    нет количества или нет описания. Цены/класс могут быть пустыми (валидно для
-    цементного молока, добавок и т.п.)."""
+    нет количества, нет описания, или единица измерения материала не нормализована."""
+    from crud.units import invariant_holds  # noqa: PLC0415
     for inv in doc.invoices:
         if not inv.items:
             return True
@@ -49,6 +54,11 @@ def _doc_has_issues(doc) -> bool:
             if (item.quantity or 0) <= 0:
                 return True
             if not (item.raw_name or "").strip():
+                return True
+            # Material rows must normalize to a base unit; otherwise they cannot be aggregated.
+            if item.item_type == "material" and item.normalized_unit_id is None:
+                return True
+            if not invariant_holds(item.quantity, item.unit_price, item.amount):
                 return True
     return False
 
@@ -99,7 +109,9 @@ def _serialize_document(doc) -> dict:
                         ),
                         "material_class_id": item.material_class_id,
                         "quantity": item.quantity,
-                        "unit": item.raw_unit,
+                        "raw_unit": item.raw_unit,
+                        "unit": item.raw_unit,  # legacy alias — drop after frontend plan ships
+                        "normalized_unit_id": item.normalized_unit_id,
                         "unit_price": item.unit_price,
                         "amount": item.amount,
                         "vat_amount": item.vat_amount,
@@ -280,18 +292,37 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
         if existing_id not in incoming_ids:
             db.delete(existing_item)
 
+    aliases = load_alias_map(db)
+    warnings: list[dict] = []
+
+    def _normalize(item_data):
+        quantity = Decimal(str(item_data.quantity))
+        unit_price = Decimal(str(item_data.unit_price))
+        norm = normalize_item(item_data.raw_unit, quantity, unit_price, aliases)
+        if norm is None and item_data.item_type == "material" and item_data.raw_unit:
+            warnings.append({
+                "field": "raw_unit",
+                "code": "unknown_unit",
+                "message": f"Единица измерения «{item_data.raw_unit}» не найдена в справочнике",
+            })
+        return norm
+
     # Обновляем существующие, создаём новые
     for item_data in data.items:
+        norm = _normalize(item_data)
         if item_data.id and item_data.id in existing:
             item = existing[item_data.id]
             item.raw_name = item_data.raw_name
             item.item_type = item_data.item_type
             item.material_class_id = item_data.material_class_id
             item.quantity = item_data.quantity
-            item.raw_unit = item_data.unit
+            item.raw_unit = item_data.raw_unit
             item.unit_price = item_data.unit_price
             item.amount = item_data.amount
             item.vat_amount = item_data.vat_amount
+            item.normalized_unit_id = norm.normalized_unit_id if norm else None
+            item.normalized_quantity = norm.normalized_quantity if norm else None
+            item.normalized_unit_price = norm.normalized_unit_price if norm else None
         else:
             new_item = InvoiceItem(
                 invoice_id=invoice.id,
@@ -299,16 +330,19 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                 item_type=item_data.item_type,
                 material_class_id=item_data.material_class_id,
                 quantity=item_data.quantity,
-                raw_unit=item_data.unit,
+                raw_unit=item_data.raw_unit,
                 unit_price=item_data.unit_price,
                 amount=item_data.amount,
                 vat_amount=item_data.vat_amount,
+                normalized_unit_id=norm.normalized_unit_id if norm else None,
+                normalized_quantity=norm.normalized_quantity if norm else None,
+                normalized_unit_price=norm.normalized_unit_price if norm else None,
             )
             db.add(new_item)
 
     db.commit()
     db.refresh(invoice)
-    return {"message": "Сохранено", "invoice_id": invoice.id}
+    return {"message": "Сохранено", "invoice_id": invoice.id, "warnings": warnings}
 
 
 @router.post("/{invoice_id}/verify")

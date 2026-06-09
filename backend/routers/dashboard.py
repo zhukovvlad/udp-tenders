@@ -99,12 +99,17 @@ def list_project_invoices(project_id: int, db: Session = Depends(get_db)):
         .all()
     )
     def _has_issues(inv):
+        from crud.units import invariant_holds  # noqa: PLC0415
         if not inv.items:
             return True
         for it in inv.items:
             if (it.quantity or 0) <= 0:
                 return True
             if not (it.raw_name or "").strip():
+                return True
+            if it.item_type == "material" and it.normalized_unit_id is None:
+                return True
+            if not invariant_holds(it.quantity, it.unit_price, it.amount):
                 return True
         return False
 
@@ -127,7 +132,8 @@ def list_project_invoices(project_id: int, db: Session = Depends(get_db)):
                     "item_type": item.item_type,
                     "material_class": item.material_class.name if item.material_class else None,
                     "quantity": item.quantity,
-                    "unit": item.unit,
+                    "raw_unit": item.raw_unit,
+                    "unit": item.raw_unit,  # legacy alias — drop after frontend plan ships
                     "unit_price": item.unit_price,
                     "amount": item.amount,
                     "vat_amount": item.vat_amount,
