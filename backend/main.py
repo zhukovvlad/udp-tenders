@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 from routers import admin as admin_router
 from routers import auth as auth_router
-from routers import dashboard, export, invoices, material_classes, projects, reference_prices, suppliers
+from routers import dashboard, export, invoices, material_classes, projects, reference_prices, suppliers, units
 from routers import orgs as orgs_router
 from routers import settings as settings_router
 from s3 import ensure_bucket
@@ -133,6 +133,8 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"]
 app.include_router(export.router, prefix="/api/export", tags=["export"], dependencies=_auth_dep)
 app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"], dependencies=_auth_dep)
 app.include_router(suppliers.router, prefix="/api/suppliers", tags=["suppliers"], dependencies=_auth_dep)
+app.include_router(units.router, prefix="/api/units", tags=["units"], dependencies=_auth_dep)
+app.include_router(units.material_types_router, prefix="/api/material-types", tags=["material-types"], dependencies=_auth_dep)
 
 
 @app.get("/api/health")
