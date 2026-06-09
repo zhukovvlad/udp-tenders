@@ -16,19 +16,21 @@ from logging_config import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
+import s3
 from routers import admin as admin_router
 from routers import auth as auth_router
 from routers import dashboard, export, invoices, material_classes, projects, reference_prices, suppliers, units
 from routers import orgs as orgs_router
 from routers import settings as settings_router
-from s3 import ensure_bucket
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Инициализация при старте приложения (не при импорте модуля)."""
     try:
-        ensure_bucket()
+        # Позднее связывание (s3.ensure_bucket, а не from-import): тестовые
+        # monkeypatch-и модуля s3 должны действовать и на lifespan.
+        s3.ensure_bucket()
         logger.info("MinIO bucket готов")
     except Exception as e:
         logger.warning(f"MinIO недоступен при старте: {e}")
