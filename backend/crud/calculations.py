@@ -31,6 +31,33 @@ def compute_compensation_per_unit(
     return Decimal("0")
 
 
+def dimension_matches(class_dimension: str | None, ref_dimension: str | None) -> bool:
+    """True only if both dimensions are present and equal (spec §4.2 guard)."""
+    return class_dimension is not None and ref_dimension is not None and class_dimension == ref_dimension
+
+
+def compute_shared_shares(base_rows) -> dict[int, Decimal]:
+    """Per-class allocation share of shared cost within ONE invoice (spec §4.3).
+
+    base_rows: objects with .material_class_id, .dimension, .qty (normalized), .mat_total (amount excl VAT).
+    Mono-dimension → split by normalized quantity. Mixed dimensions → split by amount.
+    Zero denominator → all shares 0 (no DivisionByZero).
+    """
+    from collections import defaultdict
+
+    dims = {r.dimension for r in base_rows if r.dimension is not None}
+    use_qty = len(dims) <= 1
+    # Accumulate per class_id (a class may appear in >1 row if it spans dimensions);
+    # a dict-comprehension would silently drop all but the last (last-wins) row.
+    basis: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+    for r in base_rows:
+        basis[r.material_class_id] += r.qty if use_qty else r.mat_total
+    denom = sum(basis.values(), Decimal("0"))
+    if denom <= 0:
+        return {cid: Decimal("0") for cid in basis}
+    return {cid: val / denom for cid, val in basis.items()}
+
+
 def _months_in_range(start: date, end: date) -> list[tuple[date, date]]:
     """Split [start, end] into calendar month intervals clamped to the requested bounds."""
     months = []
