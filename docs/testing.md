@@ -12,15 +12,15 @@
 
 | Слой | Файлов | Тестов | Статус |
 |---|---|---|---|
-| Backend unit | 3 | 22 | ✅ |
-| Backend integration | 7 | 34 | ✅ |
-| **Backend total** | **10** | **56** | ✅ **80% coverage** |
+| Backend unit | 14 | 155 | ✅ |
+| Backend integration | 17 | 220 | ✅ |
+| **Backend total** | **31** | **375** | ✅ |
 | Frontend (Vitest + RTL + MSW) | 7 | 18 | ✅ |
 | E2E (Playwright) | — | — | ⏳ отложено |
 | GitHub Actions CI | — | — | ⏳ отложено |
-| **Grand total (локально)** | **17** | **74** | ✅ |
+| **Grand total (локально)** | **38** | **393** | ✅ |
 
-Все 74 теста зелёные локально. CI пока **не настроен** — тесты надо запускать вручную.
+Все 393 теста зелёные локально (backend — `pytest --co` собирает; frontend — без изменений). CI пока **не настроен** — тесты надо запускать вручную.
 
 ---
 
@@ -31,9 +31,9 @@
 just install
 
 # Backend — нужен TEST_DATABASE_URL в .env.test (отдельная Neon test-ветка)
-just test-backend            # все: 56 PASSED за ~22 сек
-just test-backend-unit       # быстро (без БД): 22 PASSED за ~1 сек
-just test-backend-integration # с реальной Postgres: 34 PASSED
+just test-backend            # все: 375 PASSED
+just test-backend-unit       # быстро (без БД): 155 PASSED за ~1 сек
+just test-backend-integration # с реальной Postgres: 220 PASSED
 just coverage-backend        # HTML отчёт в backend/htmlcov/
 
 # Frontend — без БД, всё через MSW-моки
@@ -94,19 +94,29 @@ just typecheck-frontend      # tsc --noEmit
 ### ✅ Backend — покрыто
 
 **Routers:** `projects` (100%), `material_classes` (100%), `reference_prices` (92%),
-`export` (90%), `settings` (80%), `invoices` (66%), `dashboard` (49%).
+`export` (90%), `settings` (80%), `invoices` (66%), `dashboard` (49%),
+`/api/units` и `/api/material-types` (auth-protected, покрыты интеграционными тестами).
 
 **Бизнес-логика:** `crud.recalculate_prices` (95%), `pdf_parser._calculate_completeness`,
 `_final_confidence`, `routers/invoices._doc_has_issues`, `_avg_confidence` —
 ключевые функции расчёта средних цен и валидации документов.
 
+**Units-рефакторинг (добавлено):**
+- `test_unit_normalization.py` — `normalize_unit_key` (NFKC, unicode-fold, whitespace, dots) + reconcile-invariant.
+- `test_dimension_guard.py` — размерностный guard в `compute_calculations` (class vs ref-price dimension; intra-class mix).
+- `test_delivery_distribution.py` — моно- и смешанная размерность, распределение по `normalized_quantity` vs `amount`, edge-cases нулевых/ненормализованных строк.
+- `test_units_api.py` — `GET /api/units`, `GET /api/units/{id}/aliases`, `GET /api/material-types`.
+- `test_normalization_integration.py` — end-to-end нормализация единиц при создании инвойса, PUT-ренормализация, `warnings` по неизвестным единицам.
+- `test_calculations_with_units.py` — расчёт avg_price на `normalized_quantity`, dimension_mismatch → null deviation.
+- `test_reference_prices_unit.py` — валидация `unit_id` (base-unit only, dimension match vs material_type); immutability после создания.
+
 ### ⚠️ Backend — пробелы (в backlog)
 
 - `routers/invoices.reparse` endpoint не покрыт.
-- `routers/dashboard./invoices` и `/calculations` endpoints не покрыты.
 - Pydantic-валидация payload'ов (POST с пустыми полями → 422) не тестируется.
 - Cascade-delete для `MaterialClass` с привязанными InvoiceItem.
-- `recalculate_prices` edge cases: multi-item, multi-period, distribution доставки.
+- `recalculate_prices` edge cases: multi-item, multi-period (частично закрыто `test_calculations_with_units.py`).
+- Supplier deviation dimension guard отсутствует (см. `TECH_DEBT.md`).
 
 ### ✅ Frontend — покрыто
 

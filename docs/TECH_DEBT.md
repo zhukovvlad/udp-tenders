@@ -254,3 +254,39 @@
 - [ ] **Нет ограничения размера загружаемого PDF**
   `POST /api/invoices/upload` принимает файл без проверки max-size на уровне FastAPI.
   Сейчас защиту обеспечивает только Nginx/прокси (если настроен).
+
+---
+
+## Units-refactoring (Spec §2 backlog + долг реализации)
+
+### Spec §2 — отложено на следующий этап
+
+- [ ] **Кросс-размерностная конвертация через плотность** (пог.м→т для арматуры)
+  Перевод между `mass` и `length` требует коэффициента плотности, специфичного для марки материала. Сейчас такие строки получают `dimension_mismatch=True` и выпадают из расчёта.
+  **Решение:** добавить таблицу `density_factors(material_class_id, kg_per_unit)` и обрабатывать cross-dimension conversion в `normalize_item`.
+
+- [ ] **Self-learning aliases** — автоматически добавлять `unit_aliases` из новых документов
+  Сейчас неизвестная единица даёт `normalized_unit_id=NULL` и флаг «проблема». Новые алиасы добавляются только вручную (через миграцию или API).
+  **Решение:** после парсинга предлагать пользователю сопоставить неизвестную строку с существующей единицей и сохранять в `unit_aliases`.
+
+- [ ] **Lazy reprocess endpoint** — перенормализовать исторические инвойсы без реразбора PDF
+  Добавление нового алиаса не ретроактивно обновляет уже сохранённые `InvoiceItem`.
+  **Решение:** `POST /api/invoices/renormalize?project_id=` — перезапустить `normalize_item` для всех позиций с `normalized_unit_id IS NULL`, используя обновлённый alias map.
+
+### Чистки после завершения frontend-плана
+
+- [ ] **Удалить legacy `unit` OUTPUT key** из `_serialize_document` и dashboard serializer, а также `InvoiceItemEdit.unit` INPUT alias (`AliasChoices`) в схемах Pydantic — после того как фронтенд перейдёт на `raw_unit` и ни один клиент не читает/пишет `unit`.
+
+### Долг, выявленный при code-review реализации
+
+- [ ] **VAT-amount SQL expression дублируется ~6×** в `crud/calculations.py` (compute_calculations base/delivery/additive + compute_export_rows) и `crud/suppliers.py` — паттерн `coalesce(vat_amount, amount*coalesce(vat_rate, 20.0)/100)`. Расхождения при правке неизбежны.
+  **Решение:** вынести в shared `_sql_vat_amount()` — SQLAlchemy-выражение без аргументов, переиспользуемое во всех трёх модулях.
+
+- [ ] **`compute_export_rows`: ключи результирующего dict названы `*_per_m3`** (`mat_per_m3`, `delivery_per_m3` и т.д.), хотя расчёт теперь размерностно-агностичен (может быть per-ton, per-piece).
+  **Решение:** переименовать в `*_per_unit` одновременно в `crud/calculations.py` (producer) и `routers/export.py` (consumer) — косметика, но вводит в заблуждение при ревью.
+
+- [ ] **`func.max(InvoiceItem.raw_unit)` в `compute_export_rows`** — произвольный выбор, когда группа (invoice, class) содержит несколько разных `raw_unit`. Колонка «Ед. изм. по документу» может показывать не ту единицу для такой строки.
+  **Решение:** рассмотреть distinct-aware логику (напр. `string_agg(DISTINCT raw_unit, '/')`) или явное предупреждение при неоднородной группе.
+
+- [ ] **Supplier deviation не имеет dimension guard** — `crud/suppliers.py::_compute_supplier_project_deviation` не читает `contrib["dimensions"]` и может агрегировать отклонение по смешанным размерностям (например, м³ + т в одном классе). На странице проекта такие строки получили бы `dimension_mismatch=True`, на карточке поставщика — нет. Предшествует рефакторингу (старый код суммировал сырое `quantity`), не введён рефакторингом.
+  **Решение:** добавить тот же intra-class dimension guard в `_compute_supplier_project_deviation` + написать `test_supplier_deviation_dimension_mismatch`.

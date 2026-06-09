@@ -12,14 +12,23 @@ avg_price = (mat_total + mat_vat + delivery_for_class + delivery_vat_for_class) 
 
 - `mat_total` = `SUM(InvoiceItem.amount)` — сумма без НДС из позиции
 - `mat_vat` = `SUM(COALESCE(vat_amount, amount * COALESCE(vat_rate, 20.0) / 100))` — НДС; если `vat_amount` не извлечён парсером, берётся расчётный по ставке счёта
-- Доставка (`item_type = "delivery"`) распределяется пропорционально объёму м³ (`qty`) каждого класса относительно общего объёма за месяц
+- `qty` = `SUM(InvoiceItem.normalized_quantity)` — суммируется в базовых единицах; один класс материала = одна размерность
 - Расчёт помесячный; каждый месяц — отдельная строка
+
+**Размерностный guard (`dimension_mismatch`):**
+
+`compute_calculations` сравнивает размерность базовой единицы класса (из `material_types.default_unit`) с размерностью `reference_prices.unit_id`. При несовпадении или при смешении разных размерностей внутри одного класса (intra-class dimension mix) строка получает флаг `dimension_mismatch=True`. Такие строки **исключаются** из расчёта отклонения и компенсации (поля `deviation_pct`, `deviation_amount`, `compensation_*` возвращаются как `None`). Выходные поля строки: `unit_symbol` и `dimension_mismatch`.
 
 **Отклонение:**
 ```
 deviation_pct    = (avg_price − ref_price) / ref_price × 100
 deviation_amount = (avg_price − ref_price) × qty
 ```
+
+**Распределение доставки:**
+
+- **Моно-размерность** (все классы месяца одной размерности): доставка распределяется пропорционально `SUM(normalized_quantity)` каждого класса.
+- **Смешанная размерность** (разные dimension в одном месяце): доставка распределяется пропорционально `amount` (денежной сумме позиций) через `compute_shared_shares`. Строки с нулевой `normalized_quantity` или неизвестной единицей (`normalized_unit_id IS NULL`) при mono-distribution получают нулевую долю.
 
 ## Исключённые поставщики
 
@@ -47,11 +56,11 @@ deviation_amount = (avg_price − ref_price) × qty
 
 `GET /api/export/excel?project_id=&period_start=&period_end=&material_class_id=` → openpyxl через `compute_export_rows()` → `routers/export.py`. Возвращает `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
 
-**16 колонок (A–P):** дата, номер СФ, поставщик, объём м³, базовая цена, ставка НДС, материал/доставка/прочее без НДС, итого без НДС (формула), те же три с НДС (формулы), итого с НДС (формула), откл. % и откл. ₽ (формулы). Месячные строки — SUMPRODUCT-формулы, разделители между месяцами, grand total на класс. Кнопка «Экспорт» в `ProjectPage.tsx` использует `periodStart`/`periodEnd` напрямую (не debounced) — правильно для действия по кнопке.
+**21 колонка (A–U):** два блока единиц — «по документу» (сырые данные из PDF) и «расчётное» (нормализованные). Блок «по документу»: дата, номер СФ, поставщик, «Кол-во по документу», «Ед. изм. по документу». Блок «расчётное»: «Расчётное кол-во», «Базовая ед. изм.», базовая цена, ставка НДС, материал/доставка/прочее без НДС, итого без НДС (формула), те же три с НДС (формулы), итого с НДС (формула), откл. % и откл. ₽ (формулы). Строчная математика (цены на единицу) считается на `normalized_quantity`. Месячные строки — SUMPRODUCT-формулы, разделители между месяцами, grand total на класс. Кнопка «Экспорт» в `ProjectPage.tsx` использует `periodStart`/`periodEnd` напрямую (не debounced) — правильно для действия по кнопке.
 
 ## Коридор компенсации (Spec 2 — fallback иерархия)
 
-Таблица `compensation_corridors(id PK, project_id, material_type?, material_class_id?, is_compensable, corridor_pct?)` — иерархические правила per-project. Ровно одно из `material_type`/`material_class_id` заполнено (CHECK constraint).
+Таблица `compensation_corridors(id PK, project_id, material_type_id? FK→material_types, material_class_id?, is_compensable, corridor_pct?)` — иерархические правила per-project. Ровно одно из `material_type_id`/`material_class_id` заполнено (CHECK constraint). `material_type` (String) заменён на `material_type_id` FK → `material_types`; резолвер `get_corridor_map` использует ключи по `material_type_id`. HTTP API по-прежнему принимает `material_type` code (напр. `PUT .../corridors/type/concrete`) — роутер маппит code→id перед передачей в CRUD.
 
 **Whitelist-дефолт:** нет строки = не компенсируется.
 

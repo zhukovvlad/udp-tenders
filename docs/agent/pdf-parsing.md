@@ -17,3 +17,13 @@
 - **`mistral-ocr`:** ~24k токенов промпта (повторяющиеся шапки страниц), нестабилен на СФ с 60+ одинаковыми строками — пропускает или дублирует строки даже при `finish_reason=stop`.
 
 Ещё не реализовано: постраничный chunking для СФ на 100+ строк — см. `docs/TECH_DEBT.md`.
+
+## Нормализация единиц при записи
+
+Парсер возвращает сырую строку `unit` и `material_type` code — **без изменений** (не нормализует). Нормализация выполняется в `create_invoice`:
+
+1. `load_alias_map(db)` — загружает `unit_aliases` в память.
+2. `normalize_item(item, alias_map)` — для каждой позиции находит `normalized_unit_id` по ключу `normalize_unit_key(raw_unit)`, вычисляет `normalized_quantity` и `normalized_unit_price`.
+3. `get_or_create_material_class` резолвит `material_type` code → `material_type_id`; неизвестный code → 422 через API, в PDF-парсере — fallback на `"other"` с записью в лог (hallucinated code не обрывает обработку документа).
+
+`normalize_unit_key` — единственный источник правды в `crud/units.py`: NFKC-нормализация (складывает м³→м3), collapse whitespace, lowercase, strip trailing dots. Используется в рантайме, миграции и тестах.
