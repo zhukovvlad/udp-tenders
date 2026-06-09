@@ -23,4 +23,4 @@
 
 - **Все бизнес-роутеры** требуют `get_current_user`. Org-level изоляция данных для запросов проектов/инвойсов **ещё не включена** (см. `docs/TECH_DEBT.md`) — auth лишь не пускает неаутентифицированных.
 - **CLI**: `just create-superuser` / `just create-org` — бутстрап первых юзеров.
-- **Auth coverage guardian**: `tests/test_auth_coverage.py` бьёт каждый маршрут без токена, ждёт 401/403. `just test-backend-unit`.
+- **Auth coverage guardian**: `tests/test_auth_coverage.py` бьёт каждый маршрут без токена, ждёт 401/403. Входит в `just test-backend` (лежит вне `tests/unit`, поэтому `test-backend-unit` его НЕ запускает).

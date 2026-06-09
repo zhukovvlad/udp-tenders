@@ -10,13 +10,17 @@ UDP/
 │   ├── main.py           — FastAPI app, CORS, routers, middleware, CSRF middleware
 │   ├── config.py         — pydantic-settings Settings (единый источник env-переменных)
 │   ├── models.py         — ORM-модели (Project, Document, Invoice, InvoiceItem, MaterialClass,
-│   │                       ReferencePrice, Supplier, Organization, User, ProjectOrganization,
-│   │                       RefreshToken, ProjectSupplierExclusion)
-│   ├── crud/             — операции с БД, 6+ модулей:
+│   │                       MaterialType, UnitOfMeasure, UnitAlias, ReferencePrice,
+│   │                       CompensationCorridor, Supplier, Organization, User,
+│   │                       ProjectOrganization, RefreshToken, ProjectSupplierExclusion)
+│   ├── crud/             — операции с БД:
 │   │   ├── projects.py   — Project + ReferencePrice CRUD
-│   │   ├── materials.py  — MaterialClass CRUD + VALID_CALC_ROLES
-│   │   ├── documents.py  — Document + Invoice CRUD
-│   │   ├── calculations.py — avg_price, deviation, export-строки
+│   │   ├── materials.py  — MaterialClass CRUD + VALID_CALC_ROLES + код↔id типов материалов
+│   │   ├── units.py      — нормализация единиц (normalize_unit_key, normalize_item,
+│   │   │                   load_alias_map, item_has_issues) + seed-данные справочников
+│   │   ├── documents.py  — Document + Invoice CRUD (нормализация единиц при записи)
+│   │   ├── calculations.py — avg_price, deviation, dimension guard, export-строки
+│   │   ├── compensation_corridors.py — коридоры компенсации (резолвер по material_type_id)
 │   │   ├── suppliers.py  — Supplier CRUD + аналитические агрегаты
 │   │   ├── supplier_exclusions.py — get_excluded_supplier_ids, set_supplier_excluded
 │   │   └── admin.py      — админ-консоль суперюзера: orgs, users, project links,
@@ -29,7 +33,8 @@ UDP/
 │   ├── s3.py             — MinIO-хелперы
 │   ├── utils.py          — get_client_ip, utcnow
 │   ├── routers/          — projects, invoices, dashboard, export, material_classes,
-│   │                       reference_prices, settings, suppliers, auth, admin, orgs
+│   │                       reference_prices, units (+ /api/material-types), settings,
+│   │                       suppliers, auth, admin, orgs
 │   ├── alembic/          — миграции
 │   └── tests/            — unit/ + integration/ + fixtures/ + test_auth_coverage.py
 ├── frontend/src/
@@ -45,6 +50,8 @@ UDP/
 │   ├── testing.md        — архитектура тестов, покрытие, как добавлять
 │   ├── agent/            — справочники для агентов (этот набор)
 │   └── ui/routes-architecture.md  — полный дизайн маршрутов
+├── .github/workflows/backend-tests.yml — CI: ruff + полный pytest на каждый push/PR
+│                       (Postgres c pgvector как service-container; ~1 мин)
 └── justfile
 ```
 
@@ -60,7 +67,6 @@ UDP/
 ## Чего ещё нет в кодовой базе (планы)
 
 - E2E-тесты (Playwright) — спека написана, не реализована.
-- GitHub Actions CI — не настроен.
 - Org-level изоляция данных — auth есть, но запросы проектов/инвойсов ещё не фильтруют по org (см. `docs/TECH_DEBT.md`).
 - Сброс пароля / верификация email — нет.
 - Прод-деплой — планируется.
