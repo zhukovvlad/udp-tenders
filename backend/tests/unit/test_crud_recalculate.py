@@ -27,7 +27,7 @@ def test_compute_calculations_no_invoices_returns_empty(factories, db_session):
 
 def test_compute_calculations_simple_avg(factories, db_session):
     project = factories.ProjectFactory.create()
-    mc = factories.MaterialClassFactory.create(name="В25", material_type="concrete")
+    mc = factories.MaterialClassFactory.create(name="В25", material_type_code="concrete")
     doc = factories.DocumentFactory.create(project=project)
     inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 15))
     factories.InvoiceItemFactory.create(
@@ -73,8 +73,8 @@ def test_compute_calculations_with_deviation(factories, db_session):
 def test_compute_calculations_delivery_allocation(factories, db_session):
     """Доставка распределяется пропорционально объёму класса в суммарном объёме."""
     project = factories.ProjectFactory.create()
-    mc1 = factories.MaterialClassFactory.create(name="В25", material_type="concrete")
-    mc2 = factories.MaterialClassFactory.create(name="d12", material_type="rebar")
+    mc1 = factories.MaterialClassFactory.create(name="В25", material_type_code="concrete")
+    mc2 = factories.MaterialClassFactory.create(name="d12", material_type_code="rebar")
     doc = factories.DocumentFactory.create(project=project)
     inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 15))
 
@@ -167,8 +167,8 @@ def test_compute_calculations_multi_month(factories, db_session):
 def test_delivery_not_shared_across_invoices(factories, db_session):
     """Доставка не перетекает между счетами. Доставка из счёта А не входит в avg_price В30 из счёта Б."""
     project = factories.ProjectFactory.create()
-    mc_v40 = factories.MaterialClassFactory.create(name="В40", material_type="concrete")
-    mc_v30 = factories.MaterialClassFactory.create(name="В30", material_type="concrete")
+    mc_v40 = factories.MaterialClassFactory.create(name="В40", material_type_code="concrete")
+    mc_v30 = factories.MaterialClassFactory.create(name="В30", material_type_code="concrete")
     doc = factories.DocumentFactory.create(project=project)
 
     # Счёт А: В40 + доставка
@@ -208,9 +208,9 @@ def test_delivery_not_shared_across_invoices(factories, db_session):
 def test_additives_included_in_avg_price(factories, db_session):
     """Присадки (calc_role='additive') входят в avg_price пропорционально объёму."""
     project = factories.ProjectFactory.create()
-    mc_v40 = factories.MaterialClassFactory.create(name="В40", material_type="concrete")
+    mc_v40 = factories.MaterialClassFactory.create(name="В40", material_type_code="concrete")
     mc_add = factories.MaterialClassFactory.create(
-        name="Пластификатор", material_type="concrete", calc_role="additive",
+        name="Пластификатор", material_type_code="concrete", calc_role="additive",
     )
     doc = factories.DocumentFactory.create(project=project)
     inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 15))
@@ -240,9 +240,9 @@ def test_additives_included_in_avg_price(factories, db_session):
 def test_exclude_items_not_in_avg_price(factories, db_session):
     """Позиции calc_role='exclude' (цементное молоко и пр.) не входят в avg_price."""
     project = factories.ProjectFactory.create()
-    mc_v40 = factories.MaterialClassFactory.create(name="В40", material_type="concrete")
+    mc_v40 = factories.MaterialClassFactory.create(name="В40", material_type_code="concrete")
     mc_exc = factories.MaterialClassFactory.create(
-        name="Цементное молоко", material_type="concrete", calc_role="exclude",
+        name="Цементное молоко", material_type_code="concrete", calc_role="exclude",
     )
     doc = factories.DocumentFactory.create(project=project)
     inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 15))
@@ -272,9 +272,9 @@ def test_exclude_items_not_in_avg_price(factories, db_session):
 def test_exclude_items_not_in_denominator(factories, db_session):
     """Объём exclude-позиций не учитывается в знаменателе при распределении доставки."""
     project = factories.ProjectFactory.create()
-    mc_v40 = factories.MaterialClassFactory.create(name="В40", material_type="concrete")
+    mc_v40 = factories.MaterialClassFactory.create(name="В40", material_type_code="concrete")
     mc_exc = factories.MaterialClassFactory.create(
-        name="Цементное молоко", material_type="concrete", calc_role="exclude",
+        name="Цементное молоко", material_type_code="concrete", calc_role="exclude",
     )
     doc = factories.DocumentFactory.create(project=project)
     inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 15))
@@ -306,8 +306,8 @@ def test_exclude_items_not_in_denominator(factories, db_session):
 def test_multiple_classes_in_one_invoice(factories, db_session):
     """При нескольких классах в одном счёте доставка распределяется пропорционально объёмам."""
     project = factories.ProjectFactory.create()
-    mc_v40 = factories.MaterialClassFactory.create(name="В40", material_type="concrete")
-    mc_v30 = factories.MaterialClassFactory.create(name="В30", material_type="concrete")
+    mc_v40 = factories.MaterialClassFactory.create(name="В40", material_type_code="concrete")
+    mc_v30 = factories.MaterialClassFactory.create(name="В30", material_type_code="concrete")
     doc = factories.DocumentFactory.create(project=project)
     inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 15))
 
@@ -370,7 +370,7 @@ def test_supplier_deviation_uses_latest_ref_price_no_period_filter(factories, db
     """
     project = factories.ProjectFactory.create()
     supplier = factories.SupplierFactory.create()
-    mc = factories.MaterialClassFactory.create(name="В40", material_type="concrete")
+    mc = factories.MaterialClassFactory.create(name="В40", material_type_code="concrete")
     doc = factories.DocumentFactory.create(project=project)
 
     inv = factories.InvoiceFactory.create(
@@ -411,7 +411,7 @@ def test_supplier_deviation_with_delivery_allocation(factories, db_session):
     и считает отклонение через shared-cost аллокацию."""
     project = factories.ProjectFactory.create()
     supplier = factories.SupplierFactory.create()
-    mc = factories.MaterialClassFactory.create(name="В40", material_type="concrete")
+    mc = factories.MaterialClassFactory.create(name="В40", material_type_code="concrete")
     factories.ReferencePriceFactory.create(
         project=project, material_class=mc, price=12000.0,
         period_start=date(2026, 1, 1), period_end=date(2026, 12, 31),
@@ -493,7 +493,7 @@ def test_get_or_create_material_class_calc_role_mismatch_logs_warning(factories,
     """При несовпадении calc_role у существующей записи функция возвращает её без изменений и логирует warning."""
     # Создаём класс с calc_role="base" напрямую
     mc_original = factories.MaterialClassFactory.create(
-        name="Цементное молоко", material_type="concrete", calc_role="base",
+        name="Цементное молоко", material_type_code="concrete", calc_role="base",
     )
 
     with patch.object(crud_materials.logger, "warning") as mock_warn:

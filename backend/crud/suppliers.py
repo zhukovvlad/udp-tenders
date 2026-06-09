@@ -5,7 +5,7 @@ from sqlalchemy import case, func, literal, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, aliased
 
-from models import Document, Invoice, InvoiceItem, MaterialClass, Project, ReferencePrice, Supplier
+from models import Document, Invoice, InvoiceItem, MaterialClass, Project, ReferencePrice, Supplier, UnitOfMeasure
 from utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -300,7 +300,8 @@ def _compute_supplier_project_deviation(
         .filter(Invoice.supplier_id == supplier_id, Document.project_id == project_id)
     )
 
-    # Base-материалы по счёту×класс
+    # Base-материалы по счёту×класс — нормализованные единицы + dimension/symbol для
+    # dimension-aware распределения общих затрат (аналогично compute_calculations).
     base_rows = (
         db.query(
             InvoiceItem.invoice_id,
@@ -310,38 +311,27 @@ def _compute_supplier_project_deviation(
                 InvoiceItem.vat_amount,
                 InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100
             )).label("mat_vat"),
-            func.sum(InvoiceItem.quantity).label("qty"),
+            func.sum(InvoiceItem.normalized_quantity).label("qty"),
+            UnitOfMeasure.dimension.label("dimension"),
+            UnitOfMeasure.symbol.label("symbol"),
         )
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
+        .join(UnitOfMeasure, InvoiceItem.normalized_unit_id == UnitOfMeasure.id)
         .filter(
             InvoiceItem.invoice_id.in_(invoice_ids_q),
             InvoiceItem.item_type == "material",
+            InvoiceItem.normalized_unit_id.isnot(None),
             MaterialClass.calc_role == "base",
         )
-        .group_by(InvoiceItem.invoice_id, InvoiceItem.material_class_id)
+        .group_by(
+            InvoiceItem.invoice_id, InvoiceItem.material_class_id,
+            UnitOfMeasure.dimension, UnitOfMeasure.symbol,
+        )
         .all()
     )
     if not base_rows:
         return None, None
-
-    # Объём base-материала по каждому счёту (знаменатель пропорции)
-    base_qty_per_invoice: dict[int, Decimal] = {}
-    for row in (
-        db.query(
-            InvoiceItem.invoice_id,
-            func.sum(InvoiceItem.quantity).label("total_qty"),
-        )
-        .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
-        .filter(
-            InvoiceItem.invoice_id.in_(invoice_ids_q),
-            InvoiceItem.item_type == "material",
-            MaterialClass.calc_role == "base",
-        )
-        .group_by(InvoiceItem.invoice_id)
-        .all()
-    ):
-        base_qty_per_invoice[row.invoice_id] = row.total_qty
 
     # Shared costs (доставка + присадки) по счёту, с НДС
     shared_per_invoice: dict[int, Decimal] = {}
@@ -396,7 +386,7 @@ def _compute_supplier_project_deviation(
 
     # Агрегируем contribution по классу — локальный импорт для избежания кругового импорта
     from crud.calculations import _aggregate_by_class  # noqa: PLC0415
-    class_contrib = _aggregate_by_class(base_rows, base_qty_per_invoice, shared_per_invoice)
+    class_contrib = _aggregate_by_class(base_rows, shared_per_invoice)
 
     if not class_contrib:
         return None, None
