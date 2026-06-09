@@ -182,6 +182,8 @@ def list_calculations(
             "delivery_total": r["delivery_total"],
             "total_qty": r["total_qty"],
             "avg_price": r["avg_price"],
+            "unit_symbol": r["unit_symbol"],
+            "dimension_mismatch": r["dimension_mismatch"],
             "invoice_count": r["invoice_count"],
             "reference_price": r["reference_price"],
             "deviation_pct": r["deviation_pct"],
