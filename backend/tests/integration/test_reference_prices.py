@@ -1,12 +1,15 @@
-def test_create_reference_price(client, factories):
+def test_create_reference_price(client, factories, db_session):
+    from models import UnitOfMeasure
     project = factories.ProjectFactory.create()
     mc = factories.MaterialClassFactory.create()
+    m3_id = db_session.query(UnitOfMeasure).filter_by(code="M3").one().id
 
     response = client.post(
         "/api/reference-prices",
         json={
             "project_id": project.id,
             "material_class_id": mc.id,
+            "unit_id": m3_id,
             "price": 8500.0,
             "period_start": "2026-01-01",
             "period_end": "2026-12-31",
