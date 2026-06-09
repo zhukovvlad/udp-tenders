@@ -15,7 +15,7 @@ from crud.compensation_corridors import (
 from crud.projects import create_project, delete_project, get_projects, update_project
 from crud.supplier_exclusions import get_excluded_supplier_ids, set_supplier_excluded
 from database import get_db
-from models import Document, Invoice, MaterialClass, Project, Supplier
+from models import Document, Invoice, MaterialClass, MaterialType, Project, Supplier
 
 router = APIRouter()
 
@@ -132,6 +132,13 @@ def remove_supplier_exclusion(
 # --- Corridors (fallback hierarchy) ---
 
 
+def _resolve_material_type_id(db: Session, code: str) -> int:
+    mt = db.query(MaterialType).filter(MaterialType.code == code).first()
+    if mt is None:
+        raise HTTPException(status_code=404, detail=f"Тип материала не найден: {code}")
+    return mt.id
+
+
 @router.get("/{project_id}/corridors")
 def list_corridors(project_id: int, db: Session = Depends(get_db)):
     """Resolved corridor matrix: all material types + classes with resolved status."""
@@ -149,7 +156,8 @@ def upsert_type_corridor(
 ):
     if not db.query(Project).filter(Project.id == project_id).first():
         raise HTTPException(status_code=404, detail="Проект не найден")
-    set_type_corridor(db, project_id, material_type, data.is_compensable, data.corridor_pct)
+    mt_id = _resolve_material_type_id(db, material_type)
+    set_type_corridor(db, project_id, mt_id, data.is_compensable, data.corridor_pct)
     return {"material_type": material_type, "is_compensable": data.is_compensable, "corridor_pct": data.corridor_pct}
 
 
@@ -161,7 +169,8 @@ def remove_type_corridor(
 ):
     if not db.query(Project).filter(Project.id == project_id).first():
         raise HTTPException(status_code=404, detail="Проект не найден")
-    delete_type_corridor(db, project_id, material_type)
+    mt_id = _resolve_material_type_id(db, material_type)
+    delete_type_corridor(db, project_id, mt_id)
     return Response(status_code=204)
 
 

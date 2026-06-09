@@ -122,7 +122,7 @@ def compute_calculations(
 
     # Names populated lazily per month and cached across months to avoid a full-table scan
     class_name_map: dict[int, str] = {}
-    class_type_map: dict[int, str] = {}
+    class_type_map: dict[int, int] = {}
 
     # Corridor map for this project (loaded once, resolved in Python per class).
     # Local import avoids a circular import at module load time.
@@ -266,7 +266,7 @@ def compute_calculations(
         if missing_ids:
             for mc in db.query(MaterialClass).filter(MaterialClass.id.in_(missing_ids)).all():
                 class_name_map[mc.id] = mc.name
-                class_type_map[mc.id] = mc.material_type
+                class_type_map[mc.id] = mc.material_type_id
 
         # Базовые цены, перекрывающие месяц, последняя по классу
         ref_rows = (
@@ -307,7 +307,7 @@ def compute_calculations(
                 deviation_amount = money_round((avg_price - ref_price) * qty, 2)
 
             compensable, corridor_pct = resolve_corridor(
-                corridor_by_class, corridor_by_type, cid, class_type_map.get(cid, ""),
+                corridor_by_class, corridor_by_type, cid, class_type_map.get(cid, 0),
             )
             if not compensable:
                 compensation_per_unit = None

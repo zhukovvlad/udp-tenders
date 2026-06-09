@@ -3,6 +3,7 @@ from datetime import date
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from crud.calculations import compute_calculations
 from crud.compensation_corridors import (
@@ -13,6 +14,7 @@ from crud.compensation_corridors import (
     set_class_corridor,
     set_type_corridor,
 )
+from models import MaterialType
 from tests.factories import (
     DocumentFactory,
     InvoiceFactory,
@@ -25,42 +27,51 @@ from tests.factories import (
 D = Decimal
 
 
+def _mt_id(db: Session, code: str) -> int:
+    """Resolve material_type code → id (test helper)."""
+    return db.query(MaterialType).filter(MaterialType.code == code).one().id
+
+
 # --- CRUD tests ---
 
 class TestTypeCorridorCrud:
     def test_set_type_creates_row(self, db_session, factories):
         project = ProjectFactory.create()
-        set_type_corridor(db_session, project.id, "concrete", True, D("5.00"))
+        mt_id = _mt_id(db_session, "concrete")
+        set_type_corridor(db_session, project.id, mt_id, True, D("5.00"))
         by_class, by_type = get_corridor_map(db_session, project.id)
-        assert "concrete" in by_type
-        assert by_type["concrete"].corridor_pct == D("5.00")
-        assert by_type["concrete"].is_compensable is True
+        assert mt_id in by_type
+        assert by_type[mt_id].corridor_pct == D("5.00")
+        assert by_type[mt_id].is_compensable is True
 
     def test_set_type_upsert_overwrites(self, db_session, factories):
         project = ProjectFactory.create()
-        set_type_corridor(db_session, project.id, "concrete", True, D("5.00"))
-        set_type_corridor(db_session, project.id, "concrete", True, D("7.00"))
+        mt_id = _mt_id(db_session, "concrete")
+        set_type_corridor(db_session, project.id, mt_id, True, D("5.00"))
+        set_type_corridor(db_session, project.id, mt_id, True, D("7.00"))
         _, by_type = get_corridor_map(db_session, project.id)
-        assert by_type["concrete"].corridor_pct == D("7.00")
+        assert by_type[mt_id].corridor_pct == D("7.00")
 
     def test_set_type_not_compensable(self, db_session, factories):
         project = ProjectFactory.create()
-        set_type_corridor(db_session, project.id, "rebar", False, None)
+        mt_id = _mt_id(db_session, "rebar")
+        set_type_corridor(db_session, project.id, mt_id, False, None)
         _, by_type = get_corridor_map(db_session, project.id)
-        assert by_type["rebar"].is_compensable is False
-        assert by_type["rebar"].corridor_pct is None
+        assert by_type[mt_id].is_compensable is False
+        assert by_type[mt_id].corridor_pct is None
 
     def test_delete_type_idempotent(self, db_session, factories):
         project = ProjectFactory.create()
-        set_type_corridor(db_session, project.id, "concrete", True, D("5.00"))
-        assert delete_type_corridor(db_session, project.id, "concrete") is True
-        assert delete_type_corridor(db_session, project.id, "concrete") is False
+        mt_id = _mt_id(db_session, "concrete")
+        set_type_corridor(db_session, project.id, mt_id, True, D("5.00"))
+        assert delete_type_corridor(db_session, project.id, mt_id) is True
+        assert delete_type_corridor(db_session, project.id, mt_id) is False
 
 
 class TestClassCorridorCrud:
     def test_set_class_creates_row(self, db_session, factories):
         project = ProjectFactory.create()
-        mc = MaterialClassFactory.create(material_type="concrete", name="В25")
+        mc = MaterialClassFactory.create(material_type_code="concrete", name="В25")
         set_class_corridor(db_session, project.id, mc.id, True, D("7.00"))
         by_class, _ = get_corridor_map(db_session, project.id)
         assert mc.id in by_class
@@ -68,7 +79,7 @@ class TestClassCorridorCrud:
 
     def test_delete_class_idempotent(self, db_session, factories):
         project = ProjectFactory.create()
-        mc = MaterialClassFactory.create(material_type="concrete", name="В25")
+        mc = MaterialClassFactory.create(material_type_code="concrete", name="В25")
         set_class_corridor(db_session, project.id, mc.id, True, D("7.00"))
         assert delete_class_corridor(db_session, project.id, mc.id) is True
         assert delete_class_corridor(db_session, project.id, mc.id) is False
@@ -79,38 +90,41 @@ class TestClassCorridorCrud:
 class TestFallbackResolution:
     def test_class_override_wins(self, db_session, factories):
         project = ProjectFactory.create()
-        mc = MaterialClassFactory.create(material_type="concrete", name="В40")
-        set_type_corridor(db_session, project.id, "concrete", True, D("5.00"))
+        mc = MaterialClassFactory.create(material_type_code="concrete", name="В40")
+        mt_id = _mt_id(db_session, "concrete")
+        set_type_corridor(db_session, project.id, mt_id, True, D("5.00"))
         set_class_corridor(db_session, project.id, mc.id, True, D("7.00"))
         by_class, by_type = get_corridor_map(db_session, project.id)
-        compensable, pct = resolve_corridor(by_class, by_type, mc.id, "concrete")
+        compensable, pct = resolve_corridor(by_class, by_type, mc.id, mc.material_type_id)
         assert compensable is True
         assert pct == D("7.00")
 
     def test_class_disables_over_type_enabled(self, db_session, factories):
         project = ProjectFactory.create()
-        mc = MaterialClassFactory.create(material_type="concrete", name="В50")
-        set_type_corridor(db_session, project.id, "concrete", True, D("5.00"))
+        mc = MaterialClassFactory.create(material_type_code="concrete", name="В50")
+        mt_id = _mt_id(db_session, "concrete")
+        set_type_corridor(db_session, project.id, mt_id, True, D("5.00"))
         set_class_corridor(db_session, project.id, mc.id, False, None)
         by_class, by_type = get_corridor_map(db_session, project.id)
-        compensable, _ = resolve_corridor(by_class, by_type, mc.id, "concrete")
+        compensable, _ = resolve_corridor(by_class, by_type, mc.id, mc.material_type_id)
         assert compensable is False
 
     def test_class_enables_over_type_disabled(self, db_session, factories):
         project = ProjectFactory.create()
-        mc = MaterialClassFactory.create(material_type="rebar", name="d12")
-        set_type_corridor(db_session, project.id, "rebar", False, None)
+        mc = MaterialClassFactory.create(material_type_code="rebar", name="d12")
+        mt_id = _mt_id(db_session, "rebar")
+        set_type_corridor(db_session, project.id, mt_id, False, None)
         set_class_corridor(db_session, project.id, mc.id, True, D("3.00"))
         by_class, by_type = get_corridor_map(db_session, project.id)
-        compensable, pct = resolve_corridor(by_class, by_type, mc.id, "rebar")
+        compensable, pct = resolve_corridor(by_class, by_type, mc.id, mc.material_type_id)
         assert compensable is True
         assert pct == D("3.00")
 
     def test_no_rows_means_not_compensable(self, db_session, factories):
         project = ProjectFactory.create()
-        mc = MaterialClassFactory.create(material_type="other", name="Песок")
+        mc = MaterialClassFactory.create(material_type_code="other", name="Песок")
         by_class, by_type = get_corridor_map(db_session, project.id)
-        compensable, pct = resolve_corridor(by_class, by_type, mc.id, "other")
+        compensable, pct = resolve_corridor(by_class, by_type, mc.id, mc.material_type_id)
         assert compensable is None
         assert pct is None
 
@@ -131,12 +145,13 @@ class TestCalculationIntegration:
     def test_type_level_corridor_applies_to_class(self, db_session, factories):
         """Type-level corridor 5% → class inherits → compensation calculated."""
         project = ProjectFactory.create()
-        mc = MaterialClassFactory.create(material_type="concrete", name="В25")
+        mc = MaterialClassFactory.create(material_type_code="concrete", name="В25")
         ReferencePriceFactory.create(
             project=project, material_class=mc, price=D("100"),
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
-        set_type_corridor(db_session, project.id, "concrete", True, D("5.00"))
+        mt_id = _mt_id(db_session, "concrete")
+        set_type_corridor(db_session, project.id, mt_id, True, D("5.00"))
         _make_invoice_with_item(db_session, project, mc, qty=D("2"), unit_price=D("110"), inv_date=date(2026, 3, 15))
 
         rows = compute_calculations(db_session, project.id, date(2026, 3, 1), date(2026, 3, 31))
@@ -147,7 +162,7 @@ class TestCalculationIntegration:
     def test_not_compensable_returns_none(self, db_session, factories):
         """No corridor row → class not compensable → compensation fields are None."""
         project = ProjectFactory.create()
-        mc = MaterialClassFactory.create(material_type="concrete", name="В25")
+        mc = MaterialClassFactory.create(material_type_code="concrete", name="В25")
         ReferencePriceFactory.create(
             project=project, material_class=mc, price=D("100"),
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
@@ -163,12 +178,13 @@ class TestCalculationIntegration:
     def test_class_override_disables_compensation(self, db_session, factories):
         """Type enabled, class override disables → no compensation for that class."""
         project = ProjectFactory.create()
-        mc = MaterialClassFactory.create(material_type="concrete", name="В40")
+        mc = MaterialClassFactory.create(material_type_code="concrete", name="В40")
         ReferencePriceFactory.create(
             project=project, material_class=mc, price=D("100"),
             period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
         )
-        set_type_corridor(db_session, project.id, "concrete", True, D("5.00"))
+        mt_id = _mt_id(db_session, "concrete")
+        set_type_corridor(db_session, project.id, mt_id, True, D("5.00"))
         set_class_corridor(db_session, project.id, mc.id, False, None)
         _make_invoice_with_item(db_session, project, mc, qty=D("2"), unit_price=D("110"), inv_date=date(2026, 3, 15))
 
@@ -225,7 +241,7 @@ class TestCorridorApi:
 
     def test_put_class_corridor(self, client: TestClient, db_session, factories):
         project = ProjectFactory.create()
-        mc = MaterialClassFactory.create(material_type="concrete", name="В40")
+        mc = MaterialClassFactory.create(material_type_code="concrete", name="В40")
         resp = client.put(
             f"/api/projects/{project.id}/corridors/class/{mc.id}",
             json={"is_compensable": True, "corridor_pct": 7.0},
@@ -234,7 +250,7 @@ class TestCorridorApi:
 
     def test_delete_class_corridor(self, client: TestClient, db_session, factories):
         project = ProjectFactory.create()
-        mc = MaterialClassFactory.create(material_type="concrete", name="В40")
+        mc = MaterialClassFactory.create(material_type_code="concrete", name="В40")
         client.put(
             f"/api/projects/{project.id}/corridors/class/{mc.id}",
             json={"is_compensable": True, "corridor_pct": 7.0},
@@ -244,8 +260,8 @@ class TestCorridorApi:
 
     def test_resolved_matrix_shows_inheritance(self, client: TestClient, db_session, factories):
         project = ProjectFactory.create()
-        mc1 = MaterialClassFactory.create(material_type="concrete", name="В25")
-        mc2 = MaterialClassFactory.create(material_type="concrete", name="В40")
+        mc1 = MaterialClassFactory.create(material_type_code="concrete", name="В25")
+        mc2 = MaterialClassFactory.create(material_type_code="concrete", name="В40")
         client.put(
             f"/api/projects/{project.id}/corridors/type/concrete",
             json={"is_compensable": True, "corridor_pct": 5.0},
