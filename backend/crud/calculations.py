@@ -366,16 +366,9 @@ def compute_export_rows(
     material_class_id: int | None = None,
     excluded_supplier_ids: set[int] | None = None,
 ) -> list[dict]:
-    """Per-(invoice, material_class) rows for the detailed Excel report.
+    """Per-(invoice, material_class) rows for the detailed Excel report (normalized units)."""
+    from collections import defaultdict
 
-    Each row represents one invoice's contribution to one material class with a
-    per-m³ breakdown: base material / delivery / other (additives) / total (all with VAT).
-    Shared costs (delivery, additives) are distributed proportionally to the base-material
-    quantity of the class within the invoice — same methodology as compute_calculations().
-
-    Returns rows sorted by material_class_name → invoice_date → invoice_number.
-    """
-    # Resolve date bounds from invoice data when not provided
     if period_start is None or period_end is None:
         bounds_q = (
             db.query(func.min(Invoice.date), func.max(Invoice.date))
@@ -384,10 +377,7 @@ def compute_export_rows(
         )
         if excluded_supplier_ids:
             bounds_q = bounds_q.filter(
-                or_(
-                    Invoice.supplier_id.is_(None),
-                    Invoice.supplier_id.notin_(excluded_supplier_ids),
-                )
+                or_(Invoice.supplier_id.is_(None), Invoice.supplier_id.notin_(excluded_supplier_ids))
             )
         bounds = bounds_q.first()
         if not bounds or not bounds[0]:
@@ -398,23 +388,15 @@ def compute_export_rows(
             max_d = bounds[1]
             period_end = max_d.replace(day=monthrange(max_d.year, max_d.month)[1])
 
-    # ── All invoices for the project in the requested period ──
     invoices_raw_q = (
         db.query(Invoice.id, Invoice.date, Invoice.number, Invoice.supplier_name, Invoice.vat_rate)
         .join(Document, Invoice.document_id == Document.id)
-        .filter(
-            Document.project_id == project_id,
-            Invoice.date >= period_start,
-            Invoice.date <= period_end,
-        )
+        .filter(Document.project_id == project_id, Invoice.date >= period_start, Invoice.date <= period_end)
         .order_by(Invoice.date, Invoice.number)
     )
     if excluded_supplier_ids:
         invoices_raw_q = invoices_raw_q.filter(
-            or_(
-                Invoice.supplier_id.is_(None),
-                Invoice.supplier_id.notin_(excluded_supplier_ids),
-            )
+            or_(Invoice.supplier_id.is_(None), Invoice.supplier_id.notin_(excluded_supplier_ids))
         )
     invoices_raw = invoices_raw_q.all()
     if not invoices_raw:
@@ -423,8 +405,8 @@ def compute_export_rows(
     invoice_ids = [r.id for r in invoices_raw]
     invoice_map = {r.id: r for r in invoices_raw}
 
-    # ── Base material rows per (invoice, class) ──
-    base_q = (
+    # Base material rows per (invoice, class) — normalized only, NO class filter (denominator needs full invoice)
+    base_rows = (
         db.query(
             InvoiceItem.invoice_id,
             InvoiceItem.material_class_id,
@@ -433,82 +415,71 @@ def compute_export_rows(
                 InvoiceItem.vat_amount,
                 InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100,
             )).label("mat_vat"),
-            func.sum(InvoiceItem.quantity).label("qty"),
+            func.sum(InvoiceItem.normalized_quantity).label("qty"),
+            func.sum(InvoiceItem.quantity).label("raw_qty"),
+            func.max(InvoiceItem.raw_unit).label("raw_unit"),
+            UnitOfMeasure.symbol.label("symbol"),
+            UnitOfMeasure.dimension.label("dimension"),
         )
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
+        .join(UnitOfMeasure, InvoiceItem.normalized_unit_id == UnitOfMeasure.id)
         .filter(
             InvoiceItem.invoice_id.in_(invoice_ids),
             InvoiceItem.item_type == "material",
+            InvoiceItem.normalized_unit_id.isnot(None),
             MaterialClass.calc_role == "base",
         )
+        .group_by(
+            InvoiceItem.invoice_id, InvoiceItem.material_class_id,
+            UnitOfMeasure.symbol, UnitOfMeasure.dimension,
+        )
+        .all()
     )
-    if material_class_id is not None:
-        base_q = base_q.filter(InvoiceItem.material_class_id == material_class_id)
-    base_rows = base_q.group_by(InvoiceItem.invoice_id, InvoiceItem.material_class_id).all()
-
     if not base_rows:
         return []
 
-    # Narrow to only invoices that actually have base rows (reduces delivery/additive query scope)
     invoice_ids = list({r.invoice_id for r in base_rows})
 
-    # ── Total base qty per invoice (denominator for proportional allocation) ──
-    total_base_qty_per_inv: dict[int, Decimal] = {}
-    for r in (
-        db.query(
-            InvoiceItem.invoice_id,
-            func.sum(InvoiceItem.quantity).label("total_qty"),
-        )
-        .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
-        .filter(
-            InvoiceItem.invoice_id.in_(invoice_ids),
-            InvoiceItem.item_type == "material",
-            MaterialClass.calc_role == "base",
-        )
-        .group_by(InvoiceItem.invoice_id)
-        .all()
-    ):
-        total_base_qty_per_inv[r.invoice_id] = r.total_qty
+    # Dimension-aware share per (invoice, class)
+    rows_by_invoice = defaultdict(list)
+    for r in base_rows:
+        rows_by_invoice[r.invoice_id].append(r)
+    share_by_inv_class: dict[tuple[int, int], Decimal] = {}
+    for inv_id, rows in rows_by_invoice.items():
+        for cid, share in compute_shared_shares(rows).items():
+            share_by_inv_class[(inv_id, cid)] = share
 
-    # ── Delivery cost per invoice: excl VAT and with VAT ──
+    # Delivery per invoice (excl/with VAT)
     delivery_per_inv: dict[int, Decimal] = {}
     delivery_excl_per_inv: dict[int, Decimal] = {}
     for r in (
         db.query(
             InvoiceItem.invoice_id,
             func.sum(InvoiceItem.amount).label("excl_vat"),
-            func.sum(
-                InvoiceItem.amount + func.coalesce(
-                    InvoiceItem.vat_amount,
-                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100,
-                )
-            ).label("total_with_vat"),
+            func.sum(InvoiceItem.amount + func.coalesce(
+                InvoiceItem.vat_amount,
+                InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100,
+            )).label("total_with_vat"),
         )
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
-        .filter(
-            InvoiceItem.invoice_id.in_(invoice_ids),
-            InvoiceItem.item_type == "delivery",
-        )
+        .filter(InvoiceItem.invoice_id.in_(invoice_ids), InvoiceItem.item_type == "delivery")
         .group_by(InvoiceItem.invoice_id)
         .all()
     ):
         delivery_per_inv[r.invoice_id] = r.total_with_vat
         delivery_excl_per_inv[r.invoice_id] = r.excl_vat
 
-    # ── Additive (calc_role="additive") cost per invoice: excl VAT and with VAT ──
     additive_per_inv: dict[int, Decimal] = {}
     additive_excl_per_inv: dict[int, Decimal] = {}
     for r in (
         db.query(
             InvoiceItem.invoice_id,
             func.sum(InvoiceItem.amount).label("excl_vat"),
-            func.sum(
-                InvoiceItem.amount + func.coalesce(
-                    InvoiceItem.vat_amount,
-                    InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100,
-                )
-            ).label("total_with_vat"),
+            func.sum(InvoiceItem.amount + func.coalesce(
+                InvoiceItem.vat_amount,
+                InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100,
+            )).label("total_with_vat"),
         )
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
@@ -523,15 +494,12 @@ def compute_export_rows(
         additive_per_inv[r.invoice_id] = r.total_with_vat
         additive_excl_per_inv[r.invoice_id] = r.excl_vat
 
-    # ── Material class names ──
     class_ids = list({r.material_class_id for r in base_rows})
     class_name_map = {
-        mc.id: mc.name
-        for mc in db.query(MaterialClass).filter(MaterialClass.id.in_(class_ids)).all()
+        mc.id: mc.name for mc in db.query(MaterialClass).filter(MaterialClass.id.in_(class_ids)).all()
     }
 
-    # ── Batch-load all relevant reference prices for lookup ──
-    all_ref: list[ReferencePrice] = (
+    all_ref: list = (
         db.query(ReferencePrice)
         .filter(
             ReferencePrice.project_id == project_id,
@@ -547,56 +515,52 @@ def compute_export_rows(
         )
         .all()
     )
-
-    ref_by_class: dict[int, list[ReferencePrice]] = {}
+    ref_by_class: dict[int, list] = {}
     for rp in all_ref:
         ref_by_class.setdefault(rp.material_class_id, []).append(rp)
 
-    def _ref_price(class_id: int, inv_date: date) -> float | None:
+    def _ref_price(class_id: int, inv_date: date):
         for rp in ref_by_class.get(class_id, []):
             if rp.period_start <= inv_date <= rp.period_end:
                 return rp.price
         return None
 
-    # ── Build result rows ──
     from finance import money_round  # noqa: PLC0415
     rows: list[dict] = []
     for br in base_rows:
+        if material_class_id is not None and br.material_class_id != material_class_id:
+            continue
         inv_id = br.invoice_id
         cid = br.material_class_id
-        qty = br.qty  # Decimal
-        if qty <= 0:
+        qty = br.qty  # normalized
+        if qty is None or qty <= 0:
             continue
 
-        total_base_qty = total_base_qty_per_inv.get(inv_id, Decimal("0"))
-        share = qty / total_base_qty if total_base_qty > 0 else Decimal("0")
-
+        share = share_by_inv_class.get((inv_id, cid), Decimal("0"))
         mat_with_vat = br.mat_total + br.mat_vat
         delivery_alloc = delivery_per_inv.get(inv_id, Decimal("0")) * share
         additive_alloc = additive_per_inv.get(inv_id, Decimal("0")) * share
         delivery_excl_alloc = delivery_excl_per_inv.get(inv_id, Decimal("0")) * share
         additive_excl_alloc = additive_excl_per_inv.get(inv_id, Decimal("0")) * share
 
-        mat_per_m3_excl_vat = br.mat_total / qty
-        mat_per_m3 = mat_with_vat / qty
-        delivery_per_m3_excl_vat = delivery_excl_alloc / qty
-        delivery_per_m3 = delivery_alloc / qty
-        other_per_m3_excl_vat = additive_excl_alloc / qty
-        other_per_m3 = additive_alloc / qty
-        total_per_m3 = mat_per_m3 + delivery_per_m3 + other_per_m3
+        mat_per_unit_excl_vat = br.mat_total / qty
+        mat_per_unit = mat_with_vat / qty
+        delivery_per_unit_excl_vat = delivery_excl_alloc / qty
+        delivery_per_unit = delivery_alloc / qty
+        other_per_unit_excl_vat = additive_excl_alloc / qty
+        other_per_unit = additive_alloc / qty
+        total_per_unit = mat_per_unit + delivery_per_unit + other_per_unit
 
         inv = invoice_map[inv_id]
         vat_rate_decimal = (inv.vat_rate if inv.vat_rate is not None else Decimal("20")) / Decimal("100")
-        ref_price = _ref_price(cid, inv.date)  # Decimal | None
+        ref_price = _ref_price(cid, inv.date)
         deviation_pct = (
-            money_round((total_per_m3 - ref_price) / ref_price * 100, 2)
-            if ref_price and ref_price > 0
-            else None
+            money_round((total_per_unit - ref_price) / ref_price * 100, 2)
+            if ref_price and ref_price > 0 else None
         )
         deviation_amount = (
-            money_round((total_per_m3 - ref_price) * qty, 2)
-            if ref_price and ref_price > 0
-            else None
+            money_round((total_per_unit - ref_price) * qty, 2)
+            if ref_price and ref_price > 0 else None
         )
 
         rows.append({
@@ -606,16 +570,19 @@ def compute_export_rows(
             "invoice_date": inv.date,
             "invoice_number": inv.number,
             "supplier_name": inv.supplier_name or "—",
+            "raw_qty": money_round(br.raw_qty, 6),
+            "raw_unit": br.raw_unit or "—",
             "qty": money_round(qty, 6),
+            "unit_symbol": br.symbol,
             "ref_price": ref_price,
-            "mat_per_m3_excl_vat": money_round(mat_per_m3_excl_vat, 6),
-            "vat_rate": vat_rate_decimal,              # Decimal: 0.20 → shows as 20% in Excel
-            "mat_per_m3": money_round(mat_per_m3, 6),
-            "delivery_per_m3_excl_vat": money_round(delivery_per_m3_excl_vat, 6),
-            "delivery_per_m3": money_round(delivery_per_m3, 6),
-            "other_per_m3_excl_vat": money_round(other_per_m3_excl_vat, 6),
-            "other_per_m3": money_round(other_per_m3, 6),
-            "total_per_m3": money_round(total_per_m3, 6),
+            "mat_per_m3_excl_vat": money_round(mat_per_unit_excl_vat, 6),
+            "vat_rate": vat_rate_decimal,
+            "mat_per_m3": money_round(mat_per_unit, 6),
+            "delivery_per_m3_excl_vat": money_round(delivery_per_unit_excl_vat, 6),
+            "delivery_per_m3": money_round(delivery_per_unit, 6),
+            "other_per_m3_excl_vat": money_round(other_per_unit_excl_vat, 6),
+            "other_per_m3": money_round(other_per_unit, 6),
+            "total_per_m3": money_round(total_per_unit, 6),
             "deviation_pct": deviation_pct,
             "deviation_amount": deviation_amount,
         })

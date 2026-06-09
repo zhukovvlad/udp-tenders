@@ -1,11 +1,13 @@
 """Tests for the Excel export: compute_export_rows() logic and /api/export/excel endpoint.
 
-Layout overview (18 columns A–R):
-  A=Date  B=Number  C=Supplier  D=Qty  E=RefPrice  F=VATrate
-  G=MatExcl  H=DelivExcl  I=OtherExcl  J=formula:G+H+I
-  K=formula:G*(1+F)  L=formula:H*(1+F)  M=formula:I*(1+F)  N=formula:K+L+M
-  O=formula:deviation%  P=formula:deviation₽
-  Q=corridor%  R=compensation₽
+Layout overview (21 columns A–U):
+  A=Date  B=Number  C=Supplier
+  D=RawQty  E=RawUnit  F=CalcQty (normalized)  G=BaseUnit
+  H=RefPrice  I=VATrate
+  J=MatExcl  K=DelivExcl  L=OtherExcl  M=formula:J+K+L
+  N=formula:J*(1+I)  O=formula:K*(1+I)  P=formula:L*(1+I)  Q=formula:N+O+P
+  R=formula:deviation%  S=formula:deviation₽
+  T=corridor%  U=compensation₽
 """
 from __future__ import annotations
 
@@ -30,7 +32,7 @@ def _all_values(ws) -> list:
 
 
 def _find_data_row(ws) -> int | None:
-    """Return 1-based row of the first row whose col D (4) holds a plain number > 0."""
+    """Return 1-based row of the first row whose col D (4, raw_qty) holds a plain number > 0."""
     for r in range(1, ws.max_row + 1):
         v = ws.cell(row=r, column=4).value
         if isinstance(v, int | float) and not isinstance(v, bool) and v > 0:
@@ -100,7 +102,8 @@ class TestComputeExportRows:
         r = rows[0]
         required_keys = {
             "material_class_id", "material_class_name", "invoice_id",
-            "invoice_date", "invoice_number", "supplier_name", "qty",
+            "invoice_date", "invoice_number", "supplier_name",
+            "raw_qty", "raw_unit", "qty", "unit_symbol",
             "ref_price", "vat_rate",
             "mat_per_m3_excl_vat", "mat_per_m3",
             "delivery_per_m3_excl_vat", "delivery_per_m3",
@@ -607,7 +610,7 @@ class TestExportEndpoint:
 
     # ── Column layout ────────────────────────────────────────────────────────
 
-    def test_sheet_has_exactly_18_columns(self, client, factories):
+    def test_sheet_has_exactly_21_columns(self, client, factories):
         project = factories.ProjectFactory.create()
         mc = factories.MaterialClassFactory.create(calc_role="base")
         doc = factories.DocumentFactory.create(project=project)
@@ -618,10 +621,10 @@ class TestExportEndpoint:
             "&period_start=2026-03-01&period_end=2026-03-31"
         )
         ws = load_workbook(BytesIO(resp.content)).active
-        assert ws.max_column == 18
+        assert ws.max_column == 21
 
     def test_formula_columns_contain_excel_formulas(self, client, factories):
-        """Columns J(10), K(11), L(12), M(13), N(14), O(15), P(16) in a data row
+        """Columns M(13), N(14), O(15), P(16), Q(17), R(18), S(19) in a data row
         must hold '=...' formula strings (not pre-computed floats)."""
         project = factories.ProjectFactory.create()
         mc = factories.MaterialClassFactory.create(calc_role="base")
@@ -637,7 +640,7 @@ class TestExportEndpoint:
         data_row = _find_data_row(ws)
         assert data_row is not None, "No data row found (col D must have qty > 0)"
 
-        formula_cols = {10: "J", 11: "K", 12: "L", 13: "M", 14: "N", 15: "O", 16: "P"}
+        formula_cols = {13: "M", 14: "N", 15: "O", 16: "P", 17: "Q", 18: "R", 19: "S"}
         for col, letter in formula_cols.items():
             v = ws.cell(row=data_row, column=col).value
             assert isinstance(v, str) and v.startswith("="), (
@@ -645,7 +648,7 @@ class TestExportEndpoint:
             )
 
     def test_static_columns_contain_plain_values(self, client, factories):
-        """Columns A–I (1–9) in a data row hold plain values, not formulas."""
+        """Columns A–L (1–12) in a data row hold plain values, not formulas."""
         project = factories.ProjectFactory.create()
         mc = factories.MaterialClassFactory.create(calc_role="base")
         doc = factories.DocumentFactory.create(project=project)
@@ -662,7 +665,7 @@ class TestExportEndpoint:
         data_row = _find_data_row(ws)
         assert data_row is not None
 
-        for col in range(1, 10):  # A–I
+        for col in range(1, 13):  # A–L
             v = ws.cell(row=data_row, column=col).value
             assert not (isinstance(v, str) and v.startswith("=")), (
                 f"Col {col} in data row should be plain value, got formula: {v!r}"
@@ -817,8 +820,8 @@ class TestExportEndpoint:
 
     # ── Data values in sheet ─────────────────────────────────────────────────
 
-    def test_excl_vat_value_appears_in_column_g(self, client, factories):
-        """mat_per_m3_excl_vat = 5000.0 appears as plain value in col G (7)."""
+    def test_excl_vat_value_appears_in_column_j(self, client, factories):
+        """mat_per_m3_excl_vat = 5000.0 appears as plain value in col J (10)."""
         project = factories.ProjectFactory.create()
         mc = factories.MaterialClassFactory.create(calc_role="base")
         doc = factories.DocumentFactory.create(project=project)
@@ -834,9 +837,9 @@ class TestExportEndpoint:
         ws = load_workbook(BytesIO(resp.content)).active
         data_row = _find_data_row(ws)
         assert data_row is not None
-        assert float(ws.cell(row=data_row, column=7).value) == pytest.approx(5000.0)
+        assert float(ws.cell(row=data_row, column=10).value) == pytest.approx(5000.0)
 
-    def test_ref_price_appears_in_column_e(self, client, factories):
+    def test_ref_price_appears_in_column_h(self, client, factories):
         project = factories.ProjectFactory.create()
         mc = factories.MaterialClassFactory.create(calc_role="base")
         factories.ReferencePriceFactory.create(
@@ -853,4 +856,38 @@ class TestExportEndpoint:
         ws = load_workbook(BytesIO(resp.content)).active
         data_row = _find_data_row(ws)
         assert data_row is not None
-        assert float(ws.cell(row=data_row, column=5).value) == pytest.approx(7500.0)
+        assert float(ws.cell(row=data_row, column=8).value) == pytest.approx(7500.0)
+
+
+# ---------------------------------------------------------------------------
+# Section 3: normalized two-block layout (raw + calc columns)
+# ---------------------------------------------------------------------------
+
+def test_export_has_raw_and_calc_columns(client, factories, db_session):
+    from models import UnitOfMeasure
+    project = factories.ProjectFactory.create()
+    mc = factories.MaterialClassFactory.create(material_type_code="rebar", name="d12")
+    ton = db_session.query(UnitOfMeasure).filter_by(code="TON").one()
+    factories.ReferencePriceFactory.create(
+        project=project, material_class=mc, unit_id=ton.id, price=60000,
+        period_start=date(2026, 1, 1), period_end=date(2026, 12, 31),
+    )
+    doc = factories.DocumentFactory.create(project=project)
+    inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10))
+    # 2000 kg rebar normalized to 2 tons
+    factories.InvoiceItemFactory.create(
+        invoice=inv, material_class_id=mc.id, raw_unit="кг", quantity=2000,
+        normalized_unit_id=ton.id, normalized_quantity=2, unit_price=60, normalized_unit_price=60000,
+        amount=120000,
+    )
+    resp = client.get(
+        f"/api/export/excel?project_id={project.id}"
+        "&period_start=2026-03-01&period_end=2026-03-31"
+    )
+    assert resp.status_code == 200
+    wb = load_workbook(BytesIO(resp.content))
+    ws = wb.active
+    all_text = {c.value for row in ws.iter_rows() for c in row if isinstance(c.value, str)}
+    assert "Кол-во по документу" in all_text
+    assert "Расчётное кол-во" in all_text
+    assert "Базовая ед. изм." in all_text
