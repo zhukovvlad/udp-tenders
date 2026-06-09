@@ -160,6 +160,10 @@ class InvoiceItemFactory(_BaseFactory):
     item_type = "material"
     quantity = 5.0
     raw_unit = "м3"
+    # ВНИМАНИЕ: дефолт нормализации рассчитан на м³ (multiplier=1, normalized == raw).
+    # При override raw_unit на другую единицу (напр. "кг") нужно ЯВНО задать
+    # normalized_unit_id / normalized_quantity / normalized_unit_price —
+    # иначе фикстура будет несогласованной (кг → тонны, multiplier 0.001).
     normalized_unit_id = factory.LazyAttribute(lambda _: _unit_id("M3"))
     normalized_quantity = factory.LazyAttribute(lambda obj: obj.quantity)
     unit_price = 8000.0
