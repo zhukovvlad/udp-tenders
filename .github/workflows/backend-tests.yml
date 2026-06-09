@@ -35,6 +35,10 @@ jobs:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/postgres
       TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/udp_test
       SECRET_KEY: ci-only-secret-key-not-for-production-min-32-chars
+      # The PDF parser returns an error if OPENROUTER_API_KEY is empty (checked before the
+      # HTTP call). Upload tests mock the HTTP response via respx, so any non-empty value
+      # works — it only needs to pass the "is the key configured?" guard.
+      OPENROUTER_API_KEY: ci-dummy-key-respx-mocks-the-call
 
     steps:
       - uses: actions/checkout@v4
