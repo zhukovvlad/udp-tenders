@@ -4,16 +4,16 @@ Revision ID: e1f2a3b4c5d6
 Revises: d0e1f2a3b4c5
 Create Date: 2026-06-08 13:00:00.000000
 """
+# Reuse the single source of truth for seed data + normalization.
+import sys
 from decimal import Decimal
+from pathlib import Path
 from typing import Sequence, Union
 
 import sqlalchemy as sa
 
 from alembic import op
 
-# Reuse the single source of truth for seed data + normalization.
-import sys
-from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # backend/
 from crud.units import ALIASES_SEED, MATERIAL_TYPES_SEED, UNITS_SEED, normalize_unit_key  # noqa: E402
 

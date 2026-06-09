@@ -15,12 +15,14 @@ from models import (
     Invoice,
     InvoiceItem,
     MaterialClass,
+    MaterialType,
     Organization,
     OrgRole,
     Project,
     ProjectRole,
     ReferencePrice,
     Supplier,
+    UnitOfMeasure,
     User,
 )
 from security import hash_password
@@ -31,6 +33,16 @@ _session_holder: dict = {"session": None}
 
 def _register_session(session) -> None:
     _session_holder["session"] = session
+
+
+def _unit_id(code: str) -> int:
+    session = _session_holder["session"]
+    return session.query(UnitOfMeasure).filter_by(code=code).one().id
+
+
+def _material_type_id(code: str) -> int:
+    session = _session_holder["session"]
+    return session.query(MaterialType).filter_by(code=code).one().id
 
 
 class _BaseFactory(SQLAlchemyModelFactory):
@@ -90,11 +102,13 @@ class MaterialClassFactory(_BaseFactory):
     class Meta:
         model = MaterialClass
 
-    # name выводится из material_type, чтобы при override одного из полей
-    # не получить рассинхронизацию (например, name="В25", material_type="rebar").
-    material_type = factory.Iterator(["concrete", "rebar"])
+    # Default to concrete/В25. Tests override material_type_code to switch type.
+    class Params:
+        material_type_code = "concrete"
+
+    material_type_id = factory.LazyAttribute(lambda obj: _material_type_id(obj.material_type_code))
     name = factory.LazyAttribute(
-        lambda obj: {"concrete": "В25", "rebar": "d12"}.get(obj.material_type, "X")
+        lambda obj: {"concrete": "В25", "rebar": "d12", "other": "X"}.get(obj.material_type_code, "X")
     )
     calc_role = "base"
 
@@ -105,6 +119,7 @@ class ReferencePriceFactory(_BaseFactory):
 
     project = factory.SubFactory(ProjectFactory)
     material_class = factory.SubFactory(MaterialClassFactory)
+    unit_id = factory.LazyAttribute(lambda _: _unit_id("M3"))
     price = 8000.0
     period_start = date(2026, 1, 1)
     period_end = date(2026, 12, 31)
@@ -144,8 +159,11 @@ class InvoiceItemFactory(_BaseFactory):
     raw_name = "Бетон В25"
     item_type = "material"
     quantity = 5.0
-    unit = "м3"
+    raw_unit = "м3"
+    normalized_unit_id = factory.LazyAttribute(lambda _: _unit_id("M3"))
+    normalized_quantity = factory.LazyAttribute(lambda obj: obj.quantity)
     unit_price = 8000.0
+    normalized_unit_price = factory.LazyAttribute(lambda obj: obj.unit_price)
     # amount и vat_amount выводятся из quantity * unit_price — это предотвращает
     # рассинхронизацию при override quantity. Тесты могут передать amount явно.
     amount = factory.LazyAttribute(lambda obj: obj.quantity * obj.unit_price)
@@ -157,7 +175,7 @@ class CompensationCorridorFactory(_BaseFactory):
         model = CompensationCorridor
 
     project_id = factory.LazyAttribute(lambda _: ProjectFactory.create().id)
-    material_type = None
+    material_type_id = None
     material_class_id = factory.LazyAttribute(lambda _: MaterialClassFactory.create().id)
     is_compensable = True
     corridor_pct = Decimal("5.00")
