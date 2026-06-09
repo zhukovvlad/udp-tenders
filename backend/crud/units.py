@@ -44,6 +44,22 @@ def invariant_holds(
     return abs(expected - amount) <= tol
 
 
+def item_has_issues(item) -> bool:
+    """True if an invoice item blocks analytics: no quantity, no description,
+    an un-normalized material unit, or a quantity*price≈amount invariant break.
+
+    Shared by the invoices and dashboard routers' has-issues checks so the
+    business rules cannot drift between the two endpoints.
+    """
+    if (item.quantity or 0) <= 0:
+        return True
+    if not (item.raw_name or "").strip():
+        return True
+    if item.item_type == "material" and item.normalized_unit_id is None:
+        return True
+    return not invariant_holds(item.quantity, item.unit_price, item.amount)
+
+
 # --- Seed data (consumed by the migration and tests) ------------------------
 # Base units first; derived units reference base by code. multiplier is a string
 # (parsed to Decimal) to avoid float imprecision in the Numeric audit trail.

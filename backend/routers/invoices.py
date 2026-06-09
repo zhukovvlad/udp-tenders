@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from crud.documents import create_document, delete_document, get_document, get_documents
 from crud.suppliers import get_or_create_supplier
-from crud.units import load_alias_map, normalize_item
+from crud.units import item_has_issues, load_alias_map, normalize_item
 from database import get_db
 from models import Invoice, InvoiceItem, MaterialClass
 from s3 import delete_file, download_file, ensure_bucket, upload_file
@@ -44,21 +44,14 @@ class InvoiceUpdate(BaseModel):
 
 
 def _doc_has_issues(doc) -> bool:
-    """Документ требует проверки, если есть позиции, по которым нельзя считать аналитику:
-    нет количества, нет описания, или единица измерения материала не нормализована."""
-    from crud.units import invariant_holds  # noqa: PLC0415
+    """Документ требует проверки, если есть позиции, по которым нельзя считать
+    аналитику: нет количества, нет описания, единица измерения материала не
+    нормализована, или нарушен инвариант количество*цена≈сумма."""
     for inv in doc.invoices:
         if not inv.items:
             return True
         for item in inv.items:
-            if (item.quantity or 0) <= 0:
-                return True
-            if not (item.raw_name or "").strip():
-                return True
-            # Material rows must normalize to a base unit; otherwise they cannot be aggregated.
-            if item.item_type == "material" and item.normalized_unit_id is None:
-                return True
-            if not invariant_holds(item.quantity, item.unit_price, item.amount):
+            if item_has_issues(item):
                 return True
     return False
 

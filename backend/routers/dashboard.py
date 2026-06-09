@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from crud.calculations import compute_calculations, compute_full_deviation
 from crud.supplier_exclusions import get_excluded_supplier_ids
+from crud.units import item_has_issues
 from database import get_db
 from models import Document, Invoice, InvoiceItem, Project, ProjectSupplierExclusion
 
@@ -99,19 +100,9 @@ def list_project_invoices(project_id: int, db: Session = Depends(get_db)):
         .all()
     )
     def _has_issues(inv):
-        from crud.units import invariant_holds  # noqa: PLC0415
         if not inv.items:
             return True
-        for it in inv.items:
-            if (it.quantity or 0) <= 0:
-                return True
-            if not (it.raw_name or "").strip():
-                return True
-            if it.item_type == "material" and it.normalized_unit_id is None:
-                return True
-            if not invariant_holds(it.quantity, it.unit_price, it.amount):
-                return True
-        return False
+        return any(item_has_issues(it) for it in inv.items)
 
     return [
         {
