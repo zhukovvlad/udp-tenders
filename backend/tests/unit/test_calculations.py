@@ -1,5 +1,6 @@
 """Unit-тесты для _doc_has_issues и _avg_confidence (routers/invoices.py)."""
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 from routers.invoices import _avg_confidence, _doc_has_issues
 
@@ -8,6 +9,12 @@ from routers.invoices import _avg_confidence, _doc_has_issues
 class _FakeItem:
     quantity: float
     raw_name: str | None = ""
+    item_type: str = "material"
+    normalized_unit_id: int | None = 1  # non-None → no "unnormalized unit" flag
+    # invariant_holds uses Decimal arithmetic — supply Decimal-compatible values
+    # so that the check passes for a valid item (qty * unit_price ≈ amount).
+    unit_price: Decimal = Decimal("100")
+    amount: Decimal = Decimal("500")  # consistent with quantity=5, unit_price=100
 
 
 @dataclass

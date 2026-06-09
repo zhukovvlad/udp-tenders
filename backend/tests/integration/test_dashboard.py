@@ -70,6 +70,8 @@ def test_calculations_endpoint_returns_live_data(client, factories):
     assert len(rows) == 1
     assert rows[0]["total_qty"] == 10.0
     assert rows[0]["avg_price"] == 9600.0  # (80000 + 16000 vat) / 10
+    assert "unit_symbol" in rows[0]
+    assert "dimension_mismatch" in rows[0]
     assert rows[0]["period_start"] == "2026-03-01"
 
 

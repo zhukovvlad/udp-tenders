@@ -3,11 +3,13 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -39,6 +41,21 @@ class ProjectRole(str, enum.Enum):
     """Роль организации на проекте."""
     customer = "customer"      # заказчик — видит все данные, управляет базовыми ценами
     contractor = "contractor"  # подрядчик — видит только свои загрузки
+
+
+class UnitDimension(str, enum.Enum):
+    """Физическая размерность единицы измерения."""
+    mass = "mass"
+    volume = "volume"
+    length = "length"
+    count = "count"
+
+
+class ItemType(str, enum.Enum):
+    """Роль строки счёта в расчёте (ортогональна material_type)."""
+    material = "material"
+    delivery = "delivery"
+    other = "other"
 
 
 # ---------------------------------------------------------------------------
@@ -144,15 +161,70 @@ class Project(Base):
     )
 
 
+class UnitOfMeasure(Base):
+    __tablename__ = "units_of_measure"
+
+    id = Column(Integer, primary_key=True)
+    code = Column(String, nullable=False, unique=True)   # TON, KG, M3, L, M, PCS
+    name = Column(String, nullable=False)
+    symbol = Column(String, nullable=False)
+    dimension = Column(
+        SqlEnum(UnitDimension, name="ck_unit_dimension", native_enum=False),
+        nullable=False,
+    )
+    base_unit_id = Column(
+        Integer, ForeignKey("units_of_measure.id", ondelete="RESTRICT"), nullable=True
+    )
+    to_base_multiplier = Column(Numeric(30, 15), nullable=False, server_default=sa_text("1"))
+
+    base_unit = relationship("UnitOfMeasure", remote_side=[id])
+
+    __table_args__ = (
+        CheckConstraint(
+            "(base_unit_id IS NOT NULL) OR (to_base_multiplier = 1)",
+            name="ck_unit_base_multiplier",
+        ),
+    )
+
+
+class UnitAlias(Base):
+    __tablename__ = "unit_aliases"
+
+    id = Column(Integer, primary_key=True)
+    raw_text = Column(String, nullable=False, unique=True)  # normalize_unit_key() output
+    unit_id = Column(
+        Integer, ForeignKey("units_of_measure.id", ondelete="CASCADE"), nullable=False
+    )
+
+    unit = relationship("UnitOfMeasure")
+
+
+class MaterialType(Base):
+    __tablename__ = "material_types"
+
+    id = Column(Integer, primary_key=True)
+    code = Column(String, nullable=False, unique=True)   # concrete / rebar / other
+    name = Column(String, nullable=False)
+    default_unit_id = Column(
+        Integer, ForeignKey("units_of_measure.id", ondelete="RESTRICT"), nullable=True
+    )
+
+    default_unit = relationship("UnitOfMeasure")
+
+
 class MaterialClass(Base):
     __tablename__ = "material_classes"
 
     id = Column(Integer, primary_key=True, index=True)
-    material_type = Column(String, nullable=False)  # concrete / rebar / other
+    material_type_id = Column(
+        Integer, ForeignKey("material_types.id", ondelete="RESTRICT"),
+        nullable=False, index=True,
+    )
     name = Column(String, nullable=False)  # В15, В40
     calc_role = Column(String, nullable=False, default="base")  # base / additive / exclude
     created_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
 
+    material_type = relationship("MaterialType")
     reference_prices = relationship("ReferencePrice", back_populates="material_class")
     invoice_items = relationship("InvoiceItem", back_populates="material_class")
 
@@ -164,12 +236,16 @@ class ReferencePrice(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     material_class_id = Column(Integer, ForeignKey("material_classes.id"), nullable=False)
     price = Column(Numeric(19, 4), nullable=False)
+    unit_id = Column(
+        Integer, ForeignKey("units_of_measure.id", ondelete="RESTRICT"), nullable=False
+    )
     period_start = Column(Date, nullable=False)
     period_end = Column(Date, nullable=False)
     source = Column(String)
 
     project = relationship("Project", back_populates="reference_prices")
     material_class = relationship("MaterialClass", back_populates="reference_prices")
+    unit = relationship("UnitOfMeasure")
 
 
 class Document(Base):
@@ -216,26 +292,53 @@ class ProjectSupplierExclusion(Base):
 
 
 class CompensationCorridor(Base):
-    """Коридор компенсации: допуск (%) вокруг базовой цены, в пределах которого
-    удорожание/удешевление не компенсируется. Задаётся per (проект × класс материала),
-    не периодичен (действует весь срок договора).
+    """Corridor rule for a project: type-level default or class-level override.
 
-    Семантика: нет строки → класс некомпенсируемый; corridor_pct=0 → компенсируется
-    любое отклонение (нет мёртвой зоны); corridor_pct=X → допуск ±X%.
+    Exactly one of material_type_id / material_class_id is set (chk_corridor_target_exclusive).
+    is_compensable=true requires corridor_pct (chk_corridor_pct_required_if_compensable).
+    Whitelist default: no row → not compensable.
+    Fallback: class-level → type-level → no row.
     """
     __tablename__ = "compensation_corridors"
 
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
-    material_class_id = Column(
-        Integer, ForeignKey("material_classes.id", ondelete="CASCADE"), primary_key=True
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    material_type_id = Column(
+        Integer, ForeignKey("material_types.id", ondelete="RESTRICT"), nullable=True
     )
-    corridor_pct = Column(Numeric(5, 2), nullable=False)  # 5.00 = ±5%; хранится в процентах, не в долях
+    material_class_id = Column(
+        Integer, ForeignKey("material_classes.id", ondelete="CASCADE"), nullable=True
+    )
+    is_compensable = Column(Boolean, nullable=False, default=False)
+    corridor_pct = Column(Numeric(5, 2), nullable=True)
     created_at = Column(DateTime, server_default=sa_text("(now() AT TIME ZONE 'utc')"))
     updated_at = Column(
         DateTime,
         server_default=sa_text("(now() AT TIME ZONE 'utc')"),
         onupdate=lambda: datetime.now(UTC).replace(tzinfo=None),
     )
+
+    __table_args__ = (
+        CheckConstraint(
+            "(material_type_id IS NOT NULL AND material_class_id IS NULL) OR "
+            "(material_type_id IS NULL AND material_class_id IS NOT NULL)",
+            name="chk_corridor_target_exclusive",
+        ),
+        CheckConstraint(
+            "(is_compensable IS FALSE) OR (is_compensable IS TRUE AND corridor_pct IS NOT NULL)",
+            name="chk_corridor_pct_required_if_compensable",
+        ),
+        Index(
+            "uq_corridor_project_type", "project_id", "material_type_id",
+            unique=True, postgresql_where=sa_text("material_class_id IS NULL"),
+        ),
+        Index(
+            "uq_corridor_project_class", "project_id", "material_class_id",
+            unique=True, postgresql_where=sa_text("material_type_id IS NULL"),
+        ),
+    )
+
+    material_type = relationship("MaterialType")
 
 
 class Invoice(Base):
@@ -265,13 +368,22 @@ class InvoiceItem(Base):
     id = Column(Integer, primary_key=True, index=True)
     invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False)
     raw_name = Column(String)
-    item_type = Column(String, nullable=False)
+    item_type = Column(
+        SqlEnum(ItemType, name="ck_item_type", native_enum=False), nullable=False
+    )
     material_class_id = Column(Integer, ForeignKey("material_classes.id"), nullable=True)
     quantity = Column(Numeric(15, 4), nullable=False)
-    unit = Column(String)
+    raw_unit = Column(String)
+    normalized_unit_id = Column(
+        Integer, ForeignKey("units_of_measure.id", ondelete="RESTRICT"),
+        nullable=True, index=True,
+    )
+    normalized_quantity = Column(Numeric(20, 6), nullable=True)
+    normalized_unit_price = Column(Numeric(24, 6), nullable=True)
     unit_price = Column(Numeric(19, 4), nullable=False)
     amount = Column(Numeric(15, 2), nullable=False)
     vat_amount = Column(Numeric(15, 2))
 
     invoice = relationship("Invoice", back_populates="items")
     material_class = relationship("MaterialClass", back_populates="invoice_items")
+    normalized_unit = relationship("UnitOfMeasure")

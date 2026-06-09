@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from crud.suppliers import get_or_create_supplier
+from crud.units import load_alias_map, normalize_item
 from models import Document, Invoice, InvoiceItem
 
 
@@ -78,15 +79,23 @@ def create_invoice(db: Session, document_id: int, number: str, invoice_date: dat
     db.add(invoice)
     db.flush()
 
+    aliases = load_alias_map(db)
     for item in items:
+        quantity = _dec(item["quantity"])
+        unit_price = _dec(item["unit_price"])
+        raw_unit = item.get("unit")
+        norm = normalize_item(raw_unit, quantity, unit_price, aliases)
         db_item = InvoiceItem(
             invoice_id=invoice.id,
             raw_name=item["raw_name"],
             item_type=item["item_type"],
             material_class_id=item.get("material_class_id"),
-            quantity=_dec(item["quantity"]),
-            unit=item.get("unit"),
-            unit_price=_dec(item["unit_price"]),
+            quantity=quantity,
+            raw_unit=raw_unit,
+            normalized_unit_id=norm.normalized_unit_id if norm else None,
+            normalized_quantity=norm.normalized_quantity if norm else None,
+            normalized_unit_price=norm.normalized_unit_price if norm else None,
+            unit_price=unit_price,
             amount=_dec(item["amount"]),
             vat_amount=_dec(item.get("vat_amount")),
         )

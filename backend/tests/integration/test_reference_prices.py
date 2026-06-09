@@ -1,12 +1,15 @@
-def test_create_reference_price(client, factories):
+def test_create_reference_price(client, factories, db_session):
+    from models import UnitOfMeasure
     project = factories.ProjectFactory.create()
     mc = factories.MaterialClassFactory.create()
+    m3_id = db_session.query(UnitOfMeasure).filter_by(code="M3").one().id
 
     response = client.post(
         "/api/reference-prices",
         json={
             "project_id": project.id,
             "material_class_id": mc.id,
+            "unit_id": m3_id,
             "price": 8500.0,
             "period_start": "2026-01-01",
             "period_end": "2026-12-31",
@@ -25,6 +28,8 @@ def test_list_reference_prices_includes_relations(client, factories):
     assert len(body) == 1
     assert "project_name" in body[0]
     assert "material_class_name" in body[0]
+    # material_type must be the bare code string, not the nested MaterialType object
+    assert body[0]["material_type"] == "concrete"
 
 
 def test_filter_by_project(client, factories):
@@ -132,5 +137,6 @@ def test_update_reference_price_response_includes_relations(client, factories):
     body = response.json()
     assert "project_name" in body
     assert "material_class_name" in body
-    assert "material_type" in body
+    # material_type must be the bare code string, not the nested MaterialType object
+    assert body["material_type"] == "concrete"
 

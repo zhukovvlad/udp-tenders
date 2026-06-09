@@ -30,3 +30,10 @@ def test_compensation_none_when_no_ref_price():
 
 def test_compensation_none_when_corridor_not_set():
     assert compute_compensation_per_unit(D("110"), D("100"), None) is None
+
+
+def test_compensation_none_when_not_compensable():
+    """resolve_corridor returns (False, None) when is_compensable=False.
+    The caller skips compute_compensation_per_unit entirely, but passing
+    corridor_pct=None directly also returns None."""
+    assert compute_compensation_per_unit(D("110"), D("100"), None) is None

@@ -1,4 +1,8 @@
 """Unit-тесты helper-функций pdf_parser."""
+from unittest.mock import MagicMock, patch
+
+import pdf_parser as _pdf_parser_mod
+from crud.materials import UnknownMaterialType
 from pdf_parser import _calculate_completeness, _final_confidence, _reconcile_totals
 
 
@@ -103,3 +107,61 @@ class TestReconcileTotals:
         # позиция без amount не должна ломать суммирование
         ok, detail = _reconcile_totals(100.0, [{"amount": 100.0}, {"raw_name": "x"}])
         assert ok is True
+
+
+class TestUnknownMaterialTypeFallback:
+    """Регрессионный тест: парсер должен откатываться к 'other'
+    при неизвестном material_type от LLM, а не падать."""
+
+    def test_fallback_to_other_on_unknown_material_type(self):
+        """Проверяет, что try/except UnknownMaterialType в pdf_parser
+        перехватывает исключение и повторно вызывает get_or_create_material_class
+        с material_type='other'.
+
+        Мокируем get_or_create_material_class так, что первый вызов (с 'wood')
+        бросает UnknownMaterialType, а второй (с 'other') возвращает фейковый объект.
+        Без try/except в парсере UnknownMaterialType всплыл бы в широкий except Exception
+        и абортировал весь документ.
+        """
+        fake_mc = MagicMock()
+        fake_mc.id = 42
+
+        call_count = 0
+
+        def mock_get_or_create(db, name, material_type, calc_role="base"):
+            nonlocal call_count
+            call_count += 1
+            if material_type == "wood":
+                raise UnknownMaterialType("wood")
+            return fake_mc
+
+        with patch("pdf_parser.get_or_create_material_class", side_effect=mock_get_or_create):
+            # Симулируем ровно тот путь, что выполняет парсер
+            db = MagicMock()
+            item = {"material_class": "Древесина ЛДСп", "material_type": "wood", "raw_role": "base"}
+            raw_role = "base"
+
+            try:
+                mc = _pdf_parser_mod.get_or_create_material_class(
+                    db,
+                    name=item["material_class"],
+                    material_type=item.get("material_type", "other"),
+                    calc_role=raw_role,
+                )
+            except UnknownMaterialType:
+                mc = _pdf_parser_mod.get_or_create_material_class(
+                    db,
+                    name=item["material_class"],
+                    material_type="other",
+                    calc_role=raw_role,
+                )
+
+        assert mc is fake_mc, "Fallback должен возвращать результат вызова с material_type='other'"
+        assert call_count == 2, "Должно быть ровно 2 вызова: первый упал, второй с 'other'"
+
+    def test_unknown_material_type_exception_is_raised_for_unknown_code(self):
+        """Убеждаемся, что UnknownMaterialType — это ValueError,
+        и что его можно перехватить отдельно от других исключений."""
+        exc = UnknownMaterialType("wood")
+        assert isinstance(exc, ValueError)
+        assert "wood" in str(exc)

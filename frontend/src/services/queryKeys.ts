@@ -41,5 +41,5 @@ export const qk = {
   },
   projectSuppliers: (projectId: ID) => ["project-suppliers", projectId] as const,
   supplierExclusions: (projectId: ID) => ["supplier-exclusions", projectId] as const,
-  compensationCorridors: (projectId: ID) => ["compensation-corridors", projectId] as const,
+  corridors: (projectId: ID) => ["corridors", projectId] as const,
 };

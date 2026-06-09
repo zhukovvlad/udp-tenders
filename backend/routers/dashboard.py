@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from crud.calculations import compute_calculations, compute_full_deviation
 from crud.supplier_exclusions import get_excluded_supplier_ids
+from crud.units import item_has_issues
 from database import get_db
 from models import Document, Invoice, InvoiceItem, Project, ProjectSupplierExclusion
 
@@ -101,12 +102,7 @@ def list_project_invoices(project_id: int, db: Session = Depends(get_db)):
     def _has_issues(inv):
         if not inv.items:
             return True
-        for it in inv.items:
-            if (it.quantity or 0) <= 0:
-                return True
-            if not (it.raw_name or "").strip():
-                return True
-        return False
+        return any(item_has_issues(it) for it in inv.items)
 
     return [
         {
@@ -127,7 +123,8 @@ def list_project_invoices(project_id: int, db: Session = Depends(get_db)):
                     "item_type": item.item_type,
                     "material_class": item.material_class.name if item.material_class else None,
                     "quantity": item.quantity,
-                    "unit": item.unit,
+                    "raw_unit": item.raw_unit,
+                    "unit": item.raw_unit,  # legacy alias — drop after frontend plan ships
                     "unit_price": item.unit_price,
                     "amount": item.amount,
                     "vat_amount": item.vat_amount,
@@ -185,6 +182,8 @@ def list_calculations(
             "delivery_total": r["delivery_total"],
             "total_qty": r["total_qty"],
             "avg_price": r["avg_price"],
+            "unit_symbol": r["unit_symbol"],
+            "dimension_mismatch": r["dimension_mismatch"],
             "invoice_count": r["invoice_count"],
             "reference_price": r["reference_price"],
             "deviation_pct": r["deviation_pct"],

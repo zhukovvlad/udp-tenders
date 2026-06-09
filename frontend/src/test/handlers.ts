@@ -121,12 +121,20 @@ export const handlers = [
     new HttpResponse(null, { status: 204 })
   ),
 
-  // Compensation corridors
-  http.get("/api/projects/:projectId/compensation-corridors", () => HttpResponse.json([])),
-  http.put("/api/projects/:projectId/compensation-corridors/:materialClassId", () =>
-    HttpResponse.json({ material_class_id: 1, corridor_pct: 5 }),
+  // Corridors (fallback hierarchy)
+  http.get("/api/projects/:projectId/corridors", () =>
+    HttpResponse.json({ types: [], classes: [] }),
   ),
-  http.delete("/api/projects/:projectId/compensation-corridors/:materialClassId", () =>
+  http.put("/api/projects/:projectId/corridors/type/:materialType", () =>
+    HttpResponse.json({ material_type: "concrete", is_compensable: true, corridor_pct: 5 }),
+  ),
+  http.delete("/api/projects/:projectId/corridors/type/:materialType", () =>
+    new HttpResponse(null, { status: 204 }),
+  ),
+  http.put("/api/projects/:projectId/corridors/class/:materialClassId", () =>
+    HttpResponse.json({ material_class_id: 1, is_compensable: true, corridor_pct: 7 }),
+  ),
+  http.delete("/api/projects/:projectId/corridors/class/:materialClassId", () =>
     new HttpResponse(null, { status: 204 }),
   ),
 

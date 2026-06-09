@@ -66,6 +66,21 @@ def block_real_openrouter(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(httpx.AsyncClient, "send", guarded_send)
 
 
+@pytest.fixture(autouse=True)
+def no_real_minio_on_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ensure_bucket() в lifespan не должен ходить в реальный MinIO из тестов.
+
+    Каждый `with TestClient(app)` гоняет lifespan → ensure_bucket(). Без подмены
+    каждый тест платит за попытку соединения с мёртвым localhost:9000
+    (~26с на Windows c firewall-drop, ~3-4с на Linux CI с ретраями boto3) —
+    именно это делало полный прогон 20+ минут. main.py вызывает s3.ensure_bucket()
+    с поздним связыванием, поэтому патча модуля s3 достаточно.
+    """
+    import s3
+
+    monkeypatch.setattr(s3, "ensure_bucket", lambda: None)
+
+
 @pytest.fixture
 def in_memory_s3(monkeypatch: pytest.MonkeyPatch) -> dict[str, bytes]:
     """In-memory подмена S3. Возвращает dict, в котором ключ = object_name, значение = bytes."""

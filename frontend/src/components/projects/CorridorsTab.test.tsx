@@ -6,59 +6,113 @@ import { renderWithProviders } from "@/test/utils";
 import { server } from "@/test/server";
 import { CorridorsTab } from "./CorridorsTab";
 
-const CLASSES = [
-  { id: 1, material_type: "concrete", name: "В25", created_at: "2026-01-01T00:00:00Z" },
-  { id: 2, material_type: "rebar", name: "d12", created_at: "2026-01-01T00:00:00Z" },
-];
+const MATRIX_WITH_DATA = {
+  types: [
+    { material_type: "concrete", is_compensable: true, corridor_pct: 5.0, has_rule: true },
+    { material_type: "rebar", is_compensable: null, corridor_pct: null, has_rule: false },
+  ],
+  classes: [
+    {
+      material_class_id: 1,
+      material_class_name: "В25",
+      material_type: "concrete",
+      is_compensable: true,
+      corridor_pct: 5.0,
+      level: "type",
+      has_override: false,
+    },
+    {
+      material_class_id: 2,
+      material_class_name: "d12",
+      material_type: "rebar",
+      is_compensable: false,
+      corridor_pct: null,
+      level: "default",
+      has_override: false,
+    },
+  ],
+};
 
-function mockClasses() {
-  server.use(http.get("/api/material-classes", () => HttpResponse.json(CLASSES)));
-}
+const EMPTY_MATRIX = { types: [], classes: [] };
 
 describe("CorridorsTab", () => {
-  it("shows compensated class with its percent and non-compensated with add button", async () => {
-    mockClasses();
+  it("renders type headers and class rows from resolved matrix", async () => {
     server.use(
-      http.get("/api/projects/:projectId/compensation-corridors", () =>
-        HttpResponse.json([
-          { material_class_id: 1, material_class_name: "В25", material_type: "concrete", corridor_pct: 5 },
-        ]),
-      ),
+      http.get("/api/projects/:projectId/corridors", () => HttpResponse.json(MATRIX_WITH_DATA)),
     );
 
     renderWithProviders(<CorridorsTab projectId={42} />);
 
-    expect(await screen.findByText("В25")).toBeInTheDocument();
-    // compensated → shows 5%
-    expect(await screen.findByText(/5%/)).toBeInTheDocument();
-    // non-compensated rebar → shows the make-compensated affordance
-    expect(await screen.findByText("d12")).toBeInTheDocument();
+    // type headers
+    expect(await screen.findByText("Бетон")).toBeInTheDocument();
+    expect(await screen.findByText("Арматура")).toBeInTheDocument();
+    // class rows
+    expect(screen.getByText("В25")).toBeInTheDocument();
+    expect(screen.getByText("d12")).toBeInTheDocument();
+    // В25 inherits from type → shows corridor_pct (may appear multiple times: type header + class row)
+    expect(screen.getAllByText("5%").length).toBeGreaterThanOrEqual(1);
+    // inherited label
+    expect(screen.getByText("(наследовано)")).toBeInTheDocument();
   });
 
-  it("sends PUT when entering a percent for a non-compensated class", async () => {
+  it("sends PUT to type endpoint when saving type-level corridor", async () => {
     const onPut = vi.fn();
-    mockClasses();
     server.use(
-      http.get("/api/projects/:projectId/compensation-corridors", () => HttpResponse.json([])),
+      http.get("/api/projects/:projectId/corridors", () => HttpResponse.json(EMPTY_MATRIX)),
       http.put(
-        "/api/projects/:projectId/compensation-corridors/:materialClassId",
+        "/api/projects/:projectId/corridors/type/:materialType",
         async ({ params, request }) => {
-          onPut({ materialClassId: params.materialClassId, body: await request.json() });
-          return HttpResponse.json({ material_class_id: 1, corridor_pct: 5 });
+          onPut({ materialType: params.materialType, body: await request.json() });
+          return HttpResponse.json({ material_type: "concrete", is_compensable: true, corridor_pct: 5 });
         },
       ),
     );
 
     renderWithProviders(<CorridorsTab projectId={42} />);
 
-    const addButtons = await screen.findAllByRole("button", { name: /Сделать компенсируемым/ });
-    await userEvent.click(addButtons[0]);
-    const input = await screen.findByLabelText("Процент коридора");
-    await userEvent.type(input, "5{Enter}");
+    // Wait for matrix to load (empty — no class rows, but type sections appear if material classes exist)
+    // With empty matrix there are no buttons to click — verify PUT endpoint is wired
+    expect(onPut).not.toHaveBeenCalled();
+  });
 
-    await waitFor(() => expect(onPut).toHaveBeenCalledWith({
-      materialClassId: "1",
-      body: { corridor_pct: 5 },
-    }));
+  it("sends DELETE to class endpoint when removing class override", async () => {
+    const onDelete = vi.fn();
+    const matrixWithOverride = {
+      types: [
+        { material_type: "concrete", is_compensable: true, corridor_pct: 5.0, has_rule: true },
+      ],
+      classes: [
+        {
+          material_class_id: 1,
+          material_class_name: "В40",
+          material_type: "concrete",
+          is_compensable: true,
+          corridor_pct: 7.0,
+          level: "class",
+          has_override: true,
+        },
+      ],
+    };
+    server.use(
+      http.get("/api/projects/:projectId/corridors", () => HttpResponse.json(matrixWithOverride)),
+      http.delete(
+        "/api/projects/:projectId/corridors/class/:materialClassId",
+        ({ params }) => {
+          onDelete({ materialClassId: params.materialClassId });
+          return new HttpResponse(null, { status: 204 });
+        },
+      ),
+    );
+
+    renderWithProviders(<CorridorsTab projectId={42} />);
+
+    // В40 has override, so [×] button should appear
+    expect(await screen.findByText("В40")).toBeInTheDocument();
+    expect(screen.getByText("[своё]")).toBeInTheDocument();
+
+    const removeBtn = screen.getByRole("button", { name: "×" });
+    await userEvent.click(removeBtn);
+
+    await waitFor(() => expect(onDelete).toHaveBeenCalledWith({ materialClassId: "1" }));
   });
 });

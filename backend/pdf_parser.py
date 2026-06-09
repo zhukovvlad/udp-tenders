@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from crud.documents import create_invoice
-from crud.materials import VALID_CALC_ROLES, get_or_create_material_class
+from crud.materials import VALID_CALC_ROLES, UnknownMaterialType, get_or_create_material_class
 
 logger = logging.getLogger(__name__)
 
@@ -276,12 +276,26 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
                             item.get("raw_name", "")[:40], raw_role,
                         )
                         raw_role = "base"
-                    mc = get_or_create_material_class(
-                        db,
-                        name=item["material_class"],
-                        material_type=item.get("material_type", "other"),
-                        calc_role=raw_role,
-                    )
+                    try:
+                        mc = get_or_create_material_class(
+                            db,
+                            name=item["material_class"],
+                            material_type=item.get("material_type", "other"),
+                            calc_role=raw_role,
+                        )
+                    except UnknownMaterialType as exc:
+                        logger.warning(
+                            "[doc=%d] СФ №%s поз.%d '%s': неизвестный material_type=%r — "
+                            "используем 'other'",
+                            document_id, inv_number, item_idx + 1,
+                            item.get("raw_name", "")[:40], str(exc),
+                        )
+                        mc = get_or_create_material_class(
+                            db,
+                            name=item["material_class"],
+                            material_type="other",
+                            calc_role=raw_role,
+                        )
                     material_class_id = mc.id
 
                 qty = float(item.get("quantity") or 0)
