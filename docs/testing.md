@@ -15,12 +15,12 @@
 | Backend unit | 14 | 155 | ✅ |
 | Backend integration | 17 | 220 | ✅ |
 | **Backend total** | **31** | **375** | ✅ |
-| Frontend (Vitest + RTL + MSW) | 7 | 18 | ✅ |
+| Frontend (Vitest + RTL + MSW) | 20 | 134 | ✅ |
 | E2E (Playwright) | — | — | ⏳ отложено |
 | GitHub Actions CI | — | — | ⏳ отложено |
-| **Grand total (локально)** | **38** | **393** | ✅ |
+| **Grand total (локально)** | **51** | **509** | ✅ |
 
-Все 393 теста зелёные локально (backend — `pytest --co` собирает; frontend — без изменений). CI пока **не настроен** — тесты надо запускать вручную.
+Все 509 тестов зелёные локально (backend — `pytest --co` собирает; frontend — без изменений). CI настроен для backend (GitHub Actions), frontend запускается вручную.
 
 ---
 
@@ -37,7 +37,7 @@ just test-backend-integration # с реальной Postgres: 220 PASSED
 just coverage-backend        # HTML отчёт в backend/htmlcov/
 
 # Frontend — без БД, всё через MSW-моки
-just test-frontend           # 18 PASSED за ~4 сек
+just test-frontend           # 134 PASSED за ~4 сек
 just test-frontend-watch     # watch режим
 just test-frontend-ui        # @vitest/ui дашборд в браузере
 just coverage-frontend       # HTML в frontend/coverage/
@@ -122,11 +122,14 @@ just typecheck-frontend      # tsc --noEmit
 
 **Компоненты:** `Dropzone`, `EntitySelect` (4+4 теста, behavioural).
 **Страницы (smoke):** `Upload`, `Review`, `Dashboard`, `Reports`, `ReferencePrices`.
+**Units-рефакторинг (добавлено):**
+- Выбор единицы измерения в справочных ценах: default-by-type (class onChange) + ручной выбор.
+- `ReviewItemsTable` inline-edit поля `raw_unit`.
+- Отображение и сброс `warnings[]` после сохранения СФ: первый save показывает предупреждение, последующий чистый save его убирает.
 
 ### ⚠️ Frontend — пробелы (в backlog)
 
 - Coverage не измерен (Task 3.11 отложен).
-- `ReviewItemsTable` inline-edit не тестируется.
 - KPI-цифры на Dashboard (требуют `userEvent.click` для выбора проекта).
 - Полный flow Upload → парсинг → Review (это уровень E2E).
 
