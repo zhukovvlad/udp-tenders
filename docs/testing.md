@@ -32,7 +32,7 @@
 just install
 
 # Backend — нужен TEST_DATABASE_URL в .env.test (отдельная Neon test-ветка)
-just test-backend            # все: 447 PASSED
+just test-backend            # все: 441 PASSED, 6 SKIPPED
 just test-backend-unit       # быстро (без БД): 155 PASSED за ~1 сек
 just test-backend-integration # с реальной Postgres: 220 PASSED
 just coverage-backend        # HTML отчёт в backend/htmlcov/
