@@ -225,8 +225,8 @@ export function ReviewItemsTable({ items, onChange, vatRate }: ReviewItemsTableP
               {/* Ед. */}
               <div className="pt-0.5">
                 <Input
-                  value={it.unit}
-                  onChange={(e) => update(i, { unit: e.target.value })}
+                  value={it.raw_unit}
+                  onChange={(e) => update(i, { raw_unit: e.target.value })}
                   placeholder="м³"
                 />
               </div>

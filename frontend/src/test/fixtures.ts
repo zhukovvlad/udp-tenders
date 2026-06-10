@@ -43,7 +43,7 @@ export const sampleDocument = {
           material_class: { id: 1, name: "В25" },
           material_class_id: 1,
           quantity: 7.0,
-          unit: "м3",
+          raw_unit: "м3",
           unit_price: 8000.0,
           amount: 56000.0,
           vat_amount: 9333.33,
@@ -72,6 +72,8 @@ export const sampleReferencePrice = {
   project_name: "ЖК Радуга",
   material_class_id: 1,
   material_class_name: "В25",
+  unit_id: 3,
+  unit_symbol: "м³",
   price: 6010,
   period_start: "2025-01-01",
   period_end: "2026-12-31",
@@ -83,7 +85,7 @@ const _baseItem = {
   item_type: "material" as const,
   material_class: "В25",
   quantity: 5.0,
-  unit: "м3",
+  raw_unit: "м3",
   unit_price: 8000.0,
   amount: 40000.0,
 };
@@ -192,3 +194,16 @@ export const sampleSupplierInvoices = [
   },
 ];
 
+export const sampleUnits = [
+  { id: 1, code: "TON", name: "Тонна", symbol: "т", dimension: "mass" as const, base_unit_id: null },
+  { id: 2, code: "KG", name: "Килограмм", symbol: "кг", dimension: "mass" as const, base_unit_id: 1 },
+  { id: 3, code: "M3", name: "Куб. метр", symbol: "м³", dimension: "volume" as const, base_unit_id: null },
+  { id: 4, code: "M", name: "Метр", symbol: "м", dimension: "length" as const, base_unit_id: null },
+  { id: 5, code: "PCS", name: "Штука", symbol: "шт", dimension: "count" as const, base_unit_id: null },
+];
+
+export const sampleMaterialTypes = [
+  { id: 1, code: "concrete", name: "Бетон", default_unit: { id: 3, code: "M3", symbol: "м³" } },
+  { id: 2, code: "rebar", name: "Арматура", default_unit: { id: 1, code: "TON", symbol: "т" } },
+  { id: 3, code: "other", name: "Прочее", default_unit: null },
+];

@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui-domain/Skeleton";
 import { Surface } from "@/components/ui-domain/Surface";
 import { Button } from "@/components/ui-domain/Button";
 import { KpiCard } from "@/components/ui-domain/KpiCard";
+import { EntitySelect } from "@/components/ui-domain/EntitySelect";
 import { InvoiceKpiBar } from "@/components/invoices/InvoiceKpiBar";
 import { InvoiceTable } from "@/components/invoices/InvoiceTable";
 import { UploadSheet } from "@/components/projects/UploadSheet";
@@ -63,9 +64,11 @@ import {
   useSupplierExclusions,
   useToggleSupplierExclusion,
   useDocuments,
+  useUnits,
 } from "@/services/queries";
 import { reportsApi } from "@/services/api/reports";
 import { useDebounce } from "@/lib/useDebounce";
+import { useDefaultUnitId } from "@/lib/useDefaultUnitId";
 
 import { formatDate, formatMoney, formatNumber, formatPercent, pluralRu } from "@/lib/format";
 import { MONTH_NAMES_RU } from "@/lib/constants";
@@ -141,6 +144,7 @@ export default function ProjectPage() {
   // ── reference price dialog ──
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   const [rpClassId, setRpClassId] = useState<string>("");
+  const [rpUnitId, setRpUnitId] = useState<string>("");
   const [rpPrice, setRpPrice] = useState("");
   const [rpStart, setRpStart] = useState("");
   const [rpEnd, setRpEnd] = useState("");
@@ -196,6 +200,14 @@ export default function ProjectPage() {
   const createRefPrice = useCreateReferencePrice();
   const updateRefPrice = useUpdateReferencePrice();
   const deleteRefPrice = useDeleteReferencePrice();
+
+  // ── units (reference data for the create-price dialog) ──
+  const unitsQ = useUnits();
+  const baseUnits = useMemo(
+    () => (unitsQ.data ?? []).filter((u) => u.base_unit_id === null),
+    [unitsQ.data],
+  );
+  const getDefaultUnitId = useDefaultUnitId();
 
   // ── derived ──
   const calculations = useMemo(() => calculationsQ.data ?? [], [calculationsQ.data]);
@@ -262,11 +274,12 @@ export default function ProjectPage() {
 
   // ── handlers ──
   function handleAddReferencePrice() {
-    if (!projectId || !rpClassId || !rpPrice || !rpStart || !rpEnd) return;
+    if (!projectId || !rpClassId || !rpUnitId || !rpPrice || !rpStart || !rpEnd) return;
     createRefPrice.mutate(
       {
         project_id: projectId,
         material_class_id: Number(rpClassId),
+        unit_id: Number(rpUnitId),
         price: Number(rpPrice),
         period_start: rpStart,
         period_end: rpEnd,
@@ -276,6 +289,7 @@ export default function ProjectPage() {
         onSuccess: () => {
           setPriceDialogOpen(false);
           setRpClassId("");
+          setRpUnitId("");
           setRpPrice("");
           setRpStart("");
           setRpEnd("");
@@ -699,6 +713,7 @@ export default function ProjectPage() {
                         <div>Цена</div>
                         <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
                       </th>
+                      <th className="px-4 py-2 font-medium">Ед.</th>
                       <th className="px-4 py-2 font-medium">Период</th>
                       <th className="px-4 py-2 font-medium">Источник</th>
                       <th className="px-4 py-2 w-20"></th>
@@ -716,6 +731,7 @@ export default function ProjectPage() {
                         <td className="px-4 py-2 text-right font-mono text-fg">
                           {formatMoney(rp.price)}
                         </td>
+                        <td className="px-4 py-2 text-fg-secondary">{rp.unit_symbol ?? "—"}</td>
                         <td className="px-4 py-2 text-fg-secondary whitespace-nowrap">
                           {formatDate(rp.period_start)} — {formatDate(rp.period_end)}
                         </td>
@@ -764,7 +780,7 @@ export default function ProjectPage() {
                     <label className="text-xs text-fg-secondary">
                       Класс материала
                     </label>
-                    <Select value={rpClassId} onValueChange={(v) => setRpClassId(v ?? "")}>
+                    <Select value={rpClassId} onValueChange={(v) => { const id = v ?? ""; setRpClassId(id); setRpUnitId(getDefaultUnitId(id)); }}>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="Выберите класс…" />
                       </SelectTrigger>
@@ -776,6 +792,21 @@ export default function ProjectPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+
+                  {/* Unit selector */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-fg-secondary">
+                      Единица измерения
+                    </label>
+                    <EntitySelect
+                      items={baseUnits}
+                      value={rpUnitId ? Number(rpUnitId) : null}
+                      onChange={(v) => setRpUnitId(v ? String(v) : "")}
+                      getLabel={(u) => `${u.name} (${u.symbol})`}
+                      placeholder="Выберите единицу…"
+                      disabled={unitsQ.isLoading}
+                    />
                   </div>
 
                   {/* Price */}
@@ -835,7 +866,7 @@ export default function ProjectPage() {
                     onClick={handleAddReferencePrice}
                     loading={createRefPrice.isPending}
                     disabled={
-                      !rpClassId || !rpPrice || !rpStart || !rpEnd
+                      !rpClassId || !rpUnitId || !rpPrice || !rpStart || !rpEnd
                     }
                   >
                     Сохранить

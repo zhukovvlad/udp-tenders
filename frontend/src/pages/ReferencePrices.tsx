@@ -34,7 +34,9 @@ import {
   useReferencePrices,
   useCreateReferencePrice,
   useDeleteReferencePrice,
+  useUnits,
 } from "@/services/queries";
+import { useDefaultUnitId } from "@/lib/useDefaultUnitId";
 import { formatDate } from "@/lib/format";
 import type { ID } from "@/types/common";
 
@@ -47,10 +49,18 @@ export default function ReferencePrices() {
   const create = useCreateReferencePrice();
   const remove = useDeleteReferencePrice();
 
+  const unitsQ = useUnits();
+  const baseUnits = useMemo(
+    () => (unitsQ.data ?? []).filter((u) => u.base_unit_id === null),
+    [unitsQ.data],
+  );
+  const getDefaultUnitId = useDefaultUnitId();
+
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
     project_id: "",
     material_class_id: "",
+    unit_id: "",
     price: "",
     period_start: "",
     period_end: "",
@@ -61,6 +71,7 @@ export default function ReferencePrices() {
     setForm({
       project_id: "",
       material_class_id: "",
+      unit_id: "",
       price: "",
       period_start: "",
       period_end: "",
@@ -70,6 +81,7 @@ export default function ReferencePrices() {
   const canSubmit =
     form.project_id &&
     form.material_class_id &&
+    form.unit_id &&
     form.price &&
     form.period_start &&
     form.period_end;
@@ -80,6 +92,7 @@ export default function ReferencePrices() {
       {
         project_id: Number(form.project_id),
         material_class_id: Number(form.material_class_id),
+        unit_id: Number(form.unit_id),
         price: Number(form.price),
         period_start: form.period_start,
         period_end: form.period_end,
@@ -139,14 +152,29 @@ export default function ReferencePrices() {
                         ? Number(form.material_class_id)
                         : null
                     }
-                    onChange={(v) =>
-                      setForm({
-                        ...form,
-                        material_class_id: v ? String(v) : "",
-                      })
-                    }
+                    onChange={(v) => {
+                      const newClassId = v ? String(v) : "";
+                      setForm((f) => ({
+                        ...f,
+                        material_class_id: newClassId,
+                        unit_id: getDefaultUnitId(newClassId),
+                      }));
+                    }}
                     getLabel={(c) => c.name}
                     placeholder="Выберите класс"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
+                    Единица измерения *
+                  </Label>
+                  <EntitySelect
+                    items={baseUnits}
+                    value={form.unit_id ? Number(form.unit_id) : null}
+                    onChange={(v) => setForm({ ...form, unit_id: v ? String(v) : "" })}
+                    getLabel={(u) => `${u.name} (${u.symbol})`}
+                    placeholder="Выберите единицу"
+                    disabled={unitsQ.isLoading}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -263,6 +291,7 @@ export default function ReferencePrices() {
                   <TableHead>Класс</TableHead>
                   <TableHead>Период</TableHead>
                   <TableHead className="text-right">Цена</TableHead>
+                  <TableHead>Ед.</TableHead>
                   <TableHead>Источник</TableHead>
                   <TableHead className="w-12"></TableHead>
                 </TableRow>
@@ -281,6 +310,7 @@ export default function ReferencePrices() {
                     <TableCell className="text-right">
                       <MoneyCell value={rp.price} />
                     </TableCell>
+                    <TableCell className="text-fg-secondary">{rp.unit_symbol ?? "—"}</TableCell>
                     <TableCell className="text-fg-secondary">
                       {rp.source ?? "—"}
                     </TableCell>

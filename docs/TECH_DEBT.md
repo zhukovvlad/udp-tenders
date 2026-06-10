@@ -179,6 +179,14 @@
   **Решение:** в дефолтных хендлерах читать `req.url.searchParams` / `await req.json()` и отражать их
   в ответе (фильтрация/echo полей).
 
+- [ ] **Frontend: захардкоженный «м³» в дашбордах**
+  Бэкенд отдаёт `unit_symbol`/`dimension_mismatch` по строкам расчётов, но фронт хардкодит «м³»
+  в нескольких местах: `ProjectPage.tsx:468` (KPI «Объём м³»), `SupplierPage.tsx:304` (заголовок таблицы),
+  `MonthlyTab.tsx:77,284` (CSV-заголовок и столбец таблицы), `DeviationChart.tsx:428` (тултип).
+  Станет неверным, как только появится документ с арматурой (тонны) или другой не-объёмной единицей.
+  **Решение:** заменить литерал «м³» на `unit_symbol` из ответа API (или на агрегированный символ
+  по доминирующей размерности класса материала); скрывать/адаптировать KPI «Объём» если класс не объёмный.
+
 ---
 
 ## Auth
@@ -276,6 +284,10 @@
 ### Чистки после завершения frontend-плана
 
 - [ ] **Удалить legacy `unit` OUTPUT key** из `_serialize_document` и dashboard serializer, а также `InvoiceItemEdit.unit` INPUT alias (`AliasChoices`) в схемах Pydantic — после того как фронтенд перейдёт на `raw_unit` и ни один клиент не читает/пишет `unit`.
+
+- [ ] **Backend: удалить legacy-алиас `unit` в сериализаторах роутеров**
+  `backend/routers/invoices.py:106` и `backend/routers/dashboard.py:127` дублируют `raw_unit` как `"unit"` с комментарием «drop after frontend plan ships». Ветка `feat/units-refactoring-frontend` отгружена — фронтенд больше нигде не читает `unit`, алиас можно удалять.
+  **Решение:** после мержа `feat/units-refactoring-frontend` удалить строки `"unit": item.raw_unit` из обоих роутеров.
 
 ### Долг, выявленный при code-review реализации
 
