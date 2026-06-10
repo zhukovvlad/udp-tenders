@@ -14,13 +14,14 @@
 |---|---|---|---|
 | Backend unit | 14 | 155 | ✅ |
 | Backend integration | 17 | 220 | ✅ |
-| **Backend total** | **31** | **375** | ✅ |
+| Backend top-level | 1 | 72 | ✅ |
+| **Backend total** | **32** | **447** | ✅ |
 | Frontend (Vitest + RTL + MSW) | 20 | 134 | ✅ |
 | E2E (Playwright) | — | — | ⏳ отложено |
-| GitHub Actions CI | — | — | ⏳ отложено |
-| **Grand total (локально)** | **51** | **509** | ✅ |
+| GitHub Actions CI | — | backend ✅ / frontend ручной | — |
+| **Grand total (локально)** | **52** | **581** | ✅ |
 
-Все 509 тестов зелёные локально (backend — `pytest --co` собирает; frontend — без изменений). CI настроен для backend (GitHub Actions), frontend запускается вручную.
+Все 581 тест зелёный локально (backend — `pytest --co` собирает 447; frontend — 134). CI настроен для backend (GitHub Actions, `.github/workflows/backend-tests.yml`); frontend запускается вручную.
 
 ---
 
@@ -31,13 +32,13 @@
 just install
 
 # Backend — нужен TEST_DATABASE_URL в .env.test (отдельная Neon test-ветка)
-just test-backend            # все: 375 PASSED
+just test-backend            # все: 447 PASSED
 just test-backend-unit       # быстро (без БД): 155 PASSED за ~1 сек
 just test-backend-integration # с реальной Postgres: 220 PASSED
 just coverage-backend        # HTML отчёт в backend/htmlcov/
 
 # Frontend — без БД, всё через MSW-моки
-just test-frontend           # 134 PASSED за ~4 сек
+just test-frontend           # 134 PASSED за ~18–20 сек
 just test-frontend-watch     # watch режим
 just test-frontend-ui        # @vitest/ui дашборд в браузере
 just coverage-frontend       # HTML в frontend/coverage/
@@ -51,7 +52,7 @@ just typecheck-frontend      # tsc --noEmit
 
 - **`.env.test`** в корне репо (в `.gitignore`) с `TEST_DATABASE_URL` — отдельная Neon test-ветка, **не прод**.
   Шаблон: `.env.test.example`. Префикс должен быть `postgresql+psycopg://`.
-- В CI (когда настроим) переменные приходят из GitHub Actions secrets, `.env.test` не нужен.
+- В CI (backend-tests.yml) переменные приходят из GitHub Actions env/secrets, `.env.test` не нужен.
 
 ---
 
@@ -140,9 +141,15 @@ just typecheck-frontend      # tsc --noEmit
 - Mock-OpenRouter сервис на FastAPI (`e2e/mock_openrouter/`), `/api/test/reset`
   роутер на бэкенде под `TEST_MODE=1`.
 
-### ⏳ CI — отложено
+### ✅ Backend CI — настроен
 
-- GitHub Actions workflow с lint → backend / frontend / e2e параллельно.
+- `.github/workflows/backend-tests.yml`: ruff lint → pytest (unit + integration + top-level, 447 тестов) на каждый push/PR.
+- Postgres + pgvector запускается как service-container; `TEST_DATABASE_URL` подставляется из env.
+- Frontend в CI **не гоняется** — запускать вручную (`just test-frontend`).
+
+### ⏳ Frontend CI + E2E — отложено
+
+- GitHub Actions workflow с frontend / e2e jobs.
 - `branch protection` на `main` через UI.
 
 ---

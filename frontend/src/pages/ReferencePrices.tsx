@@ -78,7 +78,6 @@ export default function ReferencePrices() {
       source: "",
     });
 
-
   const canSubmit =
     form.project_id &&
     form.material_class_id &&
