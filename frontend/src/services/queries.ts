@@ -5,6 +5,7 @@ import type { AxiosError } from "axios";
 import { projectsApi } from "./api/projects";
 import { materialClassesApi } from "./api/materialClasses";
 import { referencePricesApi } from "./api/referencePrices";
+import { materialTypesApi, unitsApi } from "./api/units";
 import { invoicesApi } from "./api/invoices";
 import { dashboardApi } from "./api/dashboard";
 import { uploadApi } from "./api/upload";
@@ -19,6 +20,7 @@ import { qk } from "./queryKeys";
 import type { ID } from "@/types/common";
 import type { ProjectCreateInput, ProjectUpdateInput } from "@/types/project";
 import type { MaterialClassCreateInput } from "@/types/materialClass";
+import type { MaterialType, Unit } from "@/types/unit";
 import type { ReferencePriceCreateInput, ReferencePriceUpdateInput } from "@/types/referencePrice";
 import type { InvoiceUpdateInput } from "@/types/invoice";
 import type { AppSettings } from "./api/settings";
@@ -97,6 +99,23 @@ export function useDeleteMaterialClass() {
       qc.invalidateQueries({ queryKey: qk.materialClasses.all });
       toast.success("Класс материала удалён");
     },
+  });
+}
+
+// ========== Units ==========
+export function useUnits() {
+  return useQuery<Unit[]>({
+    queryKey: qk.units.all,
+    queryFn: () => unitsApi.list(),
+    staleTime: Infinity,  // reference data — does not change at runtime
+  });
+}
+
+export function useMaterialTypes() {
+  return useQuery<MaterialType[]>({
+    queryKey: qk.materialTypes.all,
+    queryFn: () => materialTypesApi.list(),
+    staleTime: Infinity,
   });
 }
 

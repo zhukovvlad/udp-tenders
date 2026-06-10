@@ -10,6 +10,8 @@ import {
   sampleSupplier,
   sampleSupplierProjectRows,
   sampleSupplierInvoices,
+  sampleUnits,
+  sampleMaterialTypes,
 } from "./fixtures";
 
 // Mutable state so that verify/unverify mutations are reflected in subsequent GETs.
@@ -34,6 +36,9 @@ export const handlers = [
 
   http.get("/api/material-classes", () => HttpResponse.json([sampleMaterialClass])),
   http.post("/api/material-classes", () => HttpResponse.json(sampleMaterialClass)),
+
+  http.get("/api/units", () => HttpResponse.json(sampleUnits)),
+  http.get("/api/material-types", () => HttpResponse.json(sampleMaterialTypes)),
 
   http.get("/api/reference-prices", () => HttpResponse.json([])),
   http.post("/api/reference-prices", () => HttpResponse.json({ id: 1 })),
