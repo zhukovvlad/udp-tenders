@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Trash2, Target } from "lucide-react";
 
 import {
@@ -34,6 +34,8 @@ import {
   useReferencePrices,
   useCreateReferencePrice,
   useDeleteReferencePrice,
+  useUnits,
+  useMaterialTypes,
 } from "@/services/queries";
 import { formatDate } from "@/lib/format";
 import type { ID } from "@/types/common";
@@ -47,10 +49,18 @@ export default function ReferencePrices() {
   const create = useCreateReferencePrice();
   const remove = useDeleteReferencePrice();
 
+  const unitsQ = useUnits();
+  const typesQ = useMaterialTypes();
+  const baseUnits = useMemo(
+    () => (unitsQ.data ?? []).filter((u) => u.base_unit_id === null),
+    [unitsQ.data],
+  );
+
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
     project_id: "",
     material_class_id: "",
+    unit_id: "",
     price: "",
     period_start: "",
     period_end: "",
@@ -61,15 +71,37 @@ export default function ReferencePrices() {
     setForm({
       project_id: "",
       material_class_id: "",
+      unit_id: "",
       price: "",
       period_start: "",
       period_end: "",
       source: "",
     });
 
+  // Default the unit to the material type's base unit ONLY when the class actually
+  // changes — never on a query refetch (which would clobber a manual override).
+  // `lastDefaultedClass` is marked done only AFTER a default is applied, so if the
+  // reference data isn't loaded yet the effect retries when classesQ/typesQ arrive.
+  const lastDefaultedClass = useRef<string | null>(null);
+  useEffect(() => {
+    const cls = form.material_class_id;
+    if (!cls) {
+      lastDefaultedClass.current = null;
+      return;
+    }
+    if (lastDefaultedClass.current === cls) return;  // already defaulted for this class
+    const mc = (classesQ.data ?? []).find((c) => String(c.id) === cls);
+    const mt = mc ? (typesQ.data ?? []).find((t) => t.code === mc.material_type) : undefined;
+    const defId = mt?.default_unit?.id;
+    if (defId == null) return;  // data not ready — retry on next deps change, don't mark done
+    lastDefaultedClass.current = cls;
+    setForm((f) => ({ ...f, unit_id: String(defId) }));
+  }, [form.material_class_id, classesQ.data, typesQ.data]);
+
   const canSubmit =
     form.project_id &&
     form.material_class_id &&
+    form.unit_id &&
     form.price &&
     form.period_start &&
     form.period_end;
@@ -80,6 +112,7 @@ export default function ReferencePrices() {
       {
         project_id: Number(form.project_id),
         material_class_id: Number(form.material_class_id),
+        unit_id: Number(form.unit_id),
         price: Number(form.price),
         period_start: form.period_start,
         period_end: form.period_end,
@@ -147,6 +180,19 @@ export default function ReferencePrices() {
                     }
                     getLabel={(c) => c.name}
                     placeholder="Выберите класс"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
+                    Единица измерения *
+                  </Label>
+                  <EntitySelect
+                    items={baseUnits}
+                    value={form.unit_id ? Number(form.unit_id) : null}
+                    onChange={(v) => setForm({ ...form, unit_id: v ? String(v) : "" })}
+                    getLabel={(u) => `${u.name} (${u.symbol})`}
+                    placeholder="Выберите единицу"
+                    disabled={unitsQ.isLoading}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -263,6 +309,7 @@ export default function ReferencePrices() {
                   <TableHead>Класс</TableHead>
                   <TableHead>Период</TableHead>
                   <TableHead className="text-right">Цена</TableHead>
+                  <TableHead>Ед.</TableHead>
                   <TableHead>Источник</TableHead>
                   <TableHead className="w-12"></TableHead>
                 </TableRow>
@@ -281,6 +328,7 @@ export default function ReferencePrices() {
                     <TableCell className="text-right">
                       <MoneyCell value={rp.price} />
                     </TableCell>
+                    <TableCell className="text-fg-secondary">{rp.unit_symbol ?? "—"}</TableCell>
                     <TableCell className="text-fg-secondary">
                       {rp.source ?? "—"}
                     </TableCell>

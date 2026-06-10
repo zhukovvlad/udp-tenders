@@ -72,6 +72,8 @@ export const sampleReferencePrice = {
   project_name: "ЖК Радуга",
   material_class_id: 1,
   material_class_name: "В25",
+  unit_id: 3,
+  unit_symbol: "м³",
   price: 6010,
   period_start: "2025-01-01",
   period_end: "2026-12-31",

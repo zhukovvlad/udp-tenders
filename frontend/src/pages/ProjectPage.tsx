@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Download, Loader2, Plus, Trash2, Pencil } from "lucide-react";
 
@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui-domain/Skeleton";
 import { Surface } from "@/components/ui-domain/Surface";
 import { Button } from "@/components/ui-domain/Button";
 import { KpiCard } from "@/components/ui-domain/KpiCard";
+import { EntitySelect } from "@/components/ui-domain/EntitySelect";
 import { InvoiceKpiBar } from "@/components/invoices/InvoiceKpiBar";
 import { InvoiceTable } from "@/components/invoices/InvoiceTable";
 import { UploadSheet } from "@/components/projects/UploadSheet";
@@ -63,6 +64,8 @@ import {
   useSupplierExclusions,
   useToggleSupplierExclusion,
   useDocuments,
+  useUnits,
+  useMaterialTypes,
 } from "@/services/queries";
 import { reportsApi } from "@/services/api/reports";
 import { useDebounce } from "@/lib/useDebounce";
@@ -141,6 +144,7 @@ export default function ProjectPage() {
   // ── reference price dialog ──
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   const [rpClassId, setRpClassId] = useState<string>("");
+  const [rpUnitId, setRpUnitId] = useState<string>("");
   const [rpPrice, setRpPrice] = useState("");
   const [rpStart, setRpStart] = useState("");
   const [rpEnd, setRpEnd] = useState("");
@@ -196,6 +200,27 @@ export default function ProjectPage() {
   const createRefPrice = useCreateReferencePrice();
   const updateRefPrice = useUpdateReferencePrice();
   const deleteRefPrice = useDeleteReferencePrice();
+
+  // ── units (reference data for the create-price dialog) ──
+  const unitsQ = useUnits();
+  const typesQ = useMaterialTypes();
+  const baseUnits = useMemo(
+    () => (unitsQ.data ?? []).filter((u) => u.base_unit_id === null),
+    [unitsQ.data],
+  );
+
+  // Auto-default unit from the selected material type; never clobber a manual override.
+  const lastDefaultedRpClass = useRef<string | null>(null);
+  useEffect(() => {
+    if (!rpClassId) { lastDefaultedRpClass.current = null; return; }
+    if (lastDefaultedRpClass.current === rpClassId) return;
+    const mc = (materialClassesQ.data ?? []).find((c) => String(c.id) === rpClassId);
+    const mt = mc ? (typesQ.data ?? []).find((t) => t.code === mc.material_type) : undefined;
+    const defId = mt?.default_unit?.id;
+    if (defId == null) return;
+    lastDefaultedRpClass.current = rpClassId;
+    setRpUnitId(String(defId));
+  }, [rpClassId, materialClassesQ.data, typesQ.data]);
 
   // ── derived ──
   const calculations = useMemo(() => calculationsQ.data ?? [], [calculationsQ.data]);
@@ -262,11 +287,12 @@ export default function ProjectPage() {
 
   // ── handlers ──
   function handleAddReferencePrice() {
-    if (!projectId || !rpClassId || !rpPrice || !rpStart || !rpEnd) return;
+    if (!projectId || !rpClassId || !rpUnitId || !rpPrice || !rpStart || !rpEnd) return;
     createRefPrice.mutate(
       {
         project_id: projectId,
         material_class_id: Number(rpClassId),
+        unit_id: Number(rpUnitId),
         price: Number(rpPrice),
         period_start: rpStart,
         period_end: rpEnd,
@@ -276,6 +302,7 @@ export default function ProjectPage() {
         onSuccess: () => {
           setPriceDialogOpen(false);
           setRpClassId("");
+          setRpUnitId("");
           setRpPrice("");
           setRpStart("");
           setRpEnd("");
@@ -778,6 +805,21 @@ export default function ProjectPage() {
                     </Select>
                   </div>
 
+                  {/* Unit selector */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-fg-secondary">
+                      Единица измерения
+                    </label>
+                    <EntitySelect
+                      items={baseUnits}
+                      value={rpUnitId ? Number(rpUnitId) : null}
+                      onChange={(v) => setRpUnitId(v ? String(v) : "")}
+                      getLabel={(u) => `${u.name} (${u.symbol})`}
+                      placeholder="Выберите единицу…"
+                      disabled={unitsQ.isLoading}
+                    />
+                  </div>
+
                   {/* Price */}
                   <div className="flex flex-col gap-1">
                     <label className="text-xs text-fg-secondary">
@@ -835,7 +877,7 @@ export default function ProjectPage() {
                     onClick={handleAddReferencePrice}
                     loading={createRefPrice.isPending}
                     disabled={
-                      !rpClassId || !rpPrice || !rpStart || !rpEnd
+                      !rpClassId || !rpUnitId || !rpPrice || !rpStart || !rpEnd
                     }
                   >
                     Сохранить
