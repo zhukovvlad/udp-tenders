@@ -2,8 +2,8 @@ import api from "@/lib/api";
 import type {
   DocumentDetail,
   DocumentSummary,
-  InvoiceRow,
   InvoiceUpdateInput,
+  InvoiceUpdateResult,
 } from "@/types/invoice";
 import type { ID } from "@/types/common";
 
@@ -27,8 +27,8 @@ export const invoicesApi = {
     );
     return data;
   },
-  async update(invoiceId: ID, input: InvoiceUpdateInput): Promise<InvoiceRow> {
-    const { data } = await api.put<InvoiceRow>(`/invoices/${invoiceId}`, input);
+  async update(invoiceId: ID, input: InvoiceUpdateInput): Promise<InvoiceUpdateResult> {
+    const { data } = await api.put<InvoiceUpdateResult>(`/invoices/${invoiceId}`, input);
     return data;
   },
   async removeInvoice(invoiceId: ID): Promise<void> {

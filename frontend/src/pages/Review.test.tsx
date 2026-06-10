@@ -172,3 +172,32 @@ describe("ReviewPage", () => {
     });
   });
 });
+
+describe("Review — save warnings", () => {
+  it("shows the unknown-unit warning returned by the save call", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.put("/api/invoices/:id", () =>
+        HttpResponse.json({
+          message: "Сохранено",
+          invoice_id: 100,
+          warnings: [{
+            field: "raw_unit", code: "unknown_unit",
+            message: "Единица измерения «бухта» не найдена в справочнике",
+          }],
+        }),
+      ),
+    );
+
+    renderWithProviders(<Review />);
+
+    // Items tab is the default. Edit a unit to make the form dirty (enables Save).
+    const unitInput = (await screen.findAllByDisplayValue("м3"))[0];
+    await user.clear(unitInput);
+    await user.type(unitInput, "бухта");
+
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    expect(await screen.findByText(/не найдена в справочнике/)).toBeInTheDocument();
+  });
+});

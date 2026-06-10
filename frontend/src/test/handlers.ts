@@ -61,7 +61,7 @@ export const handlers = [
   http.post("/api/invoices/upload", () => HttpResponse.json(sampleDocument)),
   http.post("/api/invoices/documents/:id/reparse", () => HttpResponse.json(sampleDocument)),
   http.put("/api/invoices/:id", ({ params }) =>
-    HttpResponse.json({ message: "Сохранено", invoice_id: Number(params.id) })
+    HttpResponse.json({ message: "Сохранено", invoice_id: Number(params.id), warnings: [] })
   ),
   http.delete("/api/invoices/bulk", async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as { ids?: number[] };

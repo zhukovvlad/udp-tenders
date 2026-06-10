@@ -28,7 +28,7 @@ import {
 import { invoicesApi } from "@/services/api/invoices";
 import { formatDate } from "@/lib/format";
 import { DEFAULT_CONFIDENCE_THRESHOLD } from "@/lib/constants";
-import type { InvoiceRow } from "@/types/invoice";
+import type { InvoiceRow, InvoiceUpdateWarning } from "@/types/invoice";
 
 type TabKey = "header" | "items" | "issues";
 
@@ -48,6 +48,7 @@ export default function Review() {
   const [tab, setTab] = useState<TabKey>("items");
   // Local edits keyed by invoice id — auto-discarded when invoice changes
   const [overrides, setOverrides] = useState<{ invId: number; data: InvoiceRow } | null>(null);
+  const [unitWarnings, setUnitWarnings] = useState<InvoiceUpdateWarning[]>([]);
 
   const serverInv = docQ.data?.invoices[0] ?? null;
   const draft = serverInv && overrides?.invId === serverInv.id ? overrides.data : serverInv;
@@ -130,6 +131,15 @@ export default function Review() {
           </>
         }
       />
+
+      {unitWarnings.length > 0 && (
+        <Surface tone="sunken" padding="sm" className="mt-4 text-sm">
+          <p className="font-medium text-fg">Предупреждения</p>
+          {unitWarnings.map((w, i) => (
+            <p key={i} className="text-fg-secondary">⚠ {w.message}</p>
+          ))}
+        </Surface>
+      )}
 
       {/* Сверху — редактирование на всю ширину */}
       <div className="mt-6">
@@ -242,7 +252,8 @@ export default function Review() {
               variant="secondary"
               disabled={!dirty || update.isPending}
               loading={update.isPending}
-              onClick={() =>
+              onClick={() => {
+                setUnitWarnings([]);
                 update.mutate(
                   {
                     id: inv.id,
@@ -255,9 +266,14 @@ export default function Review() {
                       items: inv.items,
                     },
                   },
-                  { onSuccess: () => setOverrides(null) },
-                )
-              }
+                  {
+                    onSuccess: (data) => {
+                      setOverrides(null);
+                      setUnitWarnings(data.warnings ?? []);
+                    },
+                  },
+                );
+              }}
             >
               Сохранить
             </Button>

@@ -43,7 +43,7 @@ export const sampleDocument = {
           material_class: { id: 1, name: "В25" },
           material_class_id: 1,
           quantity: 7.0,
-          unit: "м3",
+          raw_unit: "м3",
           unit_price: 8000.0,
           amount: 56000.0,
           vat_amount: 9333.33,

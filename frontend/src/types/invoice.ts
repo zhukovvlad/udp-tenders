@@ -15,7 +15,7 @@ export interface InvoiceItem {
   material_class: MaterialClassRef | null;
   material_class_id?: ID | null;
   quantity: number;
-  unit: string;
+  raw_unit: string;
   unit_price: number;
   amount: number;
   vat_amount?: number | null;
@@ -88,4 +88,16 @@ export interface InvoiceUpdateInput {
   supplier_inn?: string | null;
   vat_rate?: number;
   items?: InvoiceItem[];
+}
+
+export interface InvoiceUpdateWarning {
+  field: string;
+  code: string;
+  message: string;
+}
+
+export interface InvoiceUpdateResult {
+  message: string;
+  invoice_id: ID;
+  warnings: InvoiceUpdateWarning[];
 }
