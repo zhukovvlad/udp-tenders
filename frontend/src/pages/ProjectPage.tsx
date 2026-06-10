@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Download, Loader2, Plus, Trash2, Pencil } from "lucide-react";
 
@@ -65,10 +65,10 @@ import {
   useToggleSupplierExclusion,
   useDocuments,
   useUnits,
-  useMaterialTypes,
 } from "@/services/queries";
 import { reportsApi } from "@/services/api/reports";
 import { useDebounce } from "@/lib/useDebounce";
+import { useDefaultUnitId } from "@/lib/useDefaultUnitId";
 
 import { formatDate, formatMoney, formatNumber, formatPercent, pluralRu } from "@/lib/format";
 import { MONTH_NAMES_RU } from "@/lib/constants";
@@ -203,24 +203,11 @@ export default function ProjectPage() {
 
   // ── units (reference data for the create-price dialog) ──
   const unitsQ = useUnits();
-  const typesQ = useMaterialTypes();
   const baseUnits = useMemo(
     () => (unitsQ.data ?? []).filter((u) => u.base_unit_id === null),
     [unitsQ.data],
   );
-
-  // Auto-default unit from the selected material type; never clobber a manual override.
-  const lastDefaultedRpClass = useRef<string | null>(null);
-  useEffect(() => {
-    if (!rpClassId) { lastDefaultedRpClass.current = null; return; }
-    if (lastDefaultedRpClass.current === rpClassId) return;
-    const mc = (materialClassesQ.data ?? []).find((c) => String(c.id) === rpClassId);
-    const mt = mc ? (typesQ.data ?? []).find((t) => t.code === mc.material_type) : undefined;
-    const defId = mt?.default_unit?.id;
-    if (defId == null) return;
-    lastDefaultedRpClass.current = rpClassId;
-    setRpUnitId(String(defId));
-  }, [rpClassId, materialClassesQ.data, typesQ.data]);
+  const getDefaultUnitId = useDefaultUnitId();
 
   // ── derived ──
   const calculations = useMemo(() => calculationsQ.data ?? [], [calculationsQ.data]);
@@ -726,6 +713,7 @@ export default function ProjectPage() {
                         <div>Цена</div>
                         <div className="text-[10px] font-normal text-fg-tertiary">с НДС</div>
                       </th>
+                      <th className="px-4 py-2 font-medium">Ед.</th>
                       <th className="px-4 py-2 font-medium">Период</th>
                       <th className="px-4 py-2 font-medium">Источник</th>
                       <th className="px-4 py-2 w-20"></th>
@@ -743,6 +731,7 @@ export default function ProjectPage() {
                         <td className="px-4 py-2 text-right font-mono text-fg">
                           {formatMoney(rp.price)}
                         </td>
+                        <td className="px-4 py-2 text-fg-secondary">{rp.unit_symbol ?? "—"}</td>
                         <td className="px-4 py-2 text-fg-secondary whitespace-nowrap">
                           {formatDate(rp.period_start)} — {formatDate(rp.period_end)}
                         </td>
@@ -791,7 +780,7 @@ export default function ProjectPage() {
                     <label className="text-xs text-fg-secondary">
                       Класс материала
                     </label>
-                    <Select value={rpClassId} onValueChange={(v) => setRpClassId(v ?? "")}>
+                    <Select value={rpClassId} onValueChange={(v) => { const id = v ?? ""; setRpClassId(id); setRpUnitId(getDefaultUnitId(id)); }}>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="Выберите класс…" />
                       </SelectTrigger>

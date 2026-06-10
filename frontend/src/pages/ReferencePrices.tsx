@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Plus, Trash2, Target } from "lucide-react";
 
 import {
@@ -35,8 +35,8 @@ import {
   useCreateReferencePrice,
   useDeleteReferencePrice,
   useUnits,
-  useMaterialTypes,
 } from "@/services/queries";
+import { useDefaultUnitId } from "@/lib/useDefaultUnitId";
 import { formatDate } from "@/lib/format";
 import type { ID } from "@/types/common";
 
@@ -50,11 +50,11 @@ export default function ReferencePrices() {
   const remove = useDeleteReferencePrice();
 
   const unitsQ = useUnits();
-  const typesQ = useMaterialTypes();
   const baseUnits = useMemo(
     () => (unitsQ.data ?? []).filter((u) => u.base_unit_id === null),
     [unitsQ.data],
   );
+  const getDefaultUnitId = useDefaultUnitId();
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
@@ -78,25 +78,6 @@ export default function ReferencePrices() {
       source: "",
     });
 
-  // Default the unit to the material type's base unit ONLY when the class actually
-  // changes — never on a query refetch (which would clobber a manual override).
-  // `lastDefaultedClass` is marked done only AFTER a default is applied, so if the
-  // reference data isn't loaded yet the effect retries when classesQ/typesQ arrive.
-  const lastDefaultedClass = useRef<string | null>(null);
-  useEffect(() => {
-    const cls = form.material_class_id;
-    if (!cls) {
-      lastDefaultedClass.current = null;
-      return;
-    }
-    if (lastDefaultedClass.current === cls) return;  // already defaulted for this class
-    const mc = (classesQ.data ?? []).find((c) => String(c.id) === cls);
-    const mt = mc ? (typesQ.data ?? []).find((t) => t.code === mc.material_type) : undefined;
-    const defId = mt?.default_unit?.id;
-    if (defId == null) return;  // data not ready — retry on next deps change, don't mark done
-    lastDefaultedClass.current = cls;
-    setForm((f) => ({ ...f, unit_id: String(defId) }));
-  }, [form.material_class_id, classesQ.data, typesQ.data]);
 
   const canSubmit =
     form.project_id &&
@@ -172,12 +153,14 @@ export default function ReferencePrices() {
                         ? Number(form.material_class_id)
                         : null
                     }
-                    onChange={(v) =>
-                      setForm({
-                        ...form,
-                        material_class_id: v ? String(v) : "",
-                      })
-                    }
+                    onChange={(v) => {
+                      const newClassId = v ? String(v) : "";
+                      setForm((f) => ({
+                        ...f,
+                        material_class_id: newClassId,
+                        unit_id: getDefaultUnitId(newClassId),
+                      }));
+                    }}
                     getLabel={(c) => c.name}
                     placeholder="Выберите класс"
                   />
