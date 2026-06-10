@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, CheckCircle2, XCircle } from "lucide-react";
+import { toast } from "sonner";
+import { AlertTriangle, ArrowLeft, CheckCircle2, XCircle } from "lucide-react";
 
 import { PageHeader } from "@/components/ui-domain/PageHeader";
 import { Surface } from "@/components/ui-domain/Surface";
@@ -136,7 +137,9 @@ export default function Review() {
         <Surface tone="sunken" padding="sm" className="mt-4 text-sm">
           <p className="font-medium text-fg">Предупреждения</p>
           {unitWarnings.map((w, i) => (
-            <p key={i} className="text-fg-secondary">⚠ {w.message}</p>
+            <p key={i} className="flex items-center gap-1 text-fg-secondary">
+              <AlertTriangle size={14} />{w.message}
+            </p>
           ))}
         </Surface>
       )}
@@ -177,7 +180,7 @@ export default function Review() {
             <span>{doc.filename}</span>
             <button
               type="button"
-              onClick={() => reparse.mutate(docId)}
+              onClick={() => { setUnitWarnings([]); reparse.mutate(docId); }}
               disabled={reparse.isPending || verify.isPending || unverify.isPending || documentLocked}
               title={documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
               className="text-fg-secondary underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
@@ -269,7 +272,12 @@ export default function Review() {
                   {
                     onSuccess: (data) => {
                       setOverrides(null);
-                      setUnitWarnings(data.warnings ?? []);
+                      setUnitWarnings(data.warnings);
+                      if (data.warnings.length > 0) {
+                        toast.warning("Сохранено с предупреждениями", {
+                          description: data.warnings[0].message,
+                        });
+                      }
                     },
                   },
                 );

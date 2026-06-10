@@ -85,7 +85,7 @@ const _baseItem = {
   item_type: "material" as const,
   material_class: "В25",
   quantity: 5.0,
-  unit: "м3",
+  raw_unit: "м3",
   unit_price: 8000.0,
   amount: 40000.0,
 };

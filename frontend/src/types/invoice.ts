@@ -28,7 +28,7 @@ export interface DashboardInvoiceItem {
   /** Имя класса материала или null — бэкенд сериализует как строку. */
   material_class: string | null;
   quantity: number;
-  unit: string | null;
+  raw_unit: string | null;
   unit_price: number;
   amount: number;
   vat_amount?: number | null;

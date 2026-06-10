@@ -200,4 +200,55 @@ describe("Review — save warnings", () => {
 
     expect(await screen.findByText(/не найдена в справочнике/)).toBeInTheDocument();
   });
+
+  it("clears the warning after a subsequent clean save", async () => {
+    const user = userEvent.setup();
+
+    // First save returns a warning
+    server.use(
+      http.put("/api/invoices/:id", () =>
+        HttpResponse.json({
+          message: "Сохранено",
+          invoice_id: 100,
+          warnings: [{
+            field: "raw_unit", code: "unknown_unit",
+            message: "Единица измерения «бухта» не найдена в справочнике",
+          }],
+        }),
+      ),
+    );
+
+    renderWithProviders(<Review />);
+
+    const unitInput = (await screen.findAllByDisplayValue("м3"))[0];
+    await user.clear(unitInput);
+    await user.type(unitInput, "бухта");
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    // Warning appears
+    expect(await screen.findByText(/не найдена в справочнике/)).toBeInTheDocument();
+
+    // Override handler to return no warnings on the next save
+    server.use(
+      http.put("/api/invoices/:id", () =>
+        HttpResponse.json({
+          message: "Сохранено",
+          invoice_id: 100,
+          warnings: [],
+        }),
+      ),
+    );
+
+    // After first save overrides are cleared → input reverts to server value "м3".
+    // Make the form dirty again by editing that input, then save.
+    const unitInput2 = (await screen.findAllByDisplayValue("м3"))[0];
+    await user.clear(unitInput2);
+    await user.type(unitInput2, "шт");
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    // Warning disappears
+    await waitFor(() => {
+      expect(screen.queryByText(/не найдена в справочнике/)).toBeNull();
+    });
+  });
 });
