@@ -78,12 +78,27 @@ export const sampleDashboardSummary = {
   other_total: 0,
 };
 
-/** Объект с двумя направлениями — для тестов сводки «Все». */
+/** Объект с двумя направлениями — для тестов сводки «Все».
+ *
+ * Арифметика (инвариант §5.1):
+ *   concrete.turnover  220 000
+ * + rebar.turnover     120 000
+ * + delivery_total      30 000  (inherited)
+ * + other_total         15 000  (other_invoice_count=1 → сумма > 0)
+ * = total_amount        385 000
+ *
+ * material_amount = Σ turnover направлений = 340 000.
+ * mixed_invoice_count=1 → смешанный счёт виден в обоих направлениях;
+ * поэтому concrete-копия получает mixed_invoice_count=1 (sampleDirectionConcrete не меняем).
+ */
 export const sampleDashboardSummaryMulti = {
   ...sampleDashboardSummary,
-  total_amount: 400000,
+  // total = 340000 направлений + 30000 доставка + 15000 прочее
+  total_amount: 385000,
+  material_amount: 340000,
+  other_total: 15000,
   directions: [
-    { ...sampleDirectionConcrete },
+    { ...sampleDirectionConcrete, mixed_invoice_count: 1 },
     { code: "rebar", name: "Арматура", turnover: 120000, overpayment: 15000,
       volume: 12.4, volume_unit: "т", volume_excluded_count: 1,
       invoice_count: 2, mixed_invoice_count: 1 },

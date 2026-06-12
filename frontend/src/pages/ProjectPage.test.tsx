@@ -78,6 +78,7 @@ describe("ProjectPage", () => {
             project_id: 1,
             material_class_id: 1,
             material_class_name: "В25",
+            direction: "concrete",
             period_start: "2026-04-01",
             period_end: "2026-04-30",
             total_qty: 10,
@@ -399,6 +400,7 @@ describe("ProjectPage", () => {
     const sampleCalc = {
       material_class_id: 1,
       material_class_name: "В%25",
+      direction: "concrete",
       period_start: "2025-01-01",
       period_end: "2025-01-31",
       total_qty: 10,
