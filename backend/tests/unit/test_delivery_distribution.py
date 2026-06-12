@@ -57,10 +57,11 @@ class TestComputeSharedShares:
         assert shares[2] == D("4000") / D("8000")
 
 
-def _agg_row(invoice_id, class_id, dimension, qty, mat_total, mat_vat, symbol="т"):
+def _agg_row(invoice_id, class_id, dimension, qty, mat_total, mat_vat, symbol="т", type_id=0):
     return SimpleNamespace(
         invoice_id=invoice_id, material_class_id=class_id, dimension=dimension,
         qty=D(qty), mat_total=D(mat_total), mat_vat=D(mat_vat), symbol=symbol,
+        type_id=type_id,
     )
 
 
@@ -72,7 +73,7 @@ class TestAggregateByClassSharedOnce:
             _agg_row(1, 1, "mass", "2", "1000", "200"),
             _agg_row(1, 1, "length", "100", "3000", "600"),
         ]
-        contrib = _aggregate_by_class(rows, {1: D("500")})
+        contrib = _aggregate_by_class(rows, {1: D("500")}, {})
         assert contrib[1]["shared_with_vat"] == D("500")     # once, not double
         assert contrib[1]["mat_with_vat"] == D("4800")       # (1000+200)+(3000+600), per-row sum
         assert contrib[1]["qty"] == D("102")                 # 2 + 100, per-row sum
@@ -84,6 +85,6 @@ class TestAggregateByClassSharedOnce:
             _agg_row(1, 1, "volume", "50", "1000", "200"),
             _agg_row(1, 2, "mass", "2", "3000", "600"),
         ]
-        contrib = _aggregate_by_class(rows, {1: D("800")})
+        contrib = _aggregate_by_class(rows, {1: D("800")}, {})
         total_shared = contrib[1]["shared_with_vat"] + contrib[2]["shared_with_vat"]
         assert total_shared == D("800")

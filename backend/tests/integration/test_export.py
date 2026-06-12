@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import date
 from io import BytesIO
+from urllib.parse import unquote
 
 import pytest
 from openpyxl import load_workbook
@@ -891,3 +892,52 @@ def test_export_has_raw_and_calc_columns(client, factories, db_session):
     assert "Кол-во по документу" in all_text
     assert "Расчётное кол-во" in all_text
     assert "Базовая ед. изм." in all_text
+
+
+# ---------------------------------------------------------------------------
+# Section 4: direction-scoped export and canonical filename (spec §6.7)
+# ---------------------------------------------------------------------------
+
+def test_export_direction_scoped_and_filename(client, factories):
+    from decimal import Decimal
+
+    from tests.factories import _unit_id
+
+    project = factories.ProjectFactory.create(name="ЖК Радуга")
+    concrete = factories.MaterialClassFactory.create(name="В25")
+    rebar = factories.MaterialClassFactory.create(material_type_code="rebar", name="А500С Ø12")
+    doc = factories.DocumentFactory.create(project=project)
+    inv = factories.InvoiceFactory.create(document=doc)
+    factories.InvoiceItemFactory.create(
+        invoice=inv, material_class=concrete, item_type="material",
+        quantity=10, unit_price=8000, amount=80000)
+    factories.InvoiceItemFactory.create(
+        invoice=inv, material_class=rebar, item_type="material",
+        quantity=2, raw_unit="т", unit_price=10000,
+        normalized_unit_id=_unit_id("TON"), normalized_quantity=Decimal("2"))
+
+    resp = client.get(f"/api/export/excel?project_id={project.id}&direction=rebar")
+    assert resp.status_code == 200
+    disposition = unquote(resp.headers["content-disposition"])
+    assert "-Арматура" in disposition            # канонический суффикс §6.7
+    ws = load_workbook(BytesIO(resp.content)).active
+    cells = [str(c.value) for row in ws.iter_rows() for c in row if c.value]
+    assert any("А500С" in c for c in cells)
+    assert not any("В25" in c for c in cells)    # бетонных секций нет
+    assert any("Направление: Арматура" in c for c in cells)
+
+
+def test_export_unknown_direction_422(client, factories):
+    project = factories.ProjectFactory.create()
+    assert client.get(f"/api/export/excel?project_id={project.id}&direction=bricks").status_code == 422
+
+
+def test_export_filename_canonical_without_direction(client, factories):
+    project = factories.ProjectFactory.create(name="ЖК Радуга")
+    doc = factories.DocumentFactory.create(project=project)
+    inv = factories.InvoiceFactory.create(document=doc)
+    factories.InvoiceItemFactory.create(invoice=inv, material_class=factories.MaterialClassFactory.create(),
+                                        item_type="material", quantity=5, amount=40000)
+    resp = client.get(f"/api/export/excel?project_id={project.id}")
+    disposition = unquote(resp.headers["content-disposition"])
+    assert "отчёт-ЖК Радуга_" in disposition     # дефис после «отчёт», подчёркивание перед периодом

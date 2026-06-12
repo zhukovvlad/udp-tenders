@@ -15,6 +15,7 @@ from crud.calculations import compute_export_rows
 from crud.supplier_exclusions import get_excluded_supplier_ids
 from database import get_db
 from models import Project
+from routers.common import resolve_direction_type
 
 router = APIRouter()
 
@@ -391,22 +392,28 @@ def export_excel(
     period_start: date | None = None,
     period_end: date | None = None,
     material_class_id: int | None = None,
+    direction: str | None = None,
     db: Session = Depends(get_db),
 ):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Проект не найден")
 
+    mt = resolve_direction_type(db, direction)
+    direction_type_id = mt.id if mt else None
+
     excluded = get_excluded_supplier_ids(db, project_id)
     rows = compute_export_rows(
         db, project_id, period_start, period_end, material_class_id,
         excluded_supplier_ids=excluded or None,
+        direction_type_id=direction_type_id,
     )
 
     from crud.calculations import compute_calculations  # noqa: PLC0415
     monthly_rows = compute_calculations(
         db, project_id, period_start, period_end, material_class_id,
         excluded_supplier_ids=excluded or None,
+        direction_type_id=direction_type_id,
     )
     # (class_id, year, month) → {"corridor_pct": float|None, "compensation_amount": float|None}
     comp_by_class_month: dict[tuple[int, int, int], dict] = {
@@ -442,16 +449,18 @@ def export_excel(
     info_lines = [
         _safe_str(project.name),
         _safe_str(project.contract_number or ""),
+        *([_safe_str(f"Направление: {mt.name}")] if mt else []),
         f"Период: {display_start.strftime('%d.%m.%Y')} — {display_end.strftime('%d.%m.%Y')}",
         f"Сформировано: {date.today().strftime('%d.%m.%Y')}",
     ]
     info_fonts = [
         _font(bold=True, color="FFFFFF", size=14),
         _font(color="BDD7EE", size=10),
+        *([_font(color="BDD7EE", size=10)] if mt else []),
         _font(color="FFFFFF", size=10),
         _font(color="9DC3E6", size=9),
     ]
-    info_heights = [24, 16, 16, 14]
+    info_heights = [24, 16, *([16] if mt else []), 16, 14]
 
     for text, font, height in zip(info_lines, info_fonts, info_heights, strict=True):
         ws.merge_cells(
@@ -512,7 +521,8 @@ def export_excel(
     output.seek(0)
 
     safe_name = "".join("-" if ch in "\\/" + ':*?"<>|\r\n' else ch for ch in project.name).strip(" .-")
-    filename = f"отчёт_{safe_name or project.id}_{display_start}_{display_end}.xlsx"
+    dir_suffix = f"-{mt.name}" if mt else ""
+    filename = f"отчёт-{safe_name or project.id}{dir_suffix}_{display_start}–{display_end}.xlsx"
     encoded = quote(filename)
 
     return StreamingResponse(

@@ -34,7 +34,8 @@ UDP/
 │   ├── utils.py          — get_client_ip, utcnow
 │   ├── routers/          — projects, invoices, dashboard, export, material_classes,
 │   │                       reference_prices, units (+ /api/material-types), settings,
-│   │                       suppliers, auth, admin, orgs
+│   │                       suppliers, auth, admin, orgs;
+│   │                       common.py — shared-хелперы роутеров (resolve_direction_type → 422)
 │   ├── alembic/          — миграции
 │   └── tests/            — unit/ + integration/ + fixtures/ + test_auth_coverage.py
 ├── frontend/src/
