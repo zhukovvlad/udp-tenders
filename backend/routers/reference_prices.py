@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from crud.projects import create_reference_price, delete_reference_price, get_reference_prices, update_reference_price
 from database import get_db
 from models import MaterialClass, UnitOfMeasure
-from routers.dashboard import _resolve_direction_type
+from routers.common import resolve_direction_type
 
 router = APIRouter()
 
@@ -48,7 +48,7 @@ def _validate_ref_unit(db: Session, material_class_id: int, unit_id: int) -> Non
 
 @router.get("")
 def list_reference_prices(project_id: int | None = None, material_class_id: int | None = None, direction: str | None = None, db: Session = Depends(get_db)):
-    _resolve_direction_type(db, direction)  # 422 on unknown code
+    resolve_direction_type(db, direction)  # 422 on unknown code
     prices = get_reference_prices(db, project_id, material_class_id, material_type_code=direction)
     return [
         {

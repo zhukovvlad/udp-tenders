@@ -16,7 +16,7 @@ from crud.projects import create_project, delete_project, get_projects, update_p
 from crud.supplier_exclusions import get_excluded_supplier_ids, set_supplier_excluded
 from database import get_db
 from models import Document, Invoice, InvoiceItem, MaterialClass, MaterialType, Project, Supplier
-from routers.dashboard import _resolve_direction_type
+from routers.common import resolve_direction_type
 
 router = APIRouter()
 
@@ -75,7 +75,7 @@ def list_project_suppliers(project_id: int, direction: str | None = None, db: Se
     """Список поставщиков проекта с кол-вом счетов. Инвойсы без supplier_id не включаются."""
     if not db.query(Project).filter(Project.id == project_id).first():
         raise HTTPException(status_code=404, detail="Проект не найден")
-    mt = _resolve_direction_type(db, direction)
+    mt = resolve_direction_type(db, direction)
     q = (
         db.query(
             Supplier.id,

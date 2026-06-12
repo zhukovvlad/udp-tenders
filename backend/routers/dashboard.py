@@ -2,7 +2,7 @@ from calendar import monthrange
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import distinct, extract, func, literal, or_
 from sqlalchemy.orm import Session
 
@@ -20,18 +20,9 @@ from models import (
     ProjectSupplierExclusion,
     UnitOfMeasure,
 )
+from routers.common import resolve_direction_type
 
 router = APIRouter()
-
-
-def _resolve_direction_type(db: Session, direction: str | None) -> MaterialType | None:
-    """code направления → MaterialType. Неизвестный code → 422 (спека §6)."""
-    if direction is None:
-        return None
-    mt = db.query(MaterialType).filter(MaterialType.code == direction).first()
-    if mt is None:
-        raise HTTPException(status_code=422, detail=f"Неизвестное направление: {direction}")
-    return mt
 
 
 def _direction_summaries(db: Session, project_id: int, excl_filter, calc_rows: list[dict]) -> dict:
@@ -247,7 +238,7 @@ def list_project_invoices(
     db: Session = Depends(get_db),
 ):
     """Все СФ по проекту со всеми позициями — для отображения на дашборде."""
-    mt = _resolve_direction_type(db, direction)
+    mt = resolve_direction_type(db, direction)
 
     q = (
         db.query(Invoice)
@@ -314,7 +305,7 @@ def list_calculations(
     db: Session = Depends(get_db),
 ):
     """Live-вычисление расчётов помесячно. Если project_id не задан — по всем проектам."""
-    mt = _resolve_direction_type(db, direction)
+    mt = resolve_direction_type(db, direction)
     direction_type_id = mt.id if mt else None
 
     if project_id is None:
@@ -379,7 +370,7 @@ def get_monthly_summary(
 ):
     """Помесячная агрегация по проекту: оборот (материалы), объём, количество СФ."""
     excluded = get_excluded_supplier_ids(db, project_id)
-    mt = _resolve_direction_type(db, direction)
+    mt = resolve_direction_type(db, direction)
 
     year_expr = extract("year", Invoice.date)
     month_expr = extract("month", Invoice.date)
