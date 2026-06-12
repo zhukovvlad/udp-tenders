@@ -369,6 +369,13 @@ def compute_calculations(
     return results
 
 
+def full_deviation_from_rows(rows: list[dict]) -> float | None:
+    """Total deviation over precomputed compute_calculations rows.
+    Returns None if no reference prices produced a deviation (not 0.0)."""
+    amounts = [r["deviation_amount"] for r in rows if r["deviation_amount"] is not None]
+    return round(sum(amounts), 2) if amounts else None
+
+
 def compute_full_deviation(
     db: Session,
     project_id: int,
@@ -380,8 +387,7 @@ def compute_full_deviation(
     Delegates to compute_calculations() — единый источник истины.
     Returns None if no reference prices are available for any class (not 0.0)."""
     rows = compute_calculations(db, project_id, period_start, period_end, excluded_supplier_ids=excluded_supplier_ids)
-    amounts = [r["deviation_amount"] for r in rows if r["deviation_amount"] is not None]
-    return round(sum(amounts), 2) if amounts else None
+    return full_deviation_from_rows(rows)
 
 
 def compute_export_rows(
