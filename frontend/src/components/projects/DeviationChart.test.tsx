@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { renderWithProviders } from "@/test/utils";
 import type { DashboardCalculation } from "@/types/dashboard";
@@ -286,6 +287,90 @@ describe("periodFilterActive=false (latest-month режим)", () => {
     expect(findAxisLabel("B25")).toBeInTheDocument();
     // В latest-month режиме covered_qty всегда null → нет data-partial-coverage
     expect(document.querySelector("[data-partial-coverage='true']")).not.toBeInTheDocument();
+  });
+});
+
+// ─── 6. Нейтральный заголовок (спека §7.5) ───────────────────────────────────
+
+describe("Нейтральный заголовок", () => {
+  it("рендерит нейтральный заголовок вместо бетонного хардкода", () => {
+    renderWithProviders(
+      <DeviationChart
+        calculations={[makeCalc({ material_class_id: 1, material_class_name: "В25" })]}
+      />,
+    );
+    expect(screen.getByText("Отклонения от базовых цен")).toBeInTheDocument();
+    expect(screen.queryByText(/классам бетона/)).not.toBeInTheDocument();
+  });
+});
+
+// ─── 7. Секции по направлениям (groups, спека §3.2/§6.2) ─────────────────────
+
+describe("Секции по направлениям (groups)", () => {
+  it("группирует секции по direction с подытогом и ссылкой «открыть»", async () => {
+    const onOpen = vi.fn();
+    renderWithProviders(
+      <DeviationChart
+        periodFilterActive
+        calculations={[
+          makeCalc({ material_class_id: 1, material_class_name: "В25", deviation_amount: 10000 }),
+          makeCalc({
+            material_class_id: 2,
+            material_class_name: "А500С Ø12",
+            direction: "rebar",
+            deviation_amount: 5000,
+          }),
+        ]}
+        groups={[
+          { code: "concrete", name: "Бетон", onOpen },
+          { code: "rebar", name: "Арматура", onOpen },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("deviation-group-concrete")).toHaveTextContent("Бетон");
+    expect(screen.getByTestId("deviation-group-rebar")).toHaveTextContent("Арматура");
+    const user = userEvent.setup();
+    await user.click(screen.getAllByRole("button", { name: /открыть/ })[0]);
+    expect(onOpen).toHaveBeenCalled();
+  });
+
+  it("не рендерит секцию для направления без расчётов и баннер переплаты", () => {
+    renderWithProviders(
+      <DeviationChart
+        periodFilterActive
+        calculations={[
+          makeCalc({ material_class_id: 1, material_class_name: "В25", deviation_amount: 10000 }),
+        ]}
+        groups={[
+          { code: "concrete", name: "Бетон", onOpen: vi.fn() },
+          { code: "rebar", name: "Арматура", onOpen: vi.fn() },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("deviation-group-concrete")).toBeInTheDocument();
+    expect(screen.queryByTestId("deviation-group-rebar")).not.toBeInTheDocument();
+    // Баннер «Переплата/Экономия» не дублируется в режиме секций
+    expect(screen.queryByText(/Переплата|Экономия/)).not.toBeInTheDocument();
+  });
+});
+
+// ─── 8. top-N по |deviation_amount| ──────────────────────────────────────────
+
+describe("topN", () => {
+  it("ограничивает бары топ-N по абсолютному deviation_amount", () => {
+    const calcs = Array.from({ length: 8 }, (_, i) =>
+      makeCalc({
+        material_class_id: i + 1,
+        material_class_name: `В${i + 10}`,
+        deviation_amount: (i + 1) * 1000,
+      }),
+    );
+    renderWithProviders(
+      <DeviationChart periodFilterActive calculations={calcs} topN={5} />,
+    );
+    // топ-5 по |deviation_amount| — В17..В13; В12 (3000) не попадает
+    expect(screen.queryByText("В12")).not.toBeInTheDocument();
+    expect(findAxisLabel("В17")).toBeInTheDocument();
   });
 });
 
