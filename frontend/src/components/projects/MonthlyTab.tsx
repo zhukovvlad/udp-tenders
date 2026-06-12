@@ -41,6 +41,8 @@ interface MonthlyBucket {
 interface MonthlyTabProps {
   projectId: ID;
   projectName: string;
+  /** Скоуп направления (спека §6.4); undefined — все направления / legacy. */
+  direction?: string;
   onNavigateToMonth: (year: number, month: number) => void;
 }
 
@@ -73,8 +75,8 @@ function buildFullSequence(raw: MonthlyBucketRaw[]): MonthlyBucket[] {
   return result;
 }
 
-function exportToCsv(rows: MonthlyBucket[], projectName: string) {
-  const header = ["Период", "Оборот (₽)", "Объём (м³)", "Счетов"].join(";");
+function exportToCsv(rows: MonthlyBucket[], projectName: string, volumeUnit: string) {
+  const header = ["Период", "Оборот (₽)", `Объём (${volumeUnit})`, "Счетов"].join(";");
   const lines = rows.map((r) =>
     [
       `${MONTH_NAMES_RU[r.month - 1]} ${r.year}`,
@@ -185,13 +187,16 @@ function TurnoverChart({ buckets }: { buckets: MonthlyBucket[] }) {
 // ─────────────────────────────────────────────
 // Main Component
 // ─────────────────────────────────────────────
-export function MonthlyTab({ projectId, projectName, onNavigateToMonth }: MonthlyTabProps) {
-  const monthlyQ = useDashboardMonthlySummary(projectId);
+export function MonthlyTab({ projectId, projectName, direction, onNavigateToMonth }: MonthlyTabProps) {
+  const monthlyQ = useDashboardMonthlySummary(projectId, direction);
 
   const buckets = useMemo(
     () => buildFullSequence(monthlyQ.data ?? []),
     [monthlyQ.data],
   );
+
+  // Родная единица объёма из ответа (чистка хардкода м³ — спека §7.6)
+  const volumeUnit = (monthlyQ.data ?? []).find((b) => b.volume_unit)?.volume_unit ?? "м³";
 
   const totals = useMemo(
     () =>
@@ -263,7 +268,7 @@ export function MonthlyTab({ projectId, projectName, onNavigateToMonth }: Monthl
           variant="secondary"
           size="sm"
           leftIcon={<FileDown size={14} />}
-          onClick={() => exportToCsv(buckets, projectName)}
+          onClick={() => exportToCsv(buckets, projectName, volumeUnit)}
         >
           Экспорт CSV
         </Button>
@@ -281,7 +286,7 @@ export function MonthlyTab({ projectId, projectName, onNavigateToMonth }: Monthl
             <TableRow className="text-xs text-fg-tertiary hover:bg-transparent">
               <TableHead className="font-medium">Месяц</TableHead>
               <TableHead className="font-medium text-right">Оборот, ₽ с НДС</TableHead>
-              <TableHead className="font-medium text-right">Объём, м³</TableHead>
+              <TableHead className="font-medium text-right">Объём, {volumeUnit}</TableHead>
               <TableHead className="font-medium text-right">Счетов</TableHead>
             </TableRow>
           </TableHeader>

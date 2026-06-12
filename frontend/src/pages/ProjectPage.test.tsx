@@ -1,11 +1,17 @@
 import { describe, it, expect, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse, type JsonBodyType } from "msw";
 import { Link, Routes, Route, useParams } from "react-router-dom";
 import { renderWithProviders } from "@/test/utils";
 import { server } from "@/test/server";
-import { sampleProject, sampleReferencePrice, sampleDashboardInvoices } from "@/test/fixtures";
+import {
+  sampleProject,
+  sampleReferencePrice,
+  sampleDashboardInvoices,
+  sampleDashboardSummaryMulti,
+  sampleDashboardSummaryEmpty,
+} from "@/test/fixtures";
 import ProjectPage from "./ProjectPage";
 
 // MSW handlers provide:
@@ -15,13 +21,17 @@ import ProjectPage from "./ProjectPage";
 //   GET /api/material-classes → [sampleMaterialClass]
 
 /** Render ProjectPage inside a proper Route so useParams() extracts the id. */
-function renderProject(id: string = "1") {
+function renderProject(id: string = "1", search = "") {
   return renderWithProviders(
     <Routes>
       <Route path="/projects/:id" element={<ProjectPage />} />
     </Routes>,
-    { initialRoute: `/projects/${id}` },
+    { initialRoute: `/projects/${id}${search}` },
   );
+}
+
+function mockSummary(payload: JsonBodyType) {
+  server.use(http.get("/api/dashboard/summary", () => HttpResponse.json(payload)));
 }
 
 describe("ProjectPage", () => {
@@ -915,6 +925,172 @@ describe("ProjectPage", () => {
       await waitFor(() => {
         expect(screen.getByTestId("project-tab-suppliers")).toHaveTextContent("Поставщики · 2");
       });
+    });
+  });
+
+  // ── Направления (спека §3, §7.2–7.3) ─────────────────────────────────────
+
+  describe("ProjectPage directions", () => {
+    it("mono-object: defaults to its direction with tabs visible (ADR #10)", async () => {
+      renderProject(); // дефолтная фикстура: directions=[concrete]
+      expect(await screen.findByTestId("project-page-tabs-list")).toBeInTheDocument();
+      expect(screen.getByTestId("direction-concrete")).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("multi-object: defaults to «Все» — no tabs, summary KPIs with breakdown", async () => {
+      mockSummary(sampleDashboardSummaryMulti);
+      renderProject();
+      await screen.findByTestId("direction-switcher");
+      expect(screen.queryByTestId("project-page-tabs-list")).not.toBeInTheDocument();
+      expect(screen.getByText("Объёмы")).toBeInTheDocument();
+      expect(screen.getByText(/12,4/)).toBeInTheDocument(); // т арматуры
+      expect(screen.getByText(/Переплата за весь период|Отклонение/)).toBeInTheDocument();
+    });
+
+    it("empty object: legacy tabs, no switcher (ADR #11)", async () => {
+      mockSummary(sampleDashboardSummaryEmpty);
+      renderProject();
+      expect(await screen.findByTestId("project-page-tabs-list")).toBeInTheDocument();
+      expect(screen.queryByTestId("direction-switcher")).not.toBeInTheDocument();
+    });
+
+    it("?direction=rebar opens rebar mode directly (criterion #3)", async () => {
+      mockSummary(sampleDashboardSummaryMulti);
+      renderProject("1", "?direction=rebar");
+      expect(await screen.findByTestId("project-page-tabs-list")).toBeInTheDocument();
+      expect(screen.getByTestId("direction-rebar")).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("garbage ?direction= falls back to auto-default and never hits API with it", async () => {
+      mockSummary(sampleDashboardSummaryMulti);
+      const seen: string[] = [];
+      server.use(
+        http.get("/api/dashboard/invoices", ({ request }) => {
+          seen.push(new URL(request.url).searchParams.get("direction") ?? "");
+          return HttpResponse.json([]);
+        }),
+      );
+      renderProject("1", "?direction=trash");
+      await screen.findByTestId("direction-switcher");
+      expect(screen.getByTestId("direction-all")).toHaveAttribute("aria-selected", "true");
+      expect(seen).not.toContain("trash"); // гейт §7.2: запрос не ушёл с мусором
+    });
+
+    it("switching direction resets active tab to overview and updates URL", async () => {
+      mockSummary(sampleDashboardSummaryMulti);
+      const user = userEvent.setup();
+      renderProject();
+      await user.click(await screen.findByTestId("direction-concrete"));
+      // в режиме направления видим табы, активен «Обзор»
+      expect(await screen.findByTestId("project-tab-overview")).toHaveAttribute("aria-selected", "true");
+      await user.click(screen.getByTestId("project-tab-invoices"));
+      await waitFor(() => {
+        expect(screen.getByTestId("project-tab-invoices")).toHaveAttribute("aria-selected", "true");
+      });
+      await user.click(screen.getByTestId("direction-rebar"));
+      await waitFor(() => {
+        expect(screen.getByTestId("project-tab-overview")).toHaveAttribute("aria-selected", "true");
+      });
+    });
+
+    it("«Все»: alert opens errors view, back link returns", async () => {
+      mockSummary(sampleDashboardSummaryMulti);
+      server.use(
+        http.get("/api/invoices/documents", () =>
+          HttpResponse.json([
+            {
+              id: 1,
+              project_id: 1,
+              filename: "x.pdf",
+              doc_type: "invoice",
+              status: "error",
+              uploaded_at: "2026-05-01T10:00:00",
+              invoice_count: 0,
+              has_issues: true,
+              ai_confidence: null,
+              invoices: [],
+            },
+          ])
+        ),
+      );
+      const user = userEvent.setup();
+      renderProject();
+      await user.click(await screen.findByTestId("unrecognized-alert"));
+      expect(await screen.findByTestId("project-errors-view")).toBeInTheDocument();
+      // направление не сменилось
+      expect(screen.getByTestId("direction-all")).toHaveAttribute("aria-selected", "true");
+      await user.click(screen.getByRole("button", { name: /к сводке/ }));
+      await waitFor(() => {
+        expect(screen.queryByTestId("project-errors-view")).not.toBeInTheDocument();
+      });
+    });
+
+    it("«Все»: no period table and no configure-prices button", async () => {
+      mockSummary(sampleDashboardSummaryMulti);
+      renderProject();
+      await screen.findByTestId("direction-switcher");
+      expect(screen.queryByRole("button", { name: /настроить базовые/i })).not.toBeInTheDocument();
+    });
+
+    it("export in direction mode sends ?direction and adds direction suffix to filename", async () => {
+      mockSummary(sampleDashboardSummaryMulti);
+      const requests: Request[] = [];
+      server.use(
+        http.get("/api/export/excel", ({ request }) => {
+          requests.push(request);
+          return HttpResponse.arrayBuffer(new ArrayBuffer(8), {
+            headers: {
+              "Content-Type":
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              "Content-Disposition": "attachment; filename*=UTF-8''test.xlsx",
+            },
+          });
+        })
+      );
+
+      const origCreateObjectURL = URL.createObjectURL;
+      const origCreateElement = document.createElement.bind(document);
+      const anchorClicks: { download: string }[] = [];
+      try {
+        URL.createObjectURL = () => "blob:fake";
+        vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+          const el = origCreateElement(tag);
+          if (tag === "a") {
+            vi.spyOn(el as HTMLAnchorElement, "click").mockImplementation(() => {
+              anchorClicks.push({ download: (el as HTMLAnchorElement).download });
+            });
+          }
+          return el;
+        });
+
+        const user = userEvent.setup();
+        renderProject("1", "?direction=rebar");
+        await screen.findByTestId("project-page-tabs-list");
+
+        await user.click(screen.getByRole("button", { name: /экспорт/i }));
+
+        await waitFor(() => expect(requests).toHaveLength(1));
+        expect(new URL(requests[0].url).searchParams.get("direction")).toBe("rebar");
+        expect(anchorClicks).toHaveLength(1);
+        expect(anchorClicks[0].download).toBe("отчёт-ЖК Радуга-Арматура.xlsx");
+      } finally {
+        URL.createObjectURL = origCreateObjectURL;
+        vi.restoreAllMocks();
+      }
+    });
+
+    it("direction mode passes direction to scoped hooks (MSW)", async () => {
+      mockSummary(sampleDashboardSummaryMulti);
+      const seen: string[] = [];
+      server.use(
+        http.get("/api/dashboard/invoices", ({ request }) => {
+          seen.push(new URL(request.url).searchParams.get("direction") ?? "none");
+          return HttpResponse.json([]);
+        }),
+      );
+      renderProject("1", "?direction=rebar");
+      await screen.findByTestId("project-page-tabs-list");
+      await waitFor(() => expect(seen).toContain("rebar"));
     });
   });
 });

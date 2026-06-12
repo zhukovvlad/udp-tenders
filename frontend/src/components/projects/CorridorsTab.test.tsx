@@ -55,6 +55,19 @@ describe("CorridorsTab", () => {
     expect(screen.getByText("(наследовано)")).toBeInTheDocument();
   });
 
+  it("with direction='concrete' rebar type and class rows are not rendered (спека §3.3)", async () => {
+    server.use(
+      http.get("/api/projects/:projectId/corridors", () => HttpResponse.json(MATRIX_WITH_DATA)),
+    );
+
+    renderWithProviders(<CorridorsTab projectId={42} direction="concrete" />);
+
+    expect(await screen.findByText("Бетон")).toBeInTheDocument();
+    expect(screen.getByText("В25")).toBeInTheDocument();
+    expect(screen.queryByText("Арматура")).not.toBeInTheDocument();
+    expect(screen.queryByText("d12")).not.toBeInTheDocument();
+  });
+
   it("sends PUT to type endpoint when saving type-level corridor", async () => {
     const onPut = vi.fn();
     server.use(

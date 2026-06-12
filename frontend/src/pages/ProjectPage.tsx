@@ -1,6 +1,6 @@
 import { toast } from "sonner";
 import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Download, Loader2, Plus, Trash2, Pencil } from "lucide-react";
 
 import { Breadcrumbs } from "@/components/ui-domain/Breadcrumbs";
@@ -18,6 +18,7 @@ import { DeviationChart } from "@/components/projects/DeviationChart";
 import { MonthlyTab } from "@/components/projects/MonthlyTab";
 import { ErrorDocsTab } from "@/components/projects/ErrorDocsTab";
 import { CorridorsTab } from "@/components/projects/CorridorsTab";
+import { DirectionSwitcher } from "@/components/projects/DirectionSwitcher";
 
 import {
   Tabs,
@@ -76,6 +77,42 @@ import type { ID } from "@/types/common";
 import type { ReferencePrice } from "@/types/referencePrice";
 
 // ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
+
+/** KPI «Переплата/Экономия» — подпись, значение и danger/accent-классы.
+ * Используется и на сводке «Все» (full_deviation_amount), и в режиме
+ * направления (direction.overpayment). */
+function deviationKpi(amount: number | null | undefined) {
+  return {
+    kpiLabel:
+      amount != null
+        ? amount > 0
+          ? "Переплата за весь период"
+          : "Экономия за весь период"
+        : "Отклонение (весь период)",
+    label:
+      amount != null
+        ? amount > 0
+          ? `+${formatMoney(amount)}`
+          : formatMoney(Math.abs(amount))
+        : "—",
+    className:
+      amount != null
+        ? amount > 0
+          ? "bg-danger-soft border-danger-border"
+          : "bg-accent-soft border-accent-border"
+        : "",
+    valueClassName:
+      amount != null
+        ? amount > 0
+          ? "text-danger-text"
+          : "text-accent-text"
+        : "",
+  };
+}
+
+// ─────────────────────────────────────────────
 // Main page
 // ─────────────────────────────────────────────
 export default function ProjectPage() {
@@ -97,6 +134,7 @@ export default function ProjectPage() {
         project_id: projectId,
         period_start: periodStart || undefined,
         period_end: periodEnd || undefined,
+        direction: scopedDirection,
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -106,7 +144,10 @@ export default function ProjectPage() {
         .trim()
         .replace(/^[ .-]+|[ .-]+$/g, "");
       const periodSuffix = periodStart || periodEnd ? `_${periodStart || ""}–${periodEnd || ""}` : "";
-      a.download = `отчёт-${safeName || projectId}${periodSuffix}.xlsx`;
+      // Суффикс направления в имени файла — канон §6.7
+      const dirName = scopedDirection ? directions?.find((d) => d.code === scopedDirection)?.name : undefined;
+      const dirSuffix = dirName ? `-${dirName}` : "";
+      a.download = `отчёт-${safeName || projectId}${dirSuffix}${periodSuffix}.xlsx`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -173,16 +214,59 @@ export default function ProjectPage() {
   const project = projectsQ.data?.find((p) => p.id === projectId) ?? null;
 
   const summaryQ = useDashboardSummary(projectId);
-  const invoicesQ = useDashboardInvoices(projectId);
+
+  // ── направление: трёхзначное состояние из URL (спека §7.2) ──
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawDirection = searchParams.get("direction"); // null | 'all' | code
+  const directions = summaryQ.data?.directions;       // undefined пока summary грузится
+
+  // undefined = режим не определён (summary не пришёл) — НЕ 'all'
+  const direction: string | undefined =
+    directions === undefined ? undefined
+    : rawDirection === "all" ? "all"
+    : directions.some((d) => d.code === rawDirection) ? (rawDirection as string)
+    : directions.length === 1 ? directions[0].code     // автодефолт моно-объекта (ADR #10)
+    : "all";
+
+  const isLegacy = directions !== undefined && directions.length === 0; // пустой объект (ADR #11)
+  const scopedDirection = direction !== undefined && direction !== "all" ? direction : undefined;
+  // ?view=errors читается только на «Все»; в других режимах ИГНОРИРУЕТСЯ, URL не
+  // чистим (зафиксированный выбор из §7.2 «игнорируется/удаляется» — игнор дешевле,
+  // а changeDirection при явном переключении параметр удаляет)
+  const view = direction === "all" ? searchParams.get("view") : null;
+
+  const changeDirection = (code: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("direction", code);
+      next.delete("view");
+      return next;
+    });
+  };
+
+  // Сброс вкладки на «Обзор» при смене direction — back/forward идут мимо
+  // onChange (§7.2). Паттерн «adjust state during render» (react.dev/learn/
+  // you-might-not-need-an-effect): синхронно, без лишнего рендера с эффектом.
+  const [prevDirection, setPrevDirection] = useState(direction);
+  if (prevDirection !== direction) {
+    setPrevDirection(direction);
+    setActiveTab("overview");
+  }
+
+  // ── остальные запросы — гейт до определения режима (§7.2) ──
+  const queriesEnabled = direction !== undefined;
+  const invoicesQ = useDashboardInvoices(projectId, scopedDirection, { enabled: queriesEnabled });
   const calculationsQ = useDashboardCalculations(
     projectId,
     debouncedPeriodStart || undefined,
     debouncedPeriodEnd || undefined,
+    scopedDirection,
+    { enabled: queriesEnabled },
   );
   const hasValidProjectId = projectId !== null;
   const referencePricesQ = useReferencePrices(
     hasValidProjectId ? projectId : undefined,
-    { enabled: hasValidProjectId },
+    { enabled: hasValidProjectId && queriesEnabled, direction: scopedDirection },
   );
   const materialClassesQ = useMaterialClasses();
 
@@ -192,7 +276,7 @@ export default function ProjectPage() {
   ).length;
 
   // ── project suppliers ──
-  const projectSuppliersQ = useProjectSuppliers(projectId);
+  const projectSuppliersQ = useProjectSuppliers(projectId, scopedDirection, { enabled: queriesEnabled });
   const supplierExclusionsQ = useSupplierExclusions(projectId);
   const toggleExclusion = useToggleSupplierExclusion(projectId);
 
@@ -210,6 +294,7 @@ export default function ProjectPage() {
   const getDefaultUnitId = useDefaultUnitId();
 
   // ── derived ──
+  const dirAll = summaryQ.data; // shorthand для сводки «Все» в JSX
   const calculations = useMemo(() => calculationsQ.data ?? [], [calculationsQ.data]);
   const invoices = useMemo(() => invoicesQ.data ?? [], [invoicesQ.data]);
   const referencePrices = referencePricesQ.data ?? [];
@@ -397,8 +482,25 @@ export default function ProjectPage() {
         onOpenChange={setUploadOpen}
       />
 
-      {/* Tabs */}
-      <div className="mt-6">
+      {/* Переключатель направлений (скрыт у пустого объекта) */}
+      {!isLegacy && directions !== undefined && (
+        <div className="mt-6">
+          <DirectionSwitcher
+            directions={directions}
+            value={direction ?? "all"}
+            onChange={changeDirection}
+          />
+        </div>
+      )}
+
+      {/* Контент: высота ряда табов зарезервирована во всех режимах (§3.1) */}
+      <div className="mt-6 min-h-9">
+        {direction === undefined ? (
+          <div className="space-y-4">
+            <Skeleton className="h-8 w-2/3" />
+            <Skeleton className="h-[120px]" />
+          </div>
+        ) : isLegacy || scopedDirection ? (
         <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="project-page-tabs">
           <TabsList variant="line" data-testid="project-page-tabs-list">
             <TabsTrigger value="overview" data-testid="project-tab-overview">Обзор</TabsTrigger>
@@ -427,59 +529,74 @@ export default function ProjectPage() {
             {summaryQ.data && (() => {
               const { first_invoice_date, last_invoice_date, full_deviation_amount } = summaryQ.data;
 
-              const devLabel =
-                full_deviation_amount != null
-                  ? full_deviation_amount > 0
-                    ? `+${formatMoney(full_deviation_amount)}`
-                    : formatMoney(Math.abs(full_deviation_amount))
-                  : "—";
-              const devKpiLabel =
-                full_deviation_amount != null
-                  ? full_deviation_amount > 0
-                    ? "Переплата за весь период"
-                    : "Экономия за весь период"
-                  : "Отклонение (весь период)";
-              const devClass =
-                full_deviation_amount != null
-                  ? full_deviation_amount > 0
-                    ? "bg-danger-soft border-danger-border"
-                    : "bg-accent-soft border-accent-border"
-                  : "";
-              const devValueClass =
-                full_deviation_amount != null
-                  ? full_deviation_amount > 0
-                    ? "text-danger-text"
-                    : "text-accent-text"
-                  : "";
+              // Срез направления (§3.3); undefined в legacy-режиме → старый KPI-блок
+              const dir = directions?.find((d) => d.code === scopedDirection);
+              const dev = deviationKpi(dir ? dir.overpayment : full_deviation_amount);
 
               return (
                 <>
-                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                    <KpiCard
-                      label="Оборот, ₽ с НДС"
-                      value={formatMoney(summaryQ.data.total_amount)}
-                      breakdown={[
-                        { label: "Материалы", value: formatMoney(summaryQ.data.material_amount) },
-                        ...(summaryQ.data.delivery_amount > 0 ? [{ label: "Доставка", value: formatMoney(summaryQ.data.delivery_amount) }] : []),
-                        ...(summaryQ.data.other_amount > 0 ? [{ label: "Прочее", value: formatMoney(summaryQ.data.other_amount) }] : []),
-                      ]}
-                    />
-                    <KpiCard
-                      label="Объём м³"
-                      value={formatNumber(summaryQ.data.total_qty)}
-                    />
-                    <KpiCard
-                      label="Счетов"
-                      value={formatNumber(summaryQ.data.invoice_count)}
-                      suffix={`· ${formatNumber(summaryQ.data.doc_count)} докум.`}
-                    />
-                    <KpiCard
-                      label={devKpiLabel}
-                      value={devLabel}
-                      className={devClass}
-                      valueClassName={devValueClass}
-                    />
-                  </div>
+                  {dir ? (
+                    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                      <KpiCard
+                        label="Оборот, ₽ с НДС"
+                        value={formatMoney(dir.turnover)}
+                        suffix={
+                          summaryQ.data.total_amount > 0
+                            ? `${Math.round((dir.turnover / summaryQ.data.total_amount) * 100)}% оборота объекта`
+                            : undefined
+                        }
+                      />
+                      <KpiCard
+                        label={dir.volume_unit ? `Объём, ${dir.volume_unit}` : "Объём"}
+                        value={dir.volume !== null ? formatNumber(dir.volume) : "—"}
+                        suffix={
+                          dir.volume_excluded_count > 0 ? (
+                            <span title="не вошли позиции в других единицах">
+                              {`без ${dir.volume_excluded_count} позиц.`}
+                            </span>
+                          ) : undefined
+                        }
+                      />
+                      <KpiCard
+                        label="Счетов"
+                        value={formatNumber(dir.invoice_count)}
+                        suffix={dir.mixed_invoice_count > 0 ? `· ${dir.mixed_invoice_count} смешанных` : undefined}
+                      />
+                      <KpiCard
+                        label={dev.kpiLabel}
+                        value={dev.label}
+                        className={dev.className}
+                        valueClassName={dev.valueClassName}
+                      />
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                      <KpiCard
+                        label="Оборот, ₽ с НДС"
+                        value={formatMoney(summaryQ.data.total_amount)}
+                        breakdown={[
+                          { label: "Материалы", value: formatMoney(summaryQ.data.material_amount) },
+                          ...(summaryQ.data.delivery_amount > 0 ? [{ label: "Доставка", value: formatMoney(summaryQ.data.delivery_amount) }] : []),
+                          ...(summaryQ.data.other_amount > 0 ? [{ label: "Прочее", value: formatMoney(summaryQ.data.other_amount) }] : []),
+                        ]}
+                      />
+                      <KpiCard
+                        label="Объём м³"
+                        value={formatNumber(summaryQ.data.total_qty)}
+                      />
+                      <KpiCard
+                        label="Счетов"
+                        value={formatNumber(summaryQ.data.invoice_count)}
+                        suffix={`· ${formatNumber(summaryQ.data.doc_count)} докум.`}
+                      />
+                      <KpiCard
+                        label={dev.kpiLabel}
+                        value={dev.label}
+                        className={dev.className}
+                        valueClassName={dev.valueClassName}
+                      />
+                    </div>
+                  )}
                   <p className="text-xs text-fg-tertiary -mt-2 px-1">
                     Первый счёт{" "}
                     <span className="text-fg-secondary font-medium">
@@ -957,13 +1074,14 @@ export default function ProjectPage() {
           </TabsContent>
           {/* ────────── TAB: Коридоры ────────── */}
           <TabsContent value="corridors" className="mt-6">
-            {projectId !== null && <CorridorsTab projectId={projectId} />}
+            {projectId !== null && <CorridorsTab projectId={projectId} direction={scopedDirection} />}
           </TabsContent>
           {/* ────────── TAB: По месяцам ────────── */}
           <TabsContent value="monthly">
             <MonthlyTab
               projectId={projectId}
               projectName={project.name}
+              direction={scopedDirection}
               onNavigateToMonth={(year, month) => {
                 setInvoiceMonthFilter({ year, month });
                 setActiveTab("invoices");
@@ -1112,6 +1230,124 @@ export default function ProjectPage() {
             )}
           </TabsContent>
         </Tabs>
+        ) : view === "errors" ? (
+          /* ────────── «Все» → view=errors: ошибки объекта (§3.2 п.2) ────────── */
+          <div className="space-y-4" data-testid="project-errors-view">
+            <div className="flex items-center justify-between">
+              <h2 className="font-serif text-lg">Ошибки объекта</h2>
+              <button
+                type="button"
+                className="text-sm text-accent-text hover:underline"
+                onClick={() =>
+                  setSearchParams((p) => {
+                    const n = new URLSearchParams(p);
+                    n.delete("view");
+                    return n;
+                  })
+                }
+              >
+                ← к сводке
+              </button>
+            </div>
+            {docsQ.isLoading
+              ? <Skeleton className="h-32" />
+              : <ErrorDocsTab docs={docsQ.data ?? []} />}
+          </div>
+        ) : (
+          /* ────────── Сводка «Все направления» (§3.2) ────────── */
+          <div className="space-y-6">
+            {/* KPI ×4 */}
+            {dirAll && (() => {
+              const allDev = deviationKpi(dirAll.full_deviation_amount);
+              return (
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <KpiCard
+                    label="Оборот, ₽ с НДС"
+                    value={formatMoney(dirAll.total_amount)}
+                    breakdown={[
+                      ...dirAll.directions.map((d) => ({ label: d.name, value: formatMoney(d.turnover) })),
+                      ...(dirAll.delivery_total > 0 ? [{ label: "Доставка", value: formatMoney(dirAll.delivery_total) }] : []),
+                      ...(dirAll.other_total > 0 ? [{ label: "Прочее", value: formatMoney(dirAll.other_total) }] : []),
+                    ]}
+                  />
+                  <KpiCard
+                    label="Объёмы"
+                    values={dirAll.directions
+                      .filter((d) => d.volume !== null)
+                      .map((d) => ({
+                        label: d.name, // именительный падеж — без склонений (масштабируется на кирпич и далее)
+                        value: `${formatNumber(d.volume!)} ${d.volume_unit}`,
+                      }))}
+                  />
+                  <KpiCard
+                    label="Счетов"
+                    value={formatNumber(dirAll.invoice_count)}
+                    breakdown={[ /* breakdown, не suffix: длинная разбивка в строку у числа теснится */
+                      ...dirAll.directions.map((d) => ({ label: d.name, value: formatNumber(d.invoice_count) })),
+                      ...(dirAll.mixed_invoice_count > 0 ? [{ label: "Смешанные", value: formatNumber(dirAll.mixed_invoice_count) }] : []),
+                      ...(dirAll.other_invoice_count > 0 ? [{ label: "Прочие", value: formatNumber(dirAll.other_invoice_count) }] : []),
+                    ]}
+                  />
+                  <KpiCard
+                    label={allDev.kpiLabel}
+                    value={allDev.label}
+                    className={allDev.className}
+                    valueClassName={allDev.valueClassName}
+                    breakdown={dirAll.directions
+                      .filter((d) => d.overpayment !== null)
+                      .map((d) => ({ label: d.name, value: formatMoney(d.overpayment!) }))}
+                  />
+                </div>
+              );
+            })()}
+
+            {/* Алерт нераспознанных (§3.2 п.2) — источник тот же, что бейдж «Ошибки» */}
+            {errorDocCount > 0 && (
+              <button
+                type="button"
+                data-testid="unrecognized-alert"
+                onClick={() =>
+                  setSearchParams((p) => {
+                    const n = new URLSearchParams(p);
+                    n.set("view", "errors");
+                    return n;
+                  })
+                }
+                className="flex w-full items-center justify-between rounded-lg border border-danger-border bg-danger-soft px-4 py-2.5 text-sm text-danger-text hover:opacity-90"
+              >
+                <span>
+                  {errorDocCount} документ{pluralRu(errorDocCount)}{" "}
+                  {pluralRu(errorDocCount) === ""
+                    ? "не распознан и не учтён"
+                    : "не распознаны и не учтены"}{" "}
+                  в цифрах
+                </span>
+                <span>Разобрать →</span>
+              </button>
+            )}
+
+            {/* Отклонения секциями по направлениям, top-5 (§3.2 п.3) */}
+            <DeviationChart
+              calculations={calculations}
+              periodFilterActive
+              topN={5}
+              groups={dirAll?.directions.map((d) => ({
+                code: d.code,
+                name: d.name,
+                onOpen: () => changeDirection(d.code),
+              })) ?? []}
+              periodStart={periodStart}
+              periodEnd={periodEnd}
+              dataStart={dataStart}
+              dataEnd={dataEnd}
+              displayStart={displayStart}
+              displayEnd={displayEnd}
+              onPeriodStartChange={setPeriodStart}
+              onPeriodEndChange={setPeriodEnd}
+              onPeriodReset={() => { setPeriodStart(""); setPeriodEnd(""); }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
