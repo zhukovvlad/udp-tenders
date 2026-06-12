@@ -28,7 +28,7 @@ CI: GitHub Actions (`.github/workflows/backend-tests.yml`) гоняет ruff + �
 - Структура проекта и навигация → `docs/ui/routes-architecture.md`
 - Обзор архитектуры и планы → `docs/agent/architecture.md`
 - Модели БД и связи → `docs/agent/database.md`
-- Расчёты (avg_price, коридор, Decimal, экспорт) → `docs/agent/calculations.md`
+- Расчёты (avg_price, направления/direction, разноска, коридор, Decimal, экспорт) → `docs/agent/calculations.md`
 - Парсинг УПД и выбор движка → `docs/agent/pdf-parsing.md`
 - Аутентификация и роли → `docs/agent/auth.md`
 - Поставщики: исключения и ограничения MVP → `docs/agent/suppliers.md`
