@@ -314,6 +314,7 @@ def _compute_supplier_project_deviation(
             func.sum(InvoiceItem.normalized_quantity).label("qty"),
             UnitOfMeasure.dimension.label("dimension"),
             UnitOfMeasure.symbol.label("symbol"),
+            MaterialClass.material_type_id.label("type_id"),
         )
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
@@ -327,15 +328,15 @@ def _compute_supplier_project_deviation(
         .group_by(
             InvoiceItem.invoice_id, InvoiceItem.material_class_id,
             UnitOfMeasure.dimension, UnitOfMeasure.symbol,
+            MaterialClass.material_type_id,
         )
         .all()
     )
     if not base_rows:
         return None, None
 
-    # Shared costs (доставка + присадки) по счёту, с НДС
-    shared_per_invoice: dict[int, Decimal] = {}
-
+    # Delivery per invoice (with VAT) — invoice-wide, no direction on delivery lines.
+    delivery_per_invoice: dict[int, Decimal] = {}
     for row in (
         db.query(
             InvoiceItem.invoice_id,
@@ -355,13 +356,15 @@ def _compute_supplier_project_deviation(
         .group_by(InvoiceItem.invoice_id)
         .all()
     ):
-        shared_per_invoice[row.invoice_id] = (
-            shared_per_invoice.get(row.invoice_id, Decimal("0")) + row.total_with_vat
-        )
+        delivery_per_invoice[row.invoice_id] = row.total_with_vat
 
+    # Additives grouped by (invoice, material_type) — each pool allocated only to
+    # base rows of the same type (spec §5.4).
+    additive_per_invoice_type: dict[tuple[int, int], Decimal] = {}
     for row in (
         db.query(
             InvoiceItem.invoice_id,
+            MaterialClass.material_type_id.label("type_id"),
             func.sum(
                 InvoiceItem.amount +
                 func.coalesce(
@@ -377,16 +380,14 @@ def _compute_supplier_project_deviation(
             InvoiceItem.item_type == "material",
             MaterialClass.calc_role == "additive",
         )
-        .group_by(InvoiceItem.invoice_id)
+        .group_by(InvoiceItem.invoice_id, MaterialClass.material_type_id)
         .all()
     ):
-        shared_per_invoice[row.invoice_id] = (
-            shared_per_invoice.get(row.invoice_id, Decimal("0")) + row.total_with_vat
-        )
+        additive_per_invoice_type[(row.invoice_id, row.type_id)] = row.total_with_vat
 
     # Агрегируем contribution по классу — локальный импорт для избежания кругового импорта
     from crud.calculations import _aggregate_by_class  # noqa: PLC0415
-    class_contrib = _aggregate_by_class(base_rows, shared_per_invoice)
+    class_contrib = _aggregate_by_class(base_rows, delivery_per_invoice, additive_per_invoice_type)
 
     if not class_contrib:
         return None, None

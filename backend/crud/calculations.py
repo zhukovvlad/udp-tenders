@@ -70,12 +70,23 @@ def _months_in_range(start: date, end: date) -> list[tuple[date, date]]:
     return months
 
 
-def _aggregate_by_class(base_rows, shared_per_invoice: dict[int, Decimal]) -> dict[int, dict]:
-    """Distribute shared costs across base classes per invoice using dimension-aware shares.
+def _aggregate_by_class(
+    base_rows,
+    delivery_per_invoice: dict[int, Decimal],
+    additive_per_invoice_type: dict[tuple[int, int], Decimal],
+) -> dict[int, dict]:
+    """Distribute shared costs across base classes per invoice (spec §5.4).
 
-    base_rows: rows with (invoice_id, material_class_id, mat_total, mat_vat, qty, dimension, symbol).
-      qty is the SUM of normalized_quantity; mat_total is SUM(amount) excl VAT.
-    Returns dict[class_id -> {mat_with_vat, shared_with_vat, qty, dimensions, symbol, invoice_ids}].
+    Delivery is invoice-wide (no direction on a delivery line). Additive-class
+    costs are scoped to base classes of the SAME material_type within the
+    invoice; an additive whose type has no base rows in the invoice is not
+    allocated to anyone (honest refusal, spec §5.4 edge case).
+
+    base_rows: rows with (invoice_id, material_class_id, mat_total, mat_vat,
+      qty, dimension, symbol, type_id). qty is SUM(normalized_quantity);
+      mat_total is SUM(amount) excl VAT.
+    Returns dict[class_id -> {mat_with_vat, shared_with_vat, qty, dimensions,
+      symbol, invoice_ids}].
     """
     from collections import defaultdict
 
@@ -85,10 +96,8 @@ def _aggregate_by_class(base_rows, shared_per_invoice: dict[int, Decimal]) -> di
 
     class_contrib: dict[int, dict] = {}
     for inv_id, rows in rows_by_invoice.items():
-        shares = compute_shared_shares(rows)            # one share per class_id
-        shared_total = shared_per_invoice.get(inv_id, Decimal("0"))
-        # Per-ROW accumulation: material, qty, dimensions (a class may have >1 row when
-        # it spans dimensions — these MUST sum across rows).
+        # Per-ROW accumulation: material, qty, dimensions (a class may have >1
+        # row when it spans dimensions — these MUST sum across rows).
         for row in rows:
             cid = row.material_class_id
             if cid not in class_contrib:
@@ -104,10 +113,22 @@ def _aggregate_by_class(base_rows, shared_per_invoice: dict[int, Decimal]) -> di
             class_contrib[cid]["qty"] += row.qty
             class_contrib[cid]["dimensions"].add(row.dimension)
             class_contrib[cid]["invoice_ids"].add(inv_id)
-        # Per-CLASS shared accrual: exactly ONCE per (invoice, class). Iterating over
-        # `rows` here would double-count a class that has >1 row (shares is per-class).
-        for cid, share in shares.items():
-            class_contrib[cid]["shared_with_vat"] += shared_total * share
+
+        # Delivery: invoice-wide shares (exactly ONCE per (invoice, class)).
+        delivery_total = delivery_per_invoice.get(inv_id, Decimal("0"))
+        if delivery_total:
+            for cid, share in compute_shared_shares(rows).items():
+                class_contrib[cid]["shared_with_vat"] += delivery_total * share
+
+        # Additive: shares within base rows of the SAME material_type.
+        rows_by_type: dict[int, list] = defaultdict(list)
+        for row in rows:
+            rows_by_type[row.type_id].append(row)
+        for type_id, type_rows in rows_by_type.items():
+            additive_total = additive_per_invoice_type.get((inv_id, type_id), Decimal("0"))
+            if additive_total:
+                for cid, share in compute_shared_shares(type_rows).items():
+                    class_contrib[cid]["shared_with_vat"] += additive_total * share
     return class_contrib
 
 
@@ -184,6 +205,7 @@ def compute_calculations(
                 func.sum(InvoiceItem.normalized_quantity).label("qty"),
                 UnitOfMeasure.dimension.label("dimension"),
                 UnitOfMeasure.symbol.label("symbol"),
+                MaterialClass.material_type_id.label("type_id"),
             )
             .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
             .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
@@ -197,6 +219,7 @@ def compute_calculations(
             .group_by(
                 InvoiceItem.invoice_id, InvoiceItem.material_class_id,
                 UnitOfMeasure.dimension, UnitOfMeasure.symbol,
+                MaterialClass.material_type_id,
             )
             .all()
         )
@@ -222,11 +245,13 @@ def compute_calculations(
         ):
             delivery_per_invoice[row.invoice_id] = row.total_with_vat
 
-        # Additives (material + calc_role=additive), normalized rows only
-        additive_per_invoice: dict[int, Decimal] = {}
+        # Additives (material + calc_role=additive) — grouped by (invoice, material_type)
+        # so each type's pool is allocated only to base rows of the same type (spec §5.4).
+        additive_per_invoice_type: dict[tuple[int, int], Decimal] = {}
         for row in (
             db.query(
                 InvoiceItem.invoice_id,
+                MaterialClass.material_type_id.label("type_id"),
                 func.sum(
                     InvoiceItem.amount + func.coalesce(
                         InvoiceItem.vat_amount,
@@ -241,17 +266,12 @@ def compute_calculations(
                 InvoiceItem.item_type == "material",
                 MaterialClass.calc_role == "additive",
             )
-            .group_by(InvoiceItem.invoice_id)
+            .group_by(InvoiceItem.invoice_id, MaterialClass.material_type_id)
             .all()
         ):
-            additive_per_invoice[row.invoice_id] = row.total_with_vat
+            additive_per_invoice_type[(row.invoice_id, row.type_id)] = row.total_with_vat
 
-        shared_per_invoice = {
-            inv_id: delivery_per_invoice.get(inv_id, Decimal("0")) + additive_per_invoice.get(inv_id, Decimal("0"))
-            for inv_id in set(delivery_per_invoice) | set(additive_per_invoice)
-        }
-
-        class_contrib = _aggregate_by_class(base_rows, shared_per_invoice)
+        class_contrib = _aggregate_by_class(base_rows, delivery_per_invoice, additive_per_invoice_type)
         class_ids = list(class_contrib.keys())
 
         missing_ids = [cid for cid in class_ids if cid not in class_name_map]
@@ -420,6 +440,7 @@ def compute_export_rows(
             func.max(InvoiceItem.raw_unit).label("raw_unit"),
             UnitOfMeasure.symbol.label("symbol"),
             UnitOfMeasure.dimension.label("dimension"),
+            MaterialClass.material_type_id.label("type_id"),
         )
         .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
         .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
@@ -433,6 +454,7 @@ def compute_export_rows(
         .group_by(
             InvoiceItem.invoice_id, InvoiceItem.material_class_id,
             UnitOfMeasure.symbol, UnitOfMeasure.dimension,
+            MaterialClass.material_type_id,
         )
         .all()
     )
@@ -441,14 +463,22 @@ def compute_export_rows(
 
     invoice_ids = list({r.invoice_id for r in base_rows})
 
-    # Dimension-aware share per (invoice, class)
+    # Dimension-aware share per (invoice, class) — delivery uses all rows (invoice-wide),
+    # additive uses only rows of the same material_type (spec §5.4).
     rows_by_invoice = defaultdict(list)
     for r in base_rows:
         rows_by_invoice[r.invoice_id].append(r)
-    share_by_inv_class: dict[tuple[int, int], Decimal] = {}
+    delivery_share_by_inv_class: dict[tuple[int, int], Decimal] = {}
+    additive_share_by_inv_class: dict[tuple[int, int], Decimal] = {}
     for inv_id, rows in rows_by_invoice.items():
         for cid, share in compute_shared_shares(rows).items():
-            share_by_inv_class[(inv_id, cid)] = share
+            delivery_share_by_inv_class[(inv_id, cid)] = share
+        rows_by_type = defaultdict(list)
+        for r in rows:
+            rows_by_type[r.type_id].append(r)
+        for type_rows in rows_by_type.values():
+            for cid, share in compute_shared_shares(type_rows).items():
+                additive_share_by_inv_class[(inv_id, cid)] = share  # класс в одном типе — ключ не конфликтует
 
     # Delivery per invoice (excl/with VAT)
     delivery_per_inv: dict[int, Decimal] = {}
@@ -470,11 +500,13 @@ def compute_export_rows(
         delivery_per_inv[r.invoice_id] = r.total_with_vat
         delivery_excl_per_inv[r.invoice_id] = r.excl_vat
 
-    additive_per_inv: dict[int, Decimal] = {}
-    additive_excl_per_inv: dict[int, Decimal] = {}
+    # Additives grouped by (invoice, material_type) — per-type pool for allocation (spec §5.4).
+    additive_per_inv_type: dict[tuple[int, int], Decimal] = {}
+    additive_excl_per_inv_type: dict[tuple[int, int], Decimal] = {}
     for r in (
         db.query(
             InvoiceItem.invoice_id,
+            MaterialClass.material_type_id.label("type_id"),
             func.sum(InvoiceItem.amount).label("excl_vat"),
             func.sum(InvoiceItem.amount + func.coalesce(
                 InvoiceItem.vat_amount,
@@ -488,11 +520,11 @@ def compute_export_rows(
             InvoiceItem.item_type == "material",
             MaterialClass.calc_role == "additive",
         )
-        .group_by(InvoiceItem.invoice_id)
+        .group_by(InvoiceItem.invoice_id, MaterialClass.material_type_id)
         .all()
     ):
-        additive_per_inv[r.invoice_id] = r.total_with_vat
-        additive_excl_per_inv[r.invoice_id] = r.excl_vat
+        additive_per_inv_type[(r.invoice_id, r.type_id)] = r.total_with_vat
+        additive_excl_per_inv_type[(r.invoice_id, r.type_id)] = r.excl_vat
 
     class_ids = list({r.material_class_id for r in base_rows})
     class_name_map = {
@@ -536,12 +568,13 @@ def compute_export_rows(
         if qty is None or qty <= 0:
             continue
 
-        share = share_by_inv_class.get((inv_id, cid), Decimal("0"))
+        delivery_share = delivery_share_by_inv_class.get((inv_id, cid), Decimal("0"))
+        additive_share = additive_share_by_inv_class.get((inv_id, cid), Decimal("0"))
         mat_with_vat = br.mat_total + br.mat_vat
-        delivery_alloc = delivery_per_inv.get(inv_id, Decimal("0")) * share
-        additive_alloc = additive_per_inv.get(inv_id, Decimal("0")) * share
-        delivery_excl_alloc = delivery_excl_per_inv.get(inv_id, Decimal("0")) * share
-        additive_excl_alloc = additive_excl_per_inv.get(inv_id, Decimal("0")) * share
+        delivery_alloc = delivery_per_inv.get(inv_id, Decimal("0")) * delivery_share
+        additive_alloc = additive_per_inv_type.get((inv_id, br.type_id), Decimal("0")) * additive_share
+        delivery_excl_alloc = delivery_excl_per_inv.get(inv_id, Decimal("0")) * delivery_share
+        additive_excl_alloc = additive_excl_per_inv_type.get((inv_id, br.type_id), Decimal("0")) * additive_share
 
         mat_per_unit_excl_vat = br.mat_total / qty
         mat_per_unit = mat_with_vat / qty
