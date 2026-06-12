@@ -204,15 +204,21 @@ function AllDirectionsSummaryView({
               ...(summaryData.other_total > 0 ? [{ label: "Прочее", value: formatMoney(summaryData.other_total) }] : []),
             ]}
           />
-          <KpiCard
-            label="Объёмы"
-            values={summaryData.directions
+          {(() => {
+            const volValues = summaryData.directions
               .filter((d) => d.volume !== null)
               .map((d) => ({
                 label: d.name, // именительный падеж — без склонений (масштабируется на кирпич и далее)
                 value: `${formatNumber(d.volume!)} ${d.volume_unit}`,
-              }))}
-          />
+              }));
+            return (
+              <KpiCard
+                label="Объёмы"
+                values={volValues.length > 0 ? volValues : undefined}
+                value={volValues.length === 0 ? "—" : undefined}
+              />
+            );
+          })()}
           <KpiCard
             label="Счетов"
             value={formatNumber(summaryData.invoice_count)}
@@ -625,7 +631,7 @@ export default function ProjectPage() {
                 variant="secondary"
                 leftIcon={<Download size={14} />}
                 onClick={handleExport}
-                disabled={isExporting}
+                disabled={isExporting || direction === undefined}
               >
                 {isExporting ? "Формирую..." : "Экспорт"}
               </Button>
