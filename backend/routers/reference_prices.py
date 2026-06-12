@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from crud.projects import create_reference_price, delete_reference_price, get_reference_prices, update_reference_price
 from database import get_db
-from models import MaterialClass, UnitOfMeasure
+from models import MaterialClass, ReferencePrice, UnitOfMeasure
 from routers.common import resolve_direction_type
 
 router = APIRouter()
@@ -92,6 +92,16 @@ class ReferencePriceUpdate(BaseModel):
 
 @router.patch("/{rp_id}")
 def update_reference_price_route(rp_id: int, data: ReferencePriceUpdate, db: Session = Depends(get_db)):
+    existing = db.query(ReferencePrice).filter(ReferencePrice.id == rp_id).first()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Эталон не найден")
+    # §5.3 defense-in-depth: legacy-строка типа «Прочее» (POST уже заблокирован)
+    # не должна оставаться редактируемой.
+    if existing.material_class.material_type.code == "other":
+        raise HTTPException(
+            status_code=422,
+            detail="Классам типа «Прочее» базовая цена не назначается (направления не образует)",
+        )
     fields = data.model_fields_set
     kwargs = {k: getattr(data, k) for k in ("price", "period_start", "period_end", "source") if k in fields}
     rp = update_reference_price(db, rp_id, **kwargs)

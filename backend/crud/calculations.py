@@ -369,11 +369,14 @@ def compute_calculations(
     return results
 
 
-def full_deviation_from_rows(rows: list[dict]) -> float | None:
+def full_deviation_from_rows(rows: list[dict]) -> Decimal | None:
     """Total deviation over precomputed compute_calculations rows.
-    Returns None if no reference prices produced a deviation (not 0.0)."""
+    Returns None if no reference prices produced a deviation (not 0.0).
+    Слагаемые уже money_round-нуты до копеек, поэтому итог точен и
+    money_round здесь — соблюдение конвенции, не смена значения."""
+    from finance import money_round  # noqa: PLC0415
     amounts = [r["deviation_amount"] for r in rows if r["deviation_amount"] is not None]
-    return round(sum(amounts), 2) if amounts else None
+    return money_round(sum(amounts, Decimal("0")), 2) if amounts else None
 
 
 def compute_full_deviation(
@@ -382,7 +385,7 @@ def compute_full_deviation(
     period_start: date,
     period_end: date,
     excluded_supplier_ids: set[int] | None = None,
-) -> float | None:
+) -> Decimal | None:
     """Compute total deviation_amount for a project over [period_start, period_end].
     Delegates to compute_calculations() — единый источник истины.
     Returns None if no reference prices are available for any class (not 0.0)."""

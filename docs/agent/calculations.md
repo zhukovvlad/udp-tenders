@@ -36,7 +36,7 @@ deviation_amount = (avg_price − ref_price) × qty
 
 **Направления (`direction`):**
 
-`direction` в HTTP API = код `material_types` (`concrete`/`rebar`/...). Резолв и валидация — `routers/common.py::resolve_direction_type(db, direction)`: `None` → без фильтра, неизвестный код → 422. Параметр принимают: `/dashboard/calculations`, `/dashboard/invoices`, `/dashboard/monthly-summary`, `/projects/{id}/suppliers`, `/reference-prices`, `/export/excel`.
+`direction` в HTTP API = код `material_types` (`concrete`/`rebar`/...). Резолв и валидация — `routers/common.py::resolve_direction_type(db, direction)`: `None` → без фильтра, неизвестный код → 422, `other` → тоже 422 (тип `other` направлением не является — ADR #9). Параметр принимают: `/dashboard/calculations`, `/dashboard/invoices`, `/dashboard/monthly-summary`, `/projects/{id}/suppliers`, `/reference-prices`, `/export/excel`.
 
 **КРИТИЧНО (ADR #2):** фильтр направления в `compute_calculations`/`compute_export_rows` применяется строго **на выходе** (как `material_class_id`) — знаменатели разноски всегда считаются по полному счёту, иначе avg_price класса зависел бы от выбранного режима. Тест-страж: `test_calculations_direction_filter_does_not_change_class_rows`. Каждая строка calculations несёт поле `direction` (код типа класса).
 

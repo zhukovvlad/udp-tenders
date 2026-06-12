@@ -403,3 +403,24 @@ def test_reference_price_for_other_type_class_rejected(client, factories):
     })
     assert resp.status_code == 422
     assert "Прочее" in resp.json()["detail"]
+
+
+def test_direction_other_is_not_a_direction_422(client, factories):
+    """ADR #9: тип other направлением не является — ?direction=other → 422."""
+    project = factories.ProjectFactory.create()
+    base = f"/api/dashboard/calculations?project_id={project.id}"
+    resp = client.get(base + "&direction=other")
+    assert resp.status_code == 422
+    assert "Прочее" in resp.json()["detail"]
+
+
+def test_reference_price_patch_for_other_type_class_rejected(client, factories):
+    """§5.3 defense-in-depth: PATCH legacy-строки типа other → 422 (POST уже заблокирован)."""
+    project = factories.ProjectFactory.create()
+    misc = factories.MaterialClassFactory.create(material_type_code="other", name="Крепёж")
+    from tests.factories import _unit_id
+    rp = factories.ReferencePriceFactory.create(
+        project=project, material_class=misc, unit_id=_unit_id("PCS"), price=100.0)
+    resp = client.patch(f"/api/reference-prices/{rp.id}", json={"price": 200})
+    assert resp.status_code == 422
+    assert "Прочее" in resp.json()["detail"]
