@@ -449,7 +449,7 @@ def export_excel(
     info_lines = [
         _safe_str(project.name),
         _safe_str(project.contract_number or ""),
-        *([f"Направление: {mt.name}"] if mt else []),
+        *([_safe_str(f"Направление: {mt.name}")] if mt else []),
         f"Период: {display_start.strftime('%d.%m.%Y')} — {display_end.strftime('%d.%m.%Y')}",
         f"Сформировано: {date.today().strftime('%d.%m.%Y')}",
     ]
@@ -460,7 +460,7 @@ def export_excel(
         _font(color="FFFFFF", size=10),
         _font(color="9DC3E6", size=9),
     ]
-    info_heights = [24, 16, *([ 16] if mt else []), 16, 14]
+    info_heights = [24, 16, *([16] if mt else []), 16, 14]
 
     for text, font, height in zip(info_lines, info_fonts, info_heights, strict=True):
         ws.merge_cells(
