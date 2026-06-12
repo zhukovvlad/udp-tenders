@@ -15,7 +15,8 @@ from crud.compensation_corridors import (
 from crud.projects import create_project, delete_project, get_projects, update_project
 from crud.supplier_exclusions import get_excluded_supplier_ids, set_supplier_excluded
 from database import get_db
-from models import Document, Invoice, MaterialClass, MaterialType, Project, Supplier
+from models import Document, Invoice, InvoiceItem, MaterialClass, MaterialType, Project, Supplier
+from routers.dashboard import _resolve_direction_type
 
 router = APIRouter()
 
@@ -70,11 +71,12 @@ def delete_project_route(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{project_id}/suppliers")
-def list_project_suppliers(project_id: int, db: Session = Depends(get_db)):
+def list_project_suppliers(project_id: int, direction: str | None = None, db: Session = Depends(get_db)):
     """Список поставщиков проекта с кол-вом счетов. Инвойсы без supplier_id не включаются."""
     if not db.query(Project).filter(Project.id == project_id).first():
         raise HTTPException(status_code=404, detail="Проект не найден")
-    rows = (
+    mt = _resolve_direction_type(db, direction)
+    q = (
         db.query(
             Supplier.id,
             Supplier.name,
@@ -84,7 +86,21 @@ def list_project_suppliers(project_id: int, db: Session = Depends(get_db)):
         .join(Invoice, Invoice.supplier_id == Supplier.id)
         .join(Document, Invoice.document_id == Document.id)
         .filter(Document.project_id == project_id)
-        .group_by(Supplier.id, Supplier.name, Supplier.inn)
+    )
+    if mt is not None:
+        direction_exists = (
+            db.query(InvoiceItem.id)
+            .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
+            .filter(
+                InvoiceItem.invoice_id == Invoice.id,
+                InvoiceItem.item_type == "material",
+                MaterialClass.material_type_id == mt.id,
+            )
+            .exists()
+        )
+        q = q.filter(direction_exists)
+    rows = (
+        q.group_by(Supplier.id, Supplier.name, Supplier.inn)
         .order_by(Supplier.name)
         .all()
     )

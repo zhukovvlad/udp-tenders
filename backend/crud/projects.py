@@ -2,7 +2,7 @@ from datetime import date
 
 from sqlalchemy.orm import Session, joinedload
 
-from models import MaterialClass, Project, ReferencePrice
+from models import MaterialClass, MaterialType, Project, ReferencePrice
 
 # Sentinel: field was not provided in the update payload (differs from explicit None)
 _UNSET = object()
@@ -46,7 +46,7 @@ def delete_project(db: Session, project_id: int):
 
 # --- Reference Prices ---
 
-def get_reference_prices(db: Session, project_id: int = None, material_class_id: int = None):
+def get_reference_prices(db: Session, project_id: int = None, material_class_id: int = None, material_type_code: str = None):
     q = db.query(ReferencePrice).options(
         joinedload(ReferencePrice.project),
         joinedload(ReferencePrice.material_class).joinedload(MaterialClass.material_type),
@@ -56,6 +56,12 @@ def get_reference_prices(db: Session, project_id: int = None, material_class_id:
         q = q.filter(ReferencePrice.project_id == project_id)
     if material_class_id is not None:
         q = q.filter(ReferencePrice.material_class_id == material_class_id)
+    if material_type_code is not None:
+        q = (
+            q.join(ReferencePrice.material_class)
+            .join(MaterialClass.material_type)
+            .filter(MaterialType.code == material_type_code)
+        )
     return q.order_by(ReferencePrice.period_start.desc()).all()
 
 

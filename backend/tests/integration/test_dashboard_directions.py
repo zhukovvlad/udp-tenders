@@ -350,3 +350,56 @@ def test_invoices_unknown_direction_422(client, factories):
     project = factories.ProjectFactory.create()
     assert client.get(f"/api/dashboard/invoices?project_id={project.id}&direction=bricks").status_code == 422
     assert client.get(f"/api/dashboard/monthly-summary?project_id={project.id}&direction=bricks").status_code == 422
+
+
+def test_project_suppliers_direction_scoped(client, factories):
+    project = factories.ProjectFactory.create()
+    concrete = factories.MaterialClassFactory.create(name="В25")
+    rebar = _rebar_class(factories)
+    sup_a = factories.SupplierFactory.create(name="БетонТорг")
+    sup_b = factories.SupplierFactory.create(name="МеталлБаза")
+    doc = factories.DocumentFactory.create(project=project)
+    inv_a = factories.InvoiceFactory.create(document=doc, supplier_id=sup_a.id)
+    factories.InvoiceItemFactory.create(invoice=inv_a, material_class=concrete,
+                                        item_type="material", quantity=5, amount=40000)
+    inv_b = factories.InvoiceFactory.create(document=doc, supplier_id=sup_b.id)
+    _rebar_item(factories, inv_b, rebar, qty=2, unit_price=10000)
+
+    url = f"/api/projects/{project.id}/suppliers"
+    assert {s["name"] for s in client.get(url).json()} == {"БетонТорг", "МеталлБаза"}
+    concrete_rows = client.get(url + "?direction=concrete").json()
+    assert [s["name"] for s in concrete_rows] == ["БетонТорг"]
+    assert concrete_rows[0]["invoice_count"] == 1
+
+
+def test_project_suppliers_unknown_direction_422(client, factories):
+    project = factories.ProjectFactory.create()
+    assert client.get(f"/api/projects/{project.id}/suppliers?direction=bricks").status_code == 422
+
+
+def test_reference_prices_direction_filter(client, factories):
+    project = factories.ProjectFactory.create()
+    concrete = factories.MaterialClassFactory.create(name="В25")
+    rebar = _rebar_class(factories)
+    factories.ReferencePriceFactory.create(project=project, material_class=concrete)
+    from tests.factories import _unit_id
+    factories.ReferencePriceFactory.create(
+        project=project, material_class=rebar, unit_id=_unit_id("TON"), price=10000.0)
+
+    rows = client.get(f"/api/reference-prices?project_id={project.id}&direction=rebar").json()
+    assert [r["material_type"] for r in rows] == ["rebar"]
+    assert client.get(f"/api/reference-prices?project_id={project.id}&direction=bricks").status_code == 422
+
+
+def test_reference_price_for_other_type_class_rejected(client, factories):
+    """§5.3: классам типа other базовая цена не назначается → 422."""
+    project = factories.ProjectFactory.create()
+    misc = factories.MaterialClassFactory.create(material_type_code="other", name="Крепёж")
+    from tests.factories import _unit_id
+    resp = client.post("/api/reference-prices", json={
+        "project_id": project.id, "material_class_id": misc.id,
+        "unit_id": _unit_id("PCS"), "price": 100,
+        "period_start": "2026-01-01", "period_end": "2026-12-31",
+    })
+    assert resp.status_code == 422
+    assert "Прочее" in resp.json()["detail"]

@@ -36,12 +36,14 @@ class TestReferencePriceUnit:
         })
         assert resp.status_code == 422
 
-    def test_other_type_allows_any_base_unit(self, client, factories, db_session):
+    def test_other_type_class_rejected(self, client, factories, db_session):
+        """§5.3: классам типа other базовая цена не назначается (направления не образует)."""
         project = factories.ProjectFactory.create()
         mc = factories.MaterialClassFactory.create(material_type_code="other", name="Песок")
         resp = client.post("/api/reference-prices", json={
             "project_id": project.id, "material_class_id": mc.id,
-            "unit_id": _unit_id(db_session, "TON"),  # default_unit is NULL → skip dim check
+            "unit_id": _unit_id(db_session, "TON"),
             "price": 500, "period_start": "2026-01-01", "period_end": "2026-12-31",
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 422
+        assert "Прочее" in resp.json()["detail"]
