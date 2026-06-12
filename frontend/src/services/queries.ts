@@ -441,7 +441,7 @@ export function useProjectSuppliers(
 ) {
   return useQuery({
     queryKey: projectId ? qk.projectSuppliers(projectId, direction) : ["project-suppliers-disabled"],
-    queryFn: () => projectsApi.getSuppliers(projectId!),
+    queryFn: () => projectsApi.getSuppliers(projectId!, direction),
     enabled: projectId !== null && (options?.enabled ?? true),
   });
 }
@@ -479,7 +479,7 @@ export function useToggleSupplierExclusion(projectId: ID | null) {
       qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
       qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
       qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
-      qc.invalidateQueries({ queryKey: qk.dashboard.monthly(projectId) });
+      qc.invalidateQueries({ queryKey: ["dashboard", "monthly", projectId] });
     },
   });
 }
