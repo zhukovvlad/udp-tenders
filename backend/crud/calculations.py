@@ -348,7 +348,7 @@ def compute_calculations(
                 "project_id": project_id,
                 "material_class_id": cid,
                 "material_class_name": class_name_map.get(cid, "?"),
-                "direction": type_code_map.get(class_type_id_map.get(cid), "other"),
+                "direction": type_code_map[class_type_id_map[cid]],
                 "period_start": month_start,
                 "period_end": month_end,
                 "material_total": money_round(contrib["mat_with_vat"], 2),
