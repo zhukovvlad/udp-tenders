@@ -27,6 +27,7 @@ function makeCalc(
     delivery_total: 50000,
     total_qty: 100,
     invoice_count: 3,
+    direction: "concrete",
     ...overrides,
   };
 }

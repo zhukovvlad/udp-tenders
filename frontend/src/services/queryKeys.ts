@@ -4,10 +4,15 @@ export const qk = {
   projects: { all: ["projects"] as const },
   materialClasses: { all: ["material-classes"] as const },
   referencePrices: {
-    all: (projectId?: ID, materialClassId?: ID) => {
+    all: (projectId?: ID, materialClassId?: ID, direction?: string) => {
       const base = ["reference-prices"] as const;
-      if (!projectId && !materialClassId) return base;
-      return [...base, ...(projectId ? [projectId] : []), ...(materialClassId ? [{ materialClassId }] : [])] as const;
+      if (!projectId && !materialClassId && !direction) return base;
+      return [
+        ...base,
+        ...(projectId ? [projectId] : []),
+        ...(materialClassId ? [{ materialClassId }] : []),
+        direction ?? "all",
+      ] as const;
     },
   },
   documents: {
@@ -17,11 +22,13 @@ export const qk = {
   },
   dashboard: {
     summary: (projectId: ID) => ["dashboard", "summary", projectId] as const,
-    invoices: (projectId: ID) => ["dashboard", "invoices", projectId] as const,
-    calculations: (projectId: ID, periodStart?: string, periodEnd?: string) =>
-      ["dashboard", "calculations", projectId, periodStart, periodEnd] as const,
+    invoices: (projectId: ID, direction?: string) =>
+      ["dashboard", "invoices", projectId, direction ?? "all"] as const,
+    calculations: (projectId: ID, periodStart?: string, periodEnd?: string, direction?: string) =>
+      ["dashboard", "calculations", projectId, periodStart, periodEnd, direction ?? "all"] as const,
     calculationsAll: ["dashboard", "calculations", "all"] as const,
-    monthly: (projectId: ID) => ["dashboard", "monthly", projectId] as const,
+    monthly: (projectId: ID, direction?: string) =>
+      ["dashboard", "monthly", projectId, direction ?? "all"] as const,
   },
   suppliers: {
     all: ["suppliers"] as const,
@@ -39,7 +46,8 @@ export const qk = {
     users: (q?: string, page?: number, pageSize?: number) =>
       ["admin", "users", q ?? "", page ?? 1, pageSize ?? 20] as const,
   },
-  projectSuppliers: (projectId: ID) => ["project-suppliers", projectId] as const,
+  projectSuppliers: (projectId: ID, direction?: string) =>
+    ["project-suppliers", projectId, direction ?? "all"] as const,
   supplierExclusions: (projectId: ID) => ["supplier-exclusions", projectId] as const,
   corridors: (projectId: ID) => ["corridors", projectId] as const,
   units: { all: ["units"] as const },

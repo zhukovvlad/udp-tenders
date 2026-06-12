@@ -122,12 +122,12 @@ export function useMaterialTypes() {
 // ========== Reference prices ==========
 export function useReferencePrices(
   projectId?: ID,
-  options?: { enabled?: boolean; materialClassId?: ID },
+  options?: { enabled?: boolean; materialClassId?: ID; direction?: string },
 ) {
-  const { enabled, materialClassId } = options ?? {};
+  const { enabled, materialClassId, direction } = options ?? {};
   return useQuery({
-    queryKey: qk.referencePrices.all(projectId, materialClassId),
-    queryFn: () => referencePricesApi.list(projectId, materialClassId),
+    queryKey: qk.referencePrices.all(projectId, materialClassId, direction),
+    queryFn: () => referencePricesApi.list(projectId, materialClassId, direction),
     enabled,
   });
 }
@@ -280,11 +280,15 @@ export function useDashboardSummary(projectId: ID | null) {
   });
 }
 
-export function useDashboardInvoices(projectId: ID | null) {
+export function useDashboardInvoices(
+  projectId: ID | null,
+  direction?: string,
+  options?: { enabled?: boolean },
+) {
   return useQuery({
-    queryKey: projectId ? qk.dashboard.invoices(projectId) : ["dashboard", "invoices", "none"],
-    queryFn: () => dashboardApi.invoices(projectId as ID),
-    enabled: projectId !== null,
+    queryKey: projectId ? qk.dashboard.invoices(projectId, direction) : ["dashboard", "invoices", "none"],
+    queryFn: () => dashboardApi.invoices(projectId as ID, direction),
+    enabled: projectId !== null && (options?.enabled ?? true),
   });
 }
 
@@ -292,21 +296,27 @@ export function useDashboardCalculations(
   projectId: ID | null,
   periodStart?: string,
   periodEnd?: string,
+  direction?: string,
+  options?: { enabled?: boolean },
 ) {
   return useQuery({
     queryKey: projectId
-      ? qk.dashboard.calculations(projectId, periodStart, periodEnd)
+      ? qk.dashboard.calculations(projectId, periodStart, periodEnd, direction)
       : ["dashboard", "calculations", "none"],
-    queryFn: () => dashboardApi.calculations(projectId as ID, periodStart, periodEnd),
-    enabled: projectId !== null,
+    queryFn: () => dashboardApi.calculations(projectId as ID, periodStart, periodEnd, direction),
+    enabled: projectId !== null && (options?.enabled ?? true),
   });
 }
 
-export function useDashboardMonthlySummary(projectId: ID | null) {
+export function useDashboardMonthlySummary(
+  projectId: ID | null,
+  direction?: string,
+  options?: { enabled?: boolean },
+) {
   return useQuery({
-    queryKey: projectId ? qk.dashboard.monthly(projectId) : ["dashboard", "monthly", "none"],
-    queryFn: () => dashboardApi.monthlySummary(projectId as ID),
-    enabled: projectId !== null,
+    queryKey: projectId ? qk.dashboard.monthly(projectId, direction) : ["dashboard", "monthly", "none"],
+    queryFn: () => dashboardApi.monthlySummary(projectId as ID, direction),
+    enabled: projectId !== null && (options?.enabled ?? true),
   });
 }
 
@@ -424,11 +434,15 @@ export function useMergeSupplier() {
 
 // ========== Project Suppliers & Exclusions ==========
 
-export function useProjectSuppliers(projectId: ID | null) {
+export function useProjectSuppliers(
+  projectId: ID | null,
+  direction?: string,
+  options?: { enabled?: boolean },
+) {
   return useQuery({
-    queryKey: projectId ? qk.projectSuppliers(projectId) : ["project-suppliers-disabled"],
+    queryKey: projectId ? qk.projectSuppliers(projectId, direction) : ["project-suppliers-disabled"],
     queryFn: () => projectsApi.getSuppliers(projectId!),
-    enabled: projectId !== null,
+    enabled: projectId !== null && (options?.enabled ?? true),
   });
 }
 
