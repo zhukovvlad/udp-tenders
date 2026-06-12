@@ -493,13 +493,18 @@ export default function ProjectPage() {
         </div>
       )}
 
-      {/* Контент: высота ряда табов зарезервирована во всех режимах (§3.1) */}
-      <div className="mt-6 min-h-9">
+      {/* Контент: слот фиксированной высоты (h-8 TabsList + gap-2) всегда рендерится,
+           в tabs-режиме содержит TabsList, в остальных — невидимый резерв (§3.1) */}
+      <div className="mt-6">
         {direction === undefined ? (
-          <div className="space-y-4">
-            <Skeleton className="h-8 w-2/3" />
-            <Skeleton className="h-[120px]" />
-          </div>
+          <>
+            {/* Tab-bar slot placeholder — matches TabsList h-8 + gap-2 below it */}
+            <div aria-hidden="true" className="h-10" />
+            <div className="mt-6 space-y-4">
+              <Skeleton className="h-8 w-2/3" />
+              <Skeleton className="h-[120px]" />
+            </div>
+          </>
         ) : isLegacy || scopedDirection ? (
         <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="project-page-tabs">
           <TabsList variant="line" data-testid="project-page-tabs-list">
@@ -1232,30 +1237,37 @@ export default function ProjectPage() {
         </Tabs>
         ) : view === "errors" ? (
           /* ────────── «Все» → view=errors: ошибки объекта (§3.2 п.2) ────────── */
-          <div className="space-y-4" data-testid="project-errors-view">
-            <div className="flex items-center justify-between">
-              <h2 className="font-serif text-lg">Ошибки объекта</h2>
-              <button
-                type="button"
-                className="text-sm text-accent-text hover:underline"
-                onClick={() =>
-                  setSearchParams((p) => {
-                    const n = new URLSearchParams(p);
-                    n.delete("view");
-                    return n;
-                  })
-                }
-              >
-                ← к сводке
-              </button>
+          <>
+            {/* Tab-bar slot placeholder — matches TabsList h-8 + gap-2 below it */}
+            <div aria-hidden="true" className="h-10" />
+            <div className="mt-6 space-y-4" data-testid="project-errors-view">
+              <div className="flex items-center justify-between">
+                <h2 className="font-serif text-lg">Ошибки объекта</h2>
+                <button
+                  type="button"
+                  className="text-sm text-accent-text hover:underline"
+                  onClick={() =>
+                    setSearchParams((p) => {
+                      const n = new URLSearchParams(p);
+                      n.delete("view");
+                      return n;
+                    })
+                  }
+                >
+                  ← к сводке
+                </button>
+              </div>
+              {docsQ.isLoading
+                ? <Skeleton className="h-32" />
+                : <ErrorDocsTab docs={docsQ.data ?? []} />}
             </div>
-            {docsQ.isLoading
-              ? <Skeleton className="h-32" />
-              : <ErrorDocsTab docs={docsQ.data ?? []} />}
-          </div>
+          </>
         ) : (
           /* ────────── Сводка «Все направления» (§3.2) ────────── */
-          <div className="space-y-6">
+          <>
+            {/* Tab-bar slot placeholder — matches TabsList h-8 + gap-2 below it */}
+            <div aria-hidden="true" className="h-10" />
+            <div className="mt-6 space-y-6">
             {/* KPI ×4 */}
             {dirAll && (() => {
               const allDev = deviationKpi(dirAll.full_deviation_amount);
@@ -1347,6 +1359,7 @@ export default function ProjectPage() {
               onPeriodReset={() => { setPeriodStart(""); setPeriodEnd(""); }}
             />
           </div>
+          </>
         )}
       </div>
     </div>
