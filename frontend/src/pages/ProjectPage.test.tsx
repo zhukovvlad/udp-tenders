@@ -973,6 +973,7 @@ describe("ProjectPage", () => {
       renderProject("1", "?direction=trash");
       await screen.findByTestId("direction-switcher");
       expect(screen.getByTestId("direction-all")).toHaveAttribute("aria-selected", "true");
+      await waitFor(() => expect(seen.length).toBeGreaterThan(0));
       expect(seen).not.toContain("trash"); // гейт §7.2: запрос не ушёл с мусором
     });
 

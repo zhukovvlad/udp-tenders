@@ -75,6 +75,8 @@ import { formatDate, formatMoney, formatNumber, formatPercent, pluralRu } from "
 import { MONTH_NAMES_RU } from "@/lib/constants";
 import type { ID } from "@/types/common";
 import type { ReferencePrice } from "@/types/referencePrice";
+import type { DashboardSummary, DashboardCalculation } from "@/types/dashboard";
+import type { DocumentSummary } from "@/types/invoice";
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -85,13 +87,13 @@ import type { ReferencePrice } from "@/types/referencePrice";
  * направления (direction.overpayment). */
 function deviationKpi(amount: number | null | undefined) {
   return {
-    kpiLabel:
+    label:
       amount != null
         ? amount > 0
           ? "Переплата за весь период"
           : "Экономия за весь период"
         : "Отклонение (весь период)",
-    label:
+    value:
       amount != null
         ? amount > 0
           ? `+${formatMoney(amount)}`
@@ -110,6 +112,169 @@ function deviationKpi(amount: number | null | undefined) {
           : "text-accent-text"
         : "",
   };
+}
+
+// Резерв высоты строки вкладок: высота = TabsList h-8 + gap-2 контейнера Tabs (§3.1,
+// чтобы контент не прыгал между режимами с табами и без них).
+function TabBarSlot() {
+  return <div aria-hidden className="h-10" />;
+}
+
+// ─────────────────────────────────────────────
+// File-local sub-views
+// ─────────────────────────────────────────────
+
+/** «Все» → view=errors: ошибки объекта (§3.2 п.2) */
+function ErrorsView({
+  isLoading,
+  docs,
+  onBack,
+}: {
+  isLoading: boolean;
+  docs: DocumentSummary[];
+  onBack: () => void;
+}) {
+  return (
+    <>
+      <TabBarSlot />
+      <div className="mt-6 space-y-4" data-testid="project-errors-view">
+        <div className="flex items-center justify-between">
+          <h2 className="font-serif text-lg">Ошибки объекта</h2>
+          <button
+            type="button"
+            className="text-sm text-accent-text hover:underline"
+            onClick={onBack}
+          >
+            ← к сводке
+          </button>
+        </div>
+        {isLoading
+          ? <Skeleton className="h-32" />
+          : <ErrorDocsTab docs={docs} />}
+      </div>
+    </>
+  );
+}
+
+/** Сводка «Все направления» (§3.2) */
+function AllDirectionsSummaryView({
+  summaryData,
+  errorDocCount,
+  calculations,
+  onOpenErrors,
+  changeDirection,
+  periodStart,
+  periodEnd,
+  dataStart,
+  dataEnd,
+  displayStart,
+  displayEnd,
+  onPeriodStartChange,
+  onPeriodEndChange,
+  onPeriodReset,
+}: {
+  summaryData: DashboardSummary;
+  errorDocCount: number;
+  calculations: DashboardCalculation[];
+  onOpenErrors: () => void;
+  changeDirection: (code: string) => void;
+  periodStart: string;
+  periodEnd: string;
+  dataStart: string;
+  dataEnd: string;
+  displayStart: string;
+  displayEnd: string;
+  onPeriodStartChange: (v: string) => void;
+  onPeriodEndChange: (v: string) => void;
+  onPeriodReset: () => void;
+}) {
+  const allDev = deviationKpi(summaryData.full_deviation_amount);
+  return (
+    <>
+      <TabBarSlot />
+      <div className="mt-6 space-y-6">
+        {/* KPI ×4 */}
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <KpiCard
+            label="Оборот, ₽ с НДС"
+            value={formatMoney(summaryData.total_amount)}
+            breakdown={[
+              ...summaryData.directions.map((d) => ({ label: d.name, value: formatMoney(d.turnover) })),
+              ...(summaryData.delivery_total > 0 ? [{ label: "Доставка", value: formatMoney(summaryData.delivery_total) }] : []),
+              ...(summaryData.other_total > 0 ? [{ label: "Прочее", value: formatMoney(summaryData.other_total) }] : []),
+            ]}
+          />
+          <KpiCard
+            label="Объёмы"
+            values={summaryData.directions
+              .filter((d) => d.volume !== null)
+              .map((d) => ({
+                label: d.name, // именительный падеж — без склонений (масштабируется на кирпич и далее)
+                value: `${formatNumber(d.volume!)} ${d.volume_unit}`,
+              }))}
+          />
+          <KpiCard
+            label="Счетов"
+            value={formatNumber(summaryData.invoice_count)}
+            breakdown={[ /* breakdown, не suffix: длинная разбивка в строку у числа теснится */
+              ...summaryData.directions.map((d) => ({ label: d.name, value: formatNumber(d.invoice_count) })),
+              ...(summaryData.mixed_invoice_count > 0 ? [{ label: "Смешанные", value: formatNumber(summaryData.mixed_invoice_count) }] : []),
+              ...(summaryData.other_invoice_count > 0 ? [{ label: "Прочие", value: formatNumber(summaryData.other_invoice_count) }] : []),
+            ]}
+          />
+          <KpiCard
+            label={allDev.label}
+            value={allDev.value}
+            className={allDev.className}
+            valueClassName={allDev.valueClassName}
+            breakdown={summaryData.directions
+              .filter((d) => d.overpayment !== null)
+              .map((d) => ({ label: d.name, value: formatMoney(d.overpayment!) }))}
+          />
+        </div>
+
+        {/* Алерт нераспознанных (§3.2 п.2) — источник тот же, что бейдж «Ошибки» */}
+        {errorDocCount > 0 && (
+          <button
+            type="button"
+            data-testid="unrecognized-alert"
+            onClick={onOpenErrors}
+            className="flex w-full items-center justify-between rounded-lg border border-danger-border bg-danger-soft px-4 py-2.5 text-sm text-danger-text hover:opacity-90"
+          >
+            <span>
+              {errorDocCount} документ{pluralRu(errorDocCount)}{" "}
+              {pluralRu(errorDocCount) === ""
+                ? "не распознан и не учтён"
+                : "не распознаны и не учтены"}{" "}
+              в цифрах
+            </span>
+            <span>Разобрать →</span>
+          </button>
+        )}
+
+        {/* Отклонения секциями по направлениям, top-5 (§3.2 п.3) */}
+        <DeviationChart
+          calculations={calculations}
+          periodFilterActive
+          topN={5}
+          groups={summaryData.directions.map((d) => ({
+            code: d.code,
+            name: d.name,
+            onOpen: () => changeDirection(d.code),
+          }))}
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          dataStart={dataStart}
+          dataEnd={dataEnd}
+          displayStart={displayStart}
+          displayEnd={displayEnd}
+          onPeriodStartChange={onPeriodStartChange}
+          onPeriodEndChange={onPeriodEndChange}
+          onPeriodReset={onPeriodReset}
+        />
+      </div>
+    </>
+  );
 }
 
 // ─────────────────────────────────────────────
@@ -294,7 +459,7 @@ export default function ProjectPage() {
   const getDefaultUnitId = useDefaultUnitId();
 
   // ── derived ──
-  const dirAll = summaryQ.data; // shorthand для сводки «Все» в JSX
+  const summaryData = summaryQ.data;
   const calculations = useMemo(() => calculationsQ.data ?? [], [calculationsQ.data]);
   const invoices = useMemo(() => invoicesQ.data ?? [], [invoicesQ.data]);
   const referencePrices = referencePricesQ.data ?? [];
@@ -498,15 +663,14 @@ export default function ProjectPage() {
       <div className="mt-6">
         {direction === undefined ? (
           <>
-            {/* Tab-bar slot placeholder — matches TabsList h-8 + gap-2 below it */}
-            <div aria-hidden="true" className="h-10" />
+            <TabBarSlot />
             <div className="mt-6 space-y-4">
               <Skeleton className="h-8 w-2/3" />
               <Skeleton className="h-[120px]" />
             </div>
           </>
         ) : isLegacy || scopedDirection ? (
-        <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="project-page-tabs">
+          <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="project-page-tabs">
           <TabsList variant="line" data-testid="project-page-tabs-list">
             <TabsTrigger value="overview" data-testid="project-tab-overview">Обзор</TabsTrigger>
             <TabsTrigger value="invoices" data-testid="project-tab-invoices">
@@ -568,8 +732,8 @@ export default function ProjectPage() {
                         suffix={dir.mixed_invoice_count > 0 ? `· ${dir.mixed_invoice_count} смешанных` : undefined}
                       />
                       <KpiCard
-                        label={dev.kpiLabel}
-                        value={dev.label}
+                        label={dev.label}
+                        value={dev.value}
                         className={dev.className}
                         valueClassName={dev.valueClassName}
                       />
@@ -595,8 +759,8 @@ export default function ProjectPage() {
                         suffix={`· ${formatNumber(summaryQ.data.doc_count)} докум.`}
                       />
                       <KpiCard
-                        label={dev.kpiLabel}
-                        value={dev.label}
+                        label={dev.label}
+                        value={dev.value}
                         className={dev.className}
                         valueClassName={dev.valueClassName}
                       />
@@ -1234,133 +1398,45 @@ export default function ProjectPage() {
                 : <ErrorDocsTab docs={docsQ.data ?? []} />
             )}
           </TabsContent>
-        </Tabs>
+          </Tabs>
         ) : view === "errors" ? (
           /* ────────── «Все» → view=errors: ошибки объекта (§3.2 п.2) ────────── */
-          <>
-            {/* Tab-bar slot placeholder — matches TabsList h-8 + gap-2 below it */}
-            <div aria-hidden="true" className="h-10" />
-            <div className="mt-6 space-y-4" data-testid="project-errors-view">
-              <div className="flex items-center justify-between">
-                <h2 className="font-serif text-lg">Ошибки объекта</h2>
-                <button
-                  type="button"
-                  className="text-sm text-accent-text hover:underline"
-                  onClick={() =>
-                    setSearchParams((p) => {
-                      const n = new URLSearchParams(p);
-                      n.delete("view");
-                      return n;
-                    })
-                  }
-                >
-                  ← к сводке
-                </button>
-              </div>
-              {docsQ.isLoading
-                ? <Skeleton className="h-32" />
-                : <ErrorDocsTab docs={docsQ.data ?? []} />}
-            </div>
-          </>
-        ) : (
+          <ErrorsView
+            isLoading={docsQ.isLoading}
+            docs={docsQ.data ?? []}
+            onBack={() =>
+              setSearchParams((p) => {
+                const n = new URLSearchParams(p);
+                n.delete("view");
+                return n;
+              })
+            }
+          />
+        ) : summaryData ? (
           /* ────────── Сводка «Все направления» (§3.2) ────────── */
-          <>
-            {/* Tab-bar slot placeholder — matches TabsList h-8 + gap-2 below it */}
-            <div aria-hidden="true" className="h-10" />
-            <div className="mt-6 space-y-6">
-            {/* KPI ×4 */}
-            {dirAll && (() => {
-              const allDev = deviationKpi(dirAll.full_deviation_amount);
-              return (
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  <KpiCard
-                    label="Оборот, ₽ с НДС"
-                    value={formatMoney(dirAll.total_amount)}
-                    breakdown={[
-                      ...dirAll.directions.map((d) => ({ label: d.name, value: formatMoney(d.turnover) })),
-                      ...(dirAll.delivery_total > 0 ? [{ label: "Доставка", value: formatMoney(dirAll.delivery_total) }] : []),
-                      ...(dirAll.other_total > 0 ? [{ label: "Прочее", value: formatMoney(dirAll.other_total) }] : []),
-                    ]}
-                  />
-                  <KpiCard
-                    label="Объёмы"
-                    values={dirAll.directions
-                      .filter((d) => d.volume !== null)
-                      .map((d) => ({
-                        label: d.name, // именительный падеж — без склонений (масштабируется на кирпич и далее)
-                        value: `${formatNumber(d.volume!)} ${d.volume_unit}`,
-                      }))}
-                  />
-                  <KpiCard
-                    label="Счетов"
-                    value={formatNumber(dirAll.invoice_count)}
-                    breakdown={[ /* breakdown, не suffix: длинная разбивка в строку у числа теснится */
-                      ...dirAll.directions.map((d) => ({ label: d.name, value: formatNumber(d.invoice_count) })),
-                      ...(dirAll.mixed_invoice_count > 0 ? [{ label: "Смешанные", value: formatNumber(dirAll.mixed_invoice_count) }] : []),
-                      ...(dirAll.other_invoice_count > 0 ? [{ label: "Прочие", value: formatNumber(dirAll.other_invoice_count) }] : []),
-                    ]}
-                  />
-                  <KpiCard
-                    label={allDev.kpiLabel}
-                    value={allDev.label}
-                    className={allDev.className}
-                    valueClassName={allDev.valueClassName}
-                    breakdown={dirAll.directions
-                      .filter((d) => d.overpayment !== null)
-                      .map((d) => ({ label: d.name, value: formatMoney(d.overpayment!) }))}
-                  />
-                </div>
-              );
-            })()}
-
-            {/* Алерт нераспознанных (§3.2 п.2) — источник тот же, что бейдж «Ошибки» */}
-            {errorDocCount > 0 && (
-              <button
-                type="button"
-                data-testid="unrecognized-alert"
-                onClick={() =>
-                  setSearchParams((p) => {
-                    const n = new URLSearchParams(p);
-                    n.set("view", "errors");
-                    return n;
-                  })
-                }
-                className="flex w-full items-center justify-between rounded-lg border border-danger-border bg-danger-soft px-4 py-2.5 text-sm text-danger-text hover:opacity-90"
-              >
-                <span>
-                  {errorDocCount} документ{pluralRu(errorDocCount)}{" "}
-                  {pluralRu(errorDocCount) === ""
-                    ? "не распознан и не учтён"
-                    : "не распознаны и не учтены"}{" "}
-                  в цифрах
-                </span>
-                <span>Разобрать →</span>
-              </button>
-            )}
-
-            {/* Отклонения секциями по направлениям, top-5 (§3.2 п.3) */}
-            <DeviationChart
-              calculations={calculations}
-              periodFilterActive
-              topN={5}
-              groups={dirAll?.directions.map((d) => ({
-                code: d.code,
-                name: d.name,
-                onOpen: () => changeDirection(d.code),
-              })) ?? []}
-              periodStart={periodStart}
-              periodEnd={periodEnd}
-              dataStart={dataStart}
-              dataEnd={dataEnd}
-              displayStart={displayStart}
-              displayEnd={displayEnd}
-              onPeriodStartChange={setPeriodStart}
-              onPeriodEndChange={setPeriodEnd}
-              onPeriodReset={() => { setPeriodStart(""); setPeriodEnd(""); }}
-            />
-          </div>
-          </>
-        )}
+          <AllDirectionsSummaryView
+            summaryData={summaryData}
+            errorDocCount={errorDocCount}
+            calculations={calculations}
+            onOpenErrors={() =>
+              setSearchParams((p) => {
+                const n = new URLSearchParams(p);
+                n.set("view", "errors");
+                return n;
+              })
+            }
+            changeDirection={changeDirection}
+            periodStart={periodStart}
+            periodEnd={periodEnd}
+            dataStart={dataStart}
+            dataEnd={dataEnd}
+            displayStart={displayStart}
+            displayEnd={displayEnd}
+            onPeriodStartChange={setPeriodStart}
+            onPeriodEndChange={setPeriodEnd}
+            onPeriodReset={() => { setPeriodStart(""); setPeriodEnd(""); }}
+          />
+        ) : null}
       </div>
     </div>
   );
