@@ -329,6 +329,10 @@ describe("Секции по направлениям (groups)", () => {
     );
     expect(screen.getByTestId("deviation-group-concrete")).toHaveTextContent("Бетон");
     expect(screen.getByTestId("deviation-group-rebar")).toHaveTextContent("Арматура");
+    // Subtotals: deviation_amount=10000 → "+10 000 ₽", deviation_amount=5000 → "+5 000 ₽"
+    // formatMoney uses ru-RU locale with non-breaking space ( ) as thousands separator
+    expect(screen.getByTestId("deviation-group-concrete")).toHaveTextContent(/\+10[\s ]000/);
+    expect(screen.getByTestId("deviation-group-rebar")).toHaveTextContent(/\+5[\s ]000/);
     const user = userEvent.setup();
     await user.click(screen.getAllByRole("button", { name: /открыть/ })[0]);
     expect(onOpen).toHaveBeenCalled();
