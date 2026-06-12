@@ -87,15 +87,19 @@ export const sampleDashboardSummary = {
  * + other_total         15 000  (other_invoice_count=1 → сумма > 0)
  * = total_amount        385 000
  *
+ * total_amount 385000 = material 340000 + delivery 30000 + other 15000;
+ * other_total 15000 = other_amount (нет other-классовых material-позиций).
  * material_amount = Σ turnover направлений = 340 000.
  * mixed_invoice_count=1 → смешанный счёт виден в обоих направлениях;
  * поэтому concrete-копия получает mixed_invoice_count=1 (sampleDirectionConcrete не меняем).
  */
 export const sampleDashboardSummaryMulti = {
   ...sampleDashboardSummary,
-  // total = 340000 направлений + 30000 доставка + 15000 прочее
+  // total_amount 385000 = material 340000 + delivery 30000 + other 15000; other_total 15000 = other_amount (нет other-классовых material-позиций)
   total_amount: 385000,
   material_amount: 340000,
+  delivery_amount: 30000,
+  other_amount: 15000,
   other_total: 15000,
   directions: [
     { ...sampleDirectionConcrete, mixed_invoice_count: 1 },

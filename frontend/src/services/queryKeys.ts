@@ -4,18 +4,12 @@ export const qk = {
   projects: { all: ["projects"] as const },
   materialClasses: { all: ["material-classes"] as const },
   referencePrices: {
-    // No args → bare base key; prefix invalidations in queries.ts rely on this shape.
-    // With projectId → direction slot is always in a fixed position (like dashboard keys).
-    all: (projectId?: ID, materialClassId?: ID, direction?: string) => {
-      const base = ["reference-prices"] as const;
-      if (!projectId) return base;
-      return [
-        ...base,
-        projectId,
-        ...(materialClassId ? [{ materialClassId }] : []),
-        direction ?? "all",
-      ] as const;
-    },
+    // All args undefined → bare base key; prefix invalidations rely on this shape.
+    // Any arg present → fixed slots so keys never collide with the unfiltered list key.
+    all: (projectId?: ID, materialClassId?: ID, direction?: string) =>
+      projectId === undefined && materialClassId === undefined && direction === undefined
+        ? (["reference-prices"] as const)
+        : (["reference-prices", projectId ?? null, materialClassId ?? null, direction ?? "all"] as const),
   },
   documents: {
     list: (projectId?: ID) =>
