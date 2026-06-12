@@ -1,6 +1,6 @@
 # Расчёты цен, отклонений и компенсаций
 
-Единый источник истины — `compute_calculations()` в `crud/calculations.py`. `compute_full_deviation()` делегирует туда же. Данные считаются на лету, без кеша.
+Единый источник истины — `compute_calculations()` в `crud/calculations.py`. `compute_full_deviation()` делегирует туда же; агрегация суммы отклонений по готовым строкам — `full_deviation_from_rows(rows)` (её использует и summary, чтобы не гонять расчёт дважды). Данные считаются на лету, без кеша.
 
 ## Методология avg_price
 
@@ -25,10 +25,20 @@ deviation_pct    = (avg_price − ref_price) / ref_price × 100
 deviation_amount = (avg_price − ref_price) × qty
 ```
 
-**Распределение доставки:**
+**Распределение доставки и additive-классов** (спека направлений §5.4, ADR #8):
 
-- **Моно-размерность** (все классы месяца одной размерности): доставка распределяется пропорционально `SUM(normalized_quantity)` каждого класса.
-- **Смешанная размерность** (разные dimension в одном месяце): доставка распределяется пропорционально `amount` (денежной сумме позиций) через `compute_shared_shares`. Строки с нулевой `normalized_quantity` или неизвестной единицей (`normalized_unit_id IS NULL`) при mono-distribution получают нулевую долю.
+Разноска — внутри каждого счёта, двумя раздельными котлами (`_aggregate_by_class(base_rows, delivery_per_invoice, additive_per_invoice_type)`):
+
+- **Доставка (`item_type='delivery'`)** — на ВСЕ base-классы счёта: у строки доставки направления нет, это общий фрахт.
+- **Additive-классы (`calc_role='additive'`)** — только на base-классы **своего `material_type`** внутри счёта (пластификатор не удорожает арматуру в смешанном счёте). Edge case: additive типа D в счёте без base-классов типа D не входит ни в чей avg_price (честный отказ). Для моно-направленных счетов поведение побитово совпадает со старым общим котлом.
+- Доли — `compute_shared_shares`: моно-размерность строк → пропорционально `SUM(normalized_quantity)`, смешанная → пропорционально `amount`. Строки с неизвестной единицей (`normalized_unit_id IS NULL`) при mono-distribution получают нулевую долю.
+- Та же механика зеркально в `compute_export_rows` и `_compute_supplier_project_deviation` (`crud/suppliers.py`) — при изменении править все три места.
+
+**Направления (`direction`):**
+
+`direction` в HTTP API = код `material_types` (`concrete`/`rebar`/...). Резолв и валидация — `routers/common.py::resolve_direction_type(db, direction)`: `None` → без фильтра, неизвестный код → 422. Параметр принимают: `/dashboard/calculations`, `/dashboard/invoices`, `/dashboard/monthly-summary`, `/projects/{id}/suppliers`, `/reference-prices`, `/export/excel`.
+
+**КРИТИЧНО (ADR #2):** фильтр направления в `compute_calculations`/`compute_export_rows` применяется строго **на выходе** (как `material_class_id`) — знаменатели разноски всегда считаются по полному счёту, иначе avg_price класса зависел бы от выбранного режима. Тест-страж: `test_calculations_direction_filter_does_not_change_class_rows`. Каждая строка calculations несёт поле `direction` (код типа класса).
 
 ## Исключённые поставщики
 
@@ -36,9 +46,13 @@ deviation_amount = (avg_price − ref_price) × qty
 
 ## Dashboard и месячный оборот
 
-`GET /dashboard/calculations` — на лету через `compute_calculations()`.
+`GET /dashboard/calculations` — на лету через `compute_calculations()`; опциональный `?direction=`.
 
-`GET /dashboard/monthly-summary?project_id=` питает таб «По месяцам» (`MonthlyTab.tsx`). **Оборот по месяцам = полная стоимость всех позиций СФ с НДС**: `SUM(item.amount + COALESCE(item.vat_amount, item.amount * COALESCE(invoice.vat_rate, 20.0)/100))` по **всем** `item_type` (material + delivery + прочее), без фильтра по типу. Намеренно отличается от avg_price (которая работает только с `material`): тут нужен полный оборот по счёту, как выставил поставщик.
+`GET /dashboard/summary` — кроме legacy-полей возвращает разбивку по направлениям: `directions[]` (`code, name, turnover, overpayment, volume, volume_unit, volume_excluded_count, invoice_count, mixed_invoice_count`), `mixed_invoice_count`, `other_invoice_count`, `delivery_total`, `other_total`. Тип `other` направления не образует (ADR #9): его material-позиции и позиции без класса — в `other_total`. Инвариант: `total_amount = Σ directions.turnover + delivery_total + other_total` (точен на Decimal до сериализации; сериализованные слагаемые округлены независимо). Сборка — `_direction_summaries()` в `routers/dashboard.py`; переплата направлений — из того же прогона `compute_calculations`, что и `full_deviation_amount`. Параметр `direction` summary НЕ принимает — один ответ обслуживает оба режима фронта. Поле `total_qty` — deprecated («попугаи» при миксе единиц).
+
+`GET /dashboard/monthly-summary?project_id=` питает таб «По месяцам» (`MonthlyTab.tsx`). **Без `direction`: оборот по месяцам = полная стоимость всех позиций СФ с НДС**: `SUM(item.amount + COALESCE(item.vat_amount, item.amount * COALESCE(invoice.vat_rate, 20.0)/100))` по **всем** `item_type` (material + delivery + прочее), без фильтра по типу. Намеренно отличается от avg_price (которая работает только с `material`): тут нужен полный оборот по счёту, как выставил поставщик. **С `?direction=`**: `total_amount` — только material-позиции направления, `total_qty` — `SUM(normalized_quantity)` base-классов направления с совпадающей размерностью, `invoice_count` — счета направления; в строках поле `volume_unit` (символ default_unit направления; `None` без параметра).
+
+`GET /dashboard/invoices?direction=` — счета с ≥1 material-позицией направления (correlated EXISTS); смешанный счёт возвращается в обоих направлениях целиком, со всеми позициями.
 
 ## VAT guard
 
@@ -54,7 +68,7 @@ deviation_amount = (avg_price − ref_price) × qty
 
 ## Экспорт Excel
 
-`GET /api/export/excel?project_id=&period_start=&period_end=&material_class_id=` → openpyxl через `compute_export_rows()` → `routers/export.py`. Возвращает `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
+`GET /api/export/excel?project_id=&period_start=&period_end=&material_class_id=&direction=` → openpyxl через `compute_export_rows()` → `routers/export.py`. Возвращает `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`. При `direction`: строки только направления + строка «Направление: {имя}» в info-блоке. Каноническое имя файла: `отчёт-{имя}[-{Направление}]_{start}–{end}.xlsx` (дефисы вокруг имени/направления, подчёркивание перед периодом, en-dash между датами) — фронтовый `a.download` использует тот же формат.
 
 **21 колонка (A–U):** два блока единиц — «по документу» (сырые данные из PDF) и «расчётное» (нормализованные). Блок «по документу»: дата, номер СФ, поставщик, «Кол-во по документу», «Ед. изм. по документу». Блок «расчётное»: «Расчётное кол-во», «Базовая ед. изм.», базовая цена, ставка НДС, материал/доставка/прочее без НДС, итого без НДС (формула), те же три с НДС (формулы), итого с НДС (формула), откл. % и откл. ₽ (формулы). Строчная математика (цены на единицу) считается на `normalized_quantity`. Месячные строки — SUMPRODUCT-формулы, разделители между месяцами, grand total на класс. Кнопка «Экспорт» в `ProjectPage.tsx` использует `periodStart`/`periodEnd` напрямую (не debounced) — правильно для действия по кнопке.
 
