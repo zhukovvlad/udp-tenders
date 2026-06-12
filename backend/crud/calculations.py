@@ -5,7 +5,7 @@ from decimal import Decimal
 from sqlalchemy import func, literal, or_
 from sqlalchemy.orm import Session
 
-from models import Document, Invoice, InvoiceItem, MaterialClass, ReferencePrice, UnitOfMeasure
+from models import Document, Invoice, InvoiceItem, MaterialClass, MaterialType, ReferencePrice, UnitOfMeasure
 
 
 def compute_compensation_per_unit(
@@ -139,6 +139,7 @@ def compute_calculations(
     period_end: date | None = None,
     material_class_id: int | None = None,
     excluded_supplier_ids: set[int] | None = None,
+    direction_type_id: int | None = None,
 ) -> list[dict]:
     """Live monthly calculations per material class (normalized units). See spec §4."""
     if period_start is None or period_end is None:
@@ -169,6 +170,8 @@ def compute_calculations(
 
     from crud.compensation_corridors import get_corridor_map, resolve_corridor  # noqa: PLC0415
     corridor_by_class, corridor_by_type = get_corridor_map(db, project_id)
+
+    type_code_map: dict[int, str] = {t.id: t.code for t in db.query(MaterialType).all()}
 
     from finance import money_round  # noqa: PLC0415
     results: list[dict] = []
@@ -306,6 +309,8 @@ def compute_calculations(
         for cid, contrib in class_contrib.items():
             if material_class_id is not None and cid != material_class_id:
                 continue
+            if direction_type_id is not None and class_type_id_map.get(cid) != direction_type_id:
+                continue
             qty = contrib["qty"]
             if qty <= 0:
                 continue
@@ -343,6 +348,7 @@ def compute_calculations(
                 "project_id": project_id,
                 "material_class_id": cid,
                 "material_class_name": class_name_map.get(cid, "?"),
+                "direction": type_code_map.get(class_type_id_map.get(cid), "other"),
                 "period_start": month_start,
                 "period_end": month_end,
                 "material_total": money_round(contrib["mat_with_vat"], 2),
@@ -385,6 +391,7 @@ def compute_export_rows(
     period_end: date | None = None,
     material_class_id: int | None = None,
     excluded_supplier_ids: set[int] | None = None,
+    direction_type_id: int | None = None,
 ) -> list[dict]:
     """Per-(invoice, material_class) rows for the detailed Excel report (normalized units)."""
     from collections import defaultdict
@@ -561,6 +568,8 @@ def compute_export_rows(
     rows: list[dict] = []
     for br in base_rows:
         if material_class_id is not None and br.material_class_id != material_class_id:
+            continue
+        if direction_type_id is not None and br.type_id != direction_type_id:
             continue
         inv_id = br.invoice_id
         cid = br.material_class_id

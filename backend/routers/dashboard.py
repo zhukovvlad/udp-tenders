@@ -2,7 +2,7 @@ from calendar import monthrange
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import distinct, extract, func, literal, or_
 from sqlalchemy.orm import Session
 
@@ -10,9 +10,19 @@ from crud.calculations import compute_calculations, compute_full_deviation
 from crud.supplier_exclusions import get_excluded_supplier_ids
 from crud.units import item_has_issues
 from database import get_db
-from models import Document, Invoice, InvoiceItem, Project, ProjectSupplierExclusion
+from models import Document, Invoice, InvoiceItem, MaterialType, Project, ProjectSupplierExclusion
 
 router = APIRouter()
+
+
+def _resolve_direction_type(db: Session, direction: str | None) -> MaterialType | None:
+    """code направления → MaterialType. Неизвестный code → 422 (спека §6)."""
+    if direction is None:
+        return None
+    mt = db.query(MaterialType).filter(MaterialType.code == direction).first()
+    if mt is None:
+        raise HTTPException(status_code=422, detail=f"Неизвестное направление: {direction}")
+    return mt
 
 
 @router.get("/summary")
@@ -142,9 +152,13 @@ def list_calculations(
     material_class_id: int | None = None,
     period_start: date | None = None,
     period_end: date | None = None,
+    direction: str | None = None,
     db: Session = Depends(get_db),
 ):
     """Live-вычисление расчётов помесячно. Если project_id не задан — по всем проектам."""
+    mt = _resolve_direction_type(db, direction)
+    direction_type_id = mt.id if mt else None
+
     if project_id is None:
         projects = db.query(Project).all()
         # Bulk-load all exclusions in a single query to avoid N+1; select only needed columns
@@ -162,6 +176,7 @@ def list_calculations(
                 compute_calculations(
                     db, p.id, period_start, period_end, material_class_id,
                     excluded_supplier_ids=excl,
+                    direction_type_id=direction_type_id,
                 )
             )
     else:
@@ -169,6 +184,7 @@ def list_calculations(
         rows = compute_calculations(
             db, project_id, period_start, period_end, material_class_id,
             excluded_supplier_ids=excluded or None,
+            direction_type_id=direction_type_id,
         )
 
     return [
@@ -176,6 +192,7 @@ def list_calculations(
             "project_id": r["project_id"],
             "material_class_id": r["material_class_id"],
             "material_class_name": r["material_class_name"],
+            "direction": r["direction"],
             "period_start": r["period_start"].isoformat(),
             "period_end": r["period_end"].isoformat(),
             "material_total": r["material_total"],

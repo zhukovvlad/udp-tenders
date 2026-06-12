@@ -87,3 +87,50 @@ def test_supplier_project_deviation_additive_scoped(client, factories):
     rows = client.get(f"/api/suppliers/{supplier.id}/projects").json()
     stats = next(r for r in rows if r["project_id"] == project.id)
     assert stats["deviation_amount"] == 0.0
+
+
+def test_calculations_direction_field_and_filter(client, factories):
+    project = factories.ProjectFactory.create()
+    concrete = factories.MaterialClassFactory.create(name="В25")
+    rebar = _rebar_class(factories)
+    doc = factories.DocumentFactory.create(project=project)
+    inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10))
+    factories.InvoiceItemFactory.create(
+        invoice=inv, material_class=concrete, item_type="material",
+        quantity=10, unit_price=8000, amount=80000)
+    _rebar_item(factories, inv, rebar, qty=2, unit_price=10000)
+
+    all_rows = client.get(f"/api/dashboard/calculations?project_id={project.id}").json()
+    assert {r["direction"] for r in all_rows} == {"concrete", "rebar"}
+
+    resp = client.get(f"/api/dashboard/calculations?project_id={project.id}&direction=rebar")
+    rows = resp.json()
+    assert [r["material_class_name"] for r in rows] == ["А500С Ø12"]
+
+
+def test_calculations_direction_filter_does_not_change_class_rows(client, factories):
+    """Тест-страж ADR #2: фильтр на выходе — поклассовые цифры идентичны."""
+    project = factories.ProjectFactory.create()
+    concrete = factories.MaterialClassFactory.create(name="В25")
+    rebar = _rebar_class(factories)
+    doc = factories.DocumentFactory.create(project=project)
+    inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10))
+    factories.InvoiceItemFactory.create(
+        invoice=inv, material_class=concrete, item_type="material",
+        quantity=10, unit_price=8000, amount=80000)
+    _rebar_item(factories, inv, rebar, qty=2, unit_price=10000)
+    factories.InvoiceItemFactory.create(
+        invoice=inv, item_type="delivery", material_class=None,
+        quantity=1, unit_price=5000, amount=5000)
+    factories.ReferencePriceFactory.create(project=project, material_class=concrete, price=8000.0)
+
+    full = client.get(f"/api/dashboard/calculations?project_id={project.id}").json()
+    scoped = client.get(f"/api/dashboard/calculations?project_id={project.id}&direction=concrete").json()
+    full_concrete = [r for r in full if r["direction"] == "concrete"]
+    assert scoped == full_concrete  # включая avg_price/deviation/compensation
+
+
+def test_calculations_unknown_direction_422(client, factories):
+    project = factories.ProjectFactory.create()
+    resp = client.get(f"/api/dashboard/calculations?project_id={project.id}&direction=bricks")
+    assert resp.status_code == 422
