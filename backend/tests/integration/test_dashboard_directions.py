@@ -304,3 +304,49 @@ def test_summary_volume_excluded_count(client, factories):
     d = body["directions"][0]
     assert d["volume"] == 2.0
     assert d["volume_excluded_count"] == 1
+
+
+def test_invoices_direction_filter_mixed_visible_in_both(client, factories):
+    """Критерий #2: смешанный счёт виден в обоих направлениях, целиком."""
+    project, *_ = _mixed_project(factories)
+    base = f"/api/dashboard/invoices?project_id={project.id}"
+    all_ids = {i["id"] for i in client.get(base).json()}
+    concrete_ids = {i["id"] for i in client.get(base + "&direction=concrete").json()}
+    rebar_ids = {i["id"] for i in client.get(base + "&direction=rebar").json()}
+    assert len(all_ids) == 3
+    assert len(concrete_ids) == 2          # смешанный + чисто бетонный
+    assert len(rebar_ids) == 1             # только смешанный
+    assert rebar_ids < concrete_ids | rebar_ids
+    mixed_id = next(iter(rebar_ids))
+    mixed_inv = next(i for i in client.get(base + "&direction=rebar").json() if i["id"] == mixed_id)
+    assert len(mixed_inv["items"]) == 4    # документ целиком, со всеми позициями
+
+
+def test_monthly_summary_direction_scoped(client, factories):
+    project, *_ = _mixed_project(factories)
+    base = f"/api/dashboard/monthly-summary?project_id={project.id}"
+    rows = client.get(base + "&direction=concrete").json()
+    by_month = {(r["year"], r["month"]): r for r in rows}
+    assert by_month[(2026, 3)]["total_amount"] == 96000.0   # только бетонные позиции
+    assert by_month[(2026, 3)]["total_qty"] == 10.0
+    assert by_month[(2026, 3)]["invoice_count"] == 1
+    assert by_month[(2026, 3)]["volume_unit"] == "м³"
+    assert by_month[(2026, 4)]["total_amount"] == 49200.0
+    assert (2026, 4) in by_month and by_month[(2026, 4)]["invoice_count"] == 1
+    # счёт «только доставка» (апрель) в направлении не существует
+
+
+def test_monthly_summary_without_direction_unchanged(client, factories):
+    """Без параметра — прежнее поведение + volume_unit: None."""
+    project, *_ = _mixed_project(factories)
+    rows = client.get(f"/api/dashboard/monthly-summary?project_id={project.id}").json()
+    by_month = {(r["year"], r["month"]): r for r in rows}
+    assert by_month[(2026, 3)]["total_amount"] == 96000.0 + 24000.0 + 6000.0 + 2400.0
+    assert by_month[(2026, 4)]["total_amount"] == 49200.0 + 1200.0
+    assert all(r["volume_unit"] is None for r in rows)
+
+
+def test_invoices_unknown_direction_422(client, factories):
+    project = factories.ProjectFactory.create()
+    assert client.get(f"/api/dashboard/invoices?project_id={project.id}&direction=bricks").status_code == 422
+    assert client.get(f"/api/dashboard/monthly-summary?project_id={project.id}&direction=bricks").status_code == 422

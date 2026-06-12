@@ -241,15 +241,32 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/invoices")
-def list_project_invoices(project_id: int, db: Session = Depends(get_db)):
+def list_project_invoices(
+    project_id: int,
+    direction: str | None = None,
+    db: Session = Depends(get_db),
+):
     """Все СФ по проекту со всеми позициями — для отображения на дашборде."""
-    invoices = (
+    mt = _resolve_direction_type(db, direction)
+
+    q = (
         db.query(Invoice)
         .join(Document, Invoice.document_id == Document.id)
         .filter(Document.project_id == project_id)
-        .order_by(Invoice.date.desc())
-        .all()
     )
+    if mt is not None:
+        direction_exists = (
+            db.query(InvoiceItem.id)
+            .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
+            .filter(
+                InvoiceItem.invoice_id == Invoice.id,
+                InvoiceItem.item_type == "material",
+                MaterialClass.material_type_id == mt.id,
+            )
+            .exists()
+        )
+        q = q.filter(direction_exists)
+    invoices = q.order_by(Invoice.date.desc()).all()
     def _has_issues(inv):
         if not inv.items:
             return True
@@ -355,12 +372,79 @@ def list_calculations(
 
 
 @router.get("/monthly-summary")
-def get_monthly_summary(project_id: int, db: Session = Depends(get_db)):
+def get_monthly_summary(
+    project_id: int,
+    direction: str | None = None,
+    db: Session = Depends(get_db),
+):
     """Помесячная агрегация по проекту: оборот (материалы), объём, количество СФ."""
     excluded = get_excluded_supplier_ids(db, project_id)
+    mt = _resolve_direction_type(db, direction)
 
     year_expr = extract("year", Invoice.date)
     month_expr = extract("month", Invoice.date)
+
+    if mt is not None:
+        default_dim = mt.default_unit.dimension if mt.default_unit else None
+        vat_expr = func.coalesce(
+            InvoiceItem.vat_amount,
+            InvoiceItem.amount * func.coalesce(Invoice.vat_rate, literal(Decimal("20.0"))) / 100,
+        )
+        amount_q = (
+            db.query(
+                year_expr.label("year"), month_expr.label("month"),
+                func.sum(InvoiceItem.amount + vat_expr).label("total_amount"),
+                func.count(distinct(Invoice.id)).label("invoice_count"),
+            )
+            .select_from(Invoice)
+            .join(Document, Invoice.document_id == Document.id)
+            .join(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
+            .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
+            .filter(
+                Document.project_id == project_id,
+                InvoiceItem.item_type == "material",
+                MaterialClass.material_type_id == mt.id,
+            )
+        )
+        qty_q = (
+            db.query(
+                year_expr.label("year"), month_expr.label("month"),
+                func.sum(InvoiceItem.normalized_quantity).label("total_qty"),
+            )
+            .select_from(Invoice)
+            .join(Document, Invoice.document_id == Document.id)
+            .join(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
+            .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
+            .join(UnitOfMeasure, InvoiceItem.normalized_unit_id == UnitOfMeasure.id)
+            .filter(
+                Document.project_id == project_id,
+                InvoiceItem.item_type == "material",
+                MaterialClass.material_type_id == mt.id,
+                MaterialClass.calc_role == "base",
+                UnitOfMeasure.dimension == default_dim,
+            )
+        )
+        if excluded:
+            excl = or_(Invoice.supplier_id.is_(None), Invoice.supplier_id.notin_(excluded))
+            amount_q = amount_q.filter(excl)
+            qty_q = qty_q.filter(excl)
+        amount_rows = amount_q.group_by(year_expr, month_expr).order_by(year_expr, month_expr).all()
+        qty_by_month = {
+            (int(r.year), int(r.month)): r.total_qty
+            for r in qty_q.group_by(year_expr, month_expr).all()
+        }
+        unit_symbol = mt.default_unit.symbol if mt.default_unit else None
+        return [
+            {
+                "year": int(r.year),
+                "month": int(r.month),
+                "total_amount": round(float(r.total_amount or 0), 2),
+                "total_qty": round(float(qty_by_month.get((int(r.year), int(r.month)), 0) or 0), 2),
+                "invoice_count": int(r.invoice_count),
+                "volume_unit": unit_symbol,
+            }
+            for r in amount_rows
+        ]
 
     q = (
         db.query(
@@ -390,6 +474,7 @@ def get_monthly_summary(project_id: int, db: Session = Depends(get_db)):
             "total_amount": round(float(r.total_amount or 0), 2),
             "total_qty": round(float(r.total_qty or 0), 2),
             "invoice_count": int(r.invoice_count),
+            "volume_unit": None,
         }
         for r in rows
     ]
