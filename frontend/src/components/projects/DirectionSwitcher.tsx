@@ -1,4 +1,5 @@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { cn } from "@/lib/utils";
 
 interface DirectionSwitcherProps {
   directions: { code: string; name: string }[];
@@ -11,6 +12,8 @@ interface DirectionSwitcherProps {
  * Переключатель направлений (спека §3.1, §7.1). Скрыт у пустого объекта.
  * Сегментированный фильтр на shadcn-примитиве ToggleGroup (одиночный выбор):
  * семантика toggle (`aria-pressed`), а не tabs — у фильтра нет панелей.
+ * Вид — «утопленный» контейнер + приподнятая активная пилюля на токенах темы
+ * (дефолтная палитра shadcn под фильтр на тёмном фоне не годится).
  */
 export function DirectionSwitcher({ directions, value, onChange }: DirectionSwitcherProps) {
   if (directions.length === 0) return null;
@@ -19,8 +22,7 @@ export function DirectionSwitcher({ directions, value, onChange }: DirectionSwit
     <ToggleGroup
       aria-label="Направления"
       data-testid="direction-switcher"
-      variant="outline"
-      spacing={0}
+      spacing={1}
       value={[value]}
       onValueChange={(vals) => {
         const next = vals[0];
@@ -28,9 +30,18 @@ export function DirectionSwitcher({ directions, value, onChange }: DirectionSwit
         // у фильтра всегда ровно одно активное направление.
         if (next) onChange(next);
       }}
+      className="rounded-lg border border-border-subtle bg-surface-sunken p-1"
     >
       {items.map((d) => (
-        <ToggleGroupItem key={d.code} value={d.code} data-testid={`direction-${d.code}`}>
+        <ToggleGroupItem
+          key={d.code}
+          value={d.code}
+          data-testid={`direction-${d.code}`}
+          className={cn(
+            "border-transparent text-fg-secondary hover:bg-transparent hover:text-fg",
+            "aria-pressed:bg-surface aria-pressed:text-fg aria-pressed:shadow-sm aria-pressed:hover:bg-surface",
+          )}
+        >
           {d.name}
         </ToggleGroupItem>
       ))}
