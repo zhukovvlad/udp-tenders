@@ -8,7 +8,7 @@ backend/database.db.backup
 backend/logs/
 
 # Node
-frontend/node_modules/
+node_modules/
 frontend/dist/
 
 # MinIO
