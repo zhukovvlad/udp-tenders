@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 interface DirectionSwitcherProps {
   directions: { code: string; name: string }[];
@@ -7,35 +7,31 @@ interface DirectionSwitcherProps {
   onChange: (code: string) => void;
 }
 
-/** Переключатель направлений (спека §3.1, §7.1). Скрыт у пустого объекта. */
+/**
+ * Переключатель направлений (спека §3.1, §7.1). Скрыт у пустого объекта.
+ * Сегментированный фильтр на shadcn-примитиве ToggleGroup (одиночный выбор):
+ * семантика toggle (`aria-pressed`), а не tabs — у фильтра нет панелей.
+ */
 export function DirectionSwitcher({ directions, value, onChange }: DirectionSwitcherProps) {
   if (directions.length === 0) return null;
   const items = [{ code: "all", name: "Все направления" }, ...directions];
   return (
-    <div
-      role="tablist"
+    <ToggleGroup
       aria-label="Направления"
       data-testid="direction-switcher"
-      className="inline-flex items-center gap-1 rounded-lg border border-border-subtle bg-surface-sunken p-1"
+      value={[value]}
+      onValueChange={(vals) => {
+        const next = vals[0];
+        // Клик по уже активному сегменту снимает выбор (vals=[]) — игнорируем:
+        // у фильтра всегда ровно одно активное направление.
+        if (next) onChange(next);
+      }}
     >
       {items.map((d) => (
-        <button
-          key={d.code}
-          type="button"
-          role="tab"
-          aria-selected={value === d.code}
-          data-testid={`direction-${d.code}`}
-          onClick={() => onChange(d.code)}
-          className={cn(
-            "rounded-md px-3 py-1.5 text-sm transition-colors",
-            value === d.code
-              ? "bg-surface text-fg shadow-sm"
-              : "text-fg-secondary hover:text-fg",
-          )}
-        >
+        <ToggleGroupItem key={d.code} value={d.code} data-testid={`direction-${d.code}`}>
           {d.name}
-        </button>
+        </ToggleGroupItem>
       ))}
-    </div>
+    </ToggleGroup>
   );
 }

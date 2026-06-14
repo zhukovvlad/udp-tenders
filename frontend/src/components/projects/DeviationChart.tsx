@@ -592,7 +592,10 @@ export function DeviationChart({
           {groups.map((g) => {
             const groupCalcs = calculations.filter((c) => c.direction === g.code);
             if (groupCalcs.length === 0) return null;
-            const subtotal = groupCalcs.reduce(
+            // Subtotal — по той же выборке, что и график ниже (aggregateCalcs с тем же
+            // periodFilterActive), иначе при periodFilterActive=false подытог по всем
+            // периодам разойдётся с графиком по последнему месяцу.
+            const subtotal = aggregateCalcs(groupCalcs, periodFilterActive).reduce(
               (s, c) => (c.deviation_amount != null ? (s ?? 0) + c.deviation_amount : s),
               null as number | null,
             );

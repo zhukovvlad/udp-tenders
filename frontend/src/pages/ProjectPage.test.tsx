@@ -934,7 +934,7 @@ describe("ProjectPage", () => {
     it("mono-object: defaults to its direction with tabs visible (ADR #10)", async () => {
       renderProject(); // дефолтная фикстура: directions=[concrete]
       expect(await screen.findByTestId("project-page-tabs-list")).toBeInTheDocument();
-      expect(screen.getByTestId("direction-concrete")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("direction-concrete")).toHaveAttribute("aria-pressed", "true");
     });
 
     it("multi-object: defaults to «Все» — no tabs, summary KPIs with breakdown", async () => {
@@ -954,11 +954,20 @@ describe("ProjectPage", () => {
       expect(screen.queryByTestId("direction-switcher")).not.toBeInTheDocument();
     });
 
+    it("summary error: degrades to legacy tabs instead of infinite skeleton", async () => {
+      server.use(
+        http.get("/api/dashboard/summary", () => new HttpResponse(null, { status: 500 })),
+      );
+      renderProject();
+      expect(await screen.findByTestId("project-page-tabs-list")).toBeInTheDocument();
+      expect(screen.queryByTestId("direction-switcher")).not.toBeInTheDocument();
+    });
+
     it("?direction=rebar opens rebar mode directly (criterion #3)", async () => {
       mockSummary(sampleDashboardSummaryMulti);
       renderProject("1", "?direction=rebar");
       expect(await screen.findByTestId("project-page-tabs-list")).toBeInTheDocument();
-      expect(screen.getByTestId("direction-rebar")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("direction-rebar")).toHaveAttribute("aria-pressed", "true");
     });
 
     it("garbage ?direction= falls back to auto-default and never hits API with it", async () => {
@@ -972,7 +981,7 @@ describe("ProjectPage", () => {
       );
       renderProject("1", "?direction=trash");
       await screen.findByTestId("direction-switcher");
-      expect(screen.getByTestId("direction-all")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("direction-all")).toHaveAttribute("aria-pressed", "true");
       await waitFor(() => expect(seen.length).toBeGreaterThan(0));
       expect(seen).not.toContain("trash"); // гейт §7.2: запрос не ушёл с мусором
     });
@@ -1019,7 +1028,7 @@ describe("ProjectPage", () => {
       await user.click(await screen.findByTestId("unrecognized-alert"));
       expect(await screen.findByTestId("project-errors-view")).toBeInTheDocument();
       // направление не сменилось
-      expect(screen.getByTestId("direction-all")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("direction-all")).toHaveAttribute("aria-pressed", "true");
       await user.click(screen.getByRole("button", { name: /к сводке/ }));
       await waitFor(() => {
         expect(screen.queryByTestId("project-errors-view")).not.toBeInTheDocument();

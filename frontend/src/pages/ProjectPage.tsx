@@ -248,7 +248,7 @@ function AllDirectionsSummaryView({
             className="flex w-full items-center justify-between rounded-lg border border-danger-border bg-danger-soft px-4 py-2.5 text-sm text-danger-text hover:opacity-90"
           >
             <span>
-              {errorDocCount} документ{pluralRu(errorDocCount)}{" "}
+              {formatNumber(errorDocCount)} документ{pluralRu(errorDocCount)}{" "}
               {pluralRu(errorDocCount) === ""
                 ? "не распознан и не учтён"
                 : "не распознаны и не учтены"}{" "}
@@ -390,16 +390,22 @@ export default function ProjectPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawDirection = searchParams.get("direction"); // null | 'all' | code
   const directions = summaryQ.data?.directions;       // undefined пока summary грузится
+  // Ошибка summary не должна навсегда запирать страницу в skeleton: деградируем
+  // в legacy-режим (классические табы без направлений) — табы тянут данные из своих
+  // эндпойнтов. direction резолвим в "all" лишь чтобы снять гейт queriesEnabled (§7.2);
+  // фактический режим задаёт isLegacy ниже.
+  const summaryFailed = summaryQ.isError;
 
-  // undefined = режим не определён (summary не пришёл) — НЕ 'all'
+  // undefined = режим не определён (summary ещё грузится) — НЕ 'all'
   const direction: string | undefined =
-    directions === undefined ? undefined
+    directions === undefined ? (summaryFailed ? "all" : undefined)
     : rawDirection === "all" ? "all"
     : directions.some((d) => d.code === rawDirection) ? (rawDirection as string)
     : directions.length === 1 ? directions[0].code     // автодефолт моно-объекта (ADR #10)
     : "all";
 
-  const isLegacy = directions !== undefined && directions.length === 0; // пустой объект (ADR #11)
+  // Пустой объект (ADR #11) либо упавший summary → классические табы без направлений
+  const isLegacy = summaryFailed || (directions !== undefined && directions.length === 0);
   const scopedDirection = direction !== undefined && direction !== "all" ? direction : undefined;
   // ?view=errors читается только на «Все»; в других режимах ИГНОРИРУЕТСЯ, URL не
   // чистим (зафиксированный выбор из §7.2 «игнорируется/удаляется» — игнор дешевле,
