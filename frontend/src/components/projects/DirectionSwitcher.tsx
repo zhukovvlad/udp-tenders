@@ -19,6 +19,8 @@ export function DirectionSwitcher({ directions, value, onChange }: DirectionSwit
     <ToggleGroup
       aria-label="Направления"
       data-testid="direction-switcher"
+      variant="outline"
+      spacing={0}
       value={[value]}
       onValueChange={(vals) => {
         const next = vals[0];
