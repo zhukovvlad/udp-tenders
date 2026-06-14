@@ -38,8 +38,11 @@ export function DirectionSwitcher({ directions, value, onChange }: DirectionSwit
           value={d.code}
           data-testid={`direction-${d.code}`}
           className={cn(
-            "border-transparent text-fg-secondary hover:bg-transparent hover:text-fg",
-            "aria-pressed:bg-surface aria-pressed:text-fg aria-pressed:shadow-sm aria-pressed:hover:bg-surface",
+            "text-fg-secondary hover:bg-transparent hover:text-fg",
+            // активный сегмент — светлая «пилюля» (primary) на тёмном треке: пара
+            // primary/primary-foreground даёт явный контраст (surface≈surface-sunken
+            // в тёмной теме неразличимы)
+            "aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:shadow-sm aria-pressed:hover:bg-primary",
           )}
         >
           {d.name}
