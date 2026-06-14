@@ -29,8 +29,10 @@ export const projectsApi = {
   async remove(id: ID): Promise<void> {
     await api.delete(`/projects/${id}`);
   },
-  async getSuppliers(projectId: ID): Promise<ProjectSupplier[]> {
-    const { data } = await api.get<ProjectSupplier[]>(`/projects/${projectId}/suppliers`);
+  async getSuppliers(projectId: ID, direction?: string): Promise<ProjectSupplier[]> {
+    const params: Record<string, string | number> = {};
+    if (direction) params.direction = direction;
+    const { data } = await api.get<ProjectSupplier[]>(`/projects/${projectId}/suppliers`, { params });
     return data;
   },
   async getSupplierExclusions(projectId: ID): Promise<ID[]> {

@@ -14,6 +14,12 @@ import type { DashboardCalculation } from "@/types/dashboard";
 import { formatDate, formatMoney, formatNumber, pluralRu } from "@/lib/format";
 
 
+interface DeviationGroup {
+  code: string;
+  name: string;
+  onOpen: () => void;
+}
+
 interface Props {
   calculations: DashboardCalculation[];
   periodFilterActive?: boolean;
@@ -28,6 +34,14 @@ interface Props {
   onPeriodStartChange?: (v: string) => void;
   onPeriodEndChange?: (v: string) => void;
   onPeriodReset?: () => void;
+  /** Заголовок/подзаголовок шапки. Дефолты — нейтральные (спека §7.5). */
+  title?: string;
+  subtitle?: string;
+  /** Ограничить число классов в графике топ-N по |deviation_amount|. */
+  topN?: number;
+  /** Режим сводки «Все»: секции по direction. Строки с direction вне списка
+   * (тип other) не рендерятся ни в секциях, ни в сноске (спека §6.2). */
+  groups?: DeviationGroup[];
 }
 
 function fillFor(pct: number): string {
@@ -81,6 +95,8 @@ function BarLabel(props: BarLabelProps) {
 }
 
 interface FilterHeaderProps {
+  title: string;
+  subtitle: string;
   periodStart: string;
   periodEnd: string;
   dataStart?: string;
@@ -91,6 +107,8 @@ interface FilterHeaderProps {
 }
 
 function FilterHeader({
+  title,
+  subtitle,
   periodStart,
   periodEnd,
   dataStart,
@@ -145,8 +163,8 @@ function FilterHeader({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border-subtle">
       <div>
-        <div className="text-sm font-medium">Отклонения по классам бетона</div>
-        <div className="text-xs text-fg-tertiary mt-0.5">относительно базовой цены</div>
+        <div className="text-sm font-medium">{title}</div>
+        <div className="text-xs text-fg-tertiary mt-0.5">{subtitle}</div>
       </div>
       <div className="flex flex-col items-end gap-2">
         <div className="flex items-center gap-2">
@@ -206,47 +224,16 @@ function FilterHeader({
   );
 }
 
-export function DeviationChart({
-  calculations,
-  periodFilterActive = false,
-  onConfigurePrice,
-  periodStart = "",
-  periodEnd = "",
-  dataStart,
-  dataEnd,
-  displayStart,
-  displayEnd,
-  onPeriodStartChange,
-  onPeriodEndChange,
-  onPeriodReset,
-}: Props) {
-  const hasFilterProps = typeof onPeriodStartChange === "function" && typeof onPeriodEndChange === "function";
+type AggregatedCalc = DashboardCalculation & { covered_qty: number | null };
 
-  if (!calculations.length) {
-    // Still render the card shell with filter inputs when the parent controls the filter
-    if (!hasFilterProps) return null;
-    return (
-      <div className="rounded-xl border border-border-subtle bg-surface overflow-hidden">
-        <FilterHeader
-          periodStart={periodStart}
-          periodEnd={periodEnd}
-          dataStart={dataStart}
-          dataEnd={dataEnd}
-          onPeriodStartChange={onPeriodStartChange}
-          onPeriodEndChange={onPeriodEndChange!}
-          onPeriodReset={onPeriodReset}
-        />
-        <div className="px-5 py-10 text-center text-sm text-fg-tertiary">
-          Нет данных за выбранный период
-        </div>
-      </div>
-    );
-  }
-
-  // When a period filter is active — aggregate all months by material class.
-  // Otherwise — show only the latest calendar month in the data.
-  type AggregatedCalc = DashboardCalculation & { covered_qty: number | null };
-  const displayCalcs: AggregatedCalc[] = periodFilterActive
+// When a period filter is active — aggregate all months by material class.
+// Otherwise — show only the latest calendar month in the data.
+function aggregateCalcs(
+  calculations: DashboardCalculation[],
+  periodFilterActive: boolean,
+): AggregatedCalc[] {
+  if (!calculations.length) return [];
+  return periodFilterActive
     ? (() => {
         const byClass = new Map<number, DashboardCalculation[]>();
         for (const c of calculations) {
@@ -304,22 +291,87 @@ export function DeviationChart({
           .filter((c) => c.period_end === latestPeriodEnd)
           .map((c): AggregatedCalc => ({ ...c, covered_qty: null }));
       })();
+}
+
+// ── Footer: classes without planned price (extracted for reuse in grouped mode) ──
+interface WithoutPriceFooterProps {
+  withoutPrice: AggregatedCalc[];
+  onConfigurePrice?: () => void;
+}
+
+function WithoutPriceFooter({ withoutPrice, onConfigurePrice }: WithoutPriceFooterProps) {
+  if (!withoutPrice.length) return null;
+  return (
+    <div className="flex items-center justify-between gap-4 px-5 py-3 border-t border-border-subtle bg-surface-sunken">
+      <span className="text-xs text-fg-tertiary">
+        {withoutPrice.length} класс{pluralRu(withoutPrice.length)}{" "}
+        ({withoutPrice.map((c) => c.material_class_name).join(", ")}) без базовой цены —{" "}
+        {withoutPrice.length % 10 === 1 && withoutPrice.length % 100 !== 11
+          ? "не учтён в расчёте"
+          : "не учтены в расчёте"}
+      </span>
+      {typeof onConfigurePrice === "function" && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onConfigurePrice}
+          className="shrink-0 text-xs text-accent-text hover:underline"
+        >
+          Настроить базовые цены →
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// ── Body: banner + bars + footnote for a set of calculations ──
+interface ChartBodyProps {
+  calcs: DashboardCalculation[];
+  periodFilterActive: boolean;
+  topN?: number;
+  /** Баннер «Переплата/Экономия» — только в несгруппированном режиме. */
+  showBanner: boolean;
+  /** Сноска «без базовой цены» — в grouped-режиме рендерится один раз снаружи. */
+  showFooter: boolean;
+  onConfigurePrice?: () => void;
+  displayStart?: string;
+  displayEnd?: string;
+}
+
+function ChartBody({
+  calcs,
+  periodFilterActive,
+  topN,
+  showBanner,
+  showFooter,
+  onConfigurePrice,
+  displayStart,
+  displayEnd,
+}: ChartBodyProps) {
+  const displayCalcs = aggregateCalcs(calcs, periodFilterActive);
 
   // deviation_pct is null when reference_price is null or <= 0
   const withPrice = displayCalcs.filter((c) => c.deviation_pct !== null);
   const withoutPrice = displayCalcs.filter((c) => c.deviation_pct === null);
+
+  // top-N classes by absolute deviation amount
+  const shown = topN
+    ? [...withPrice]
+        .sort((a, b) => Math.abs(b.deviation_amount ?? 0) - Math.abs(a.deviation_amount ?? 0))
+        .slice(0, topN)
+    : withPrice;
 
   const anyHasDeviation = displayCalcs.some((c) => c.deviation_amount !== null);
   const totalBannerDev = anyHasDeviation
     ? displayCalcs.reduce((s, c) => s + (c.deviation_amount ?? 0), 0)
     : null;
 
-  const maxAbsPct = withPrice.length
-    ? Math.max(...withPrice.map((c) => Math.abs(c.deviation_pct!)), 0.5)
+  const maxAbsPct = shown.length
+    ? Math.max(...shown.map((c) => Math.abs(c.deviation_pct!)), 0.5)
     : 5;
   const domainBound = Math.ceil(maxAbsPct * 1.5);
 
-  const data = withPrice.map((c) => ({
+  const data = shown.map((c) => ({
     name: c.material_class_name,
     value: c.deviation_pct!,
     amount: c.deviation_amount,
@@ -328,32 +380,12 @@ export function DeviationChart({
     total_qty: c.total_qty,
   }));
 
-  const chartHeight = withPrice.length * 36 + 8;
+  const chartHeight = shown.length * 36 + 8;
 
   return (
-    <div className="rounded-xl border border-border-subtle bg-surface overflow-hidden">
-      {/* ── Header: title + period filter ── */}
-      {hasFilterProps ? (
-        <FilterHeader
-          periodStart={periodStart}
-          periodEnd={periodEnd}
-          dataStart={dataStart}
-          dataEnd={dataEnd}
-          onPeriodStartChange={onPeriodStartChange!}
-          onPeriodEndChange={onPeriodEndChange!}
-          onPeriodReset={onPeriodReset}
-        />
-      ) : (
-        <div className="flex flex-wrap items-center gap-3 px-5 py-4 border-b border-border-subtle">
-          <div>
-            <div className="text-sm font-medium">Отклонения по классам бетона</div>
-            <div className="text-xs text-fg-tertiary mt-0.5">относительно базовой цены</div>
-          </div>
-        </div>
-      )}
-
+    <>
       {/* ── Period summary banner ── */}
-      {totalBannerDev !== null && (
+      {showBanner && totalBannerDev !== null && (
         <div
           className={
             totalBannerDev > 0
@@ -381,7 +413,7 @@ export function DeviationChart({
       )}
 
       {/* ── Chart bars ── */}
-      {withPrice.length > 0 && (
+      {shown.length > 0 && (
         <div className="p-5">
           <ChartContainer
             config={chartConfig}
@@ -481,26 +513,144 @@ export function DeviationChart({
       )}
 
       {/* ── Footer: classes without planned price ── */}
-      {withoutPrice.length > 0 && (
-        <div className="flex items-center justify-between gap-4 px-5 py-3 border-t border-border-subtle bg-surface-sunken">
-          <span className="text-xs text-fg-tertiary">
-            {withoutPrice.length} класс{pluralRu(withoutPrice.length)}{" "}
-            ({withoutPrice.map((c) => c.material_class_name).join(", ")}) без базовой цены —{" "}
-            {withoutPrice.length % 10 === 1 && withoutPrice.length % 100 !== 11
-              ? "не учтён в расчёте"
-              : "не учтены в расчёте"}
-          </span>
-          {typeof onConfigurePrice === "function" && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onConfigurePrice}
-              className="shrink-0 text-xs text-accent-text hover:underline"
-            >
-              Настроить базовые цены →
-            </Button>
-          )}
+      {showFooter && (
+        <WithoutPriceFooter withoutPrice={withoutPrice} onConfigurePrice={onConfigurePrice} />
+      )}
+    </>
+  );
+}
+
+export function DeviationChart({
+  calculations,
+  periodFilterActive = false,
+  onConfigurePrice,
+  periodStart = "",
+  periodEnd = "",
+  dataStart,
+  dataEnd,
+  displayStart,
+  displayEnd,
+  onPeriodStartChange,
+  onPeriodEndChange,
+  onPeriodReset,
+  title = "Отклонения от базовых цен",
+  subtitle = "относительно базовой цены",
+  topN,
+  groups,
+}: Props) {
+  const hasFilterProps = typeof onPeriodStartChange === "function" && typeof onPeriodEndChange === "function";
+
+  if (!calculations.length) {
+    // Still render the card shell with filter inputs when the parent controls the filter
+    if (!hasFilterProps) return null;
+    return (
+      <div className="rounded-xl border border-border-subtle bg-surface overflow-hidden">
+        <FilterHeader
+          title={title}
+          subtitle={subtitle}
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          dataStart={dataStart}
+          dataEnd={dataEnd}
+          onPeriodStartChange={onPeriodStartChange}
+          onPeriodEndChange={onPeriodEndChange!}
+          onPeriodReset={onPeriodReset}
+        />
+        <div className="px-5 py-10 text-center text-sm text-fg-tertiary">
+          Нет данных за выбранный период
         </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border-subtle bg-surface overflow-hidden">
+      {/* ── Header: title + period filter ── */}
+      {hasFilterProps ? (
+        <FilterHeader
+          title={title}
+          subtitle={subtitle}
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          dataStart={dataStart}
+          dataEnd={dataEnd}
+          onPeriodStartChange={onPeriodStartChange!}
+          onPeriodEndChange={onPeriodEndChange!}
+          onPeriodReset={onPeriodReset}
+        />
+      ) : (
+        <div className="flex flex-wrap items-center gap-3 px-5 py-4 border-b border-border-subtle">
+          <div>
+            <div className="text-sm font-medium">{title}</div>
+            <div className="text-xs text-fg-tertiary mt-0.5">{subtitle}</div>
+          </div>
+        </div>
+      )}
+
+      {groups ? (
+        <>
+          {groups.map((g) => {
+            const groupCalcs = calculations.filter((c) => c.direction === g.code);
+            if (groupCalcs.length === 0) return null;
+            // Subtotal — по той же выборке, что и график ниже (aggregateCalcs с тем же
+            // periodFilterActive), иначе при periodFilterActive=false подытог по всем
+            // периодам разойдётся с графиком по последнему месяцу.
+            const subtotal = aggregateCalcs(groupCalcs, periodFilterActive).reduce(
+              (s, c) => (c.deviation_amount != null ? (s ?? 0) + c.deviation_amount : s),
+              null as number | null,
+            );
+            return (
+              <div key={g.code} data-testid={`deviation-group-${g.code}`}>
+                <div className="flex items-center justify-between px-5 pt-4 pb-1">
+                  <span className="text-sm font-medium">{g.name}</span>
+                  <span className="flex items-center gap-3 text-xs">
+                    {subtotal != null && (
+                      <span className={subtotal > 0 ? "text-danger-text" : "text-accent-text"}>
+                        {subtotal > 0 ? `+${formatMoney(subtotal)}` : formatMoney(subtotal)}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={g.onOpen}
+                      className="text-accent-text hover:underline"
+                    >
+                      открыть →
+                    </button>
+                  </span>
+                </div>
+                <ChartBody
+                  calcs={groupCalcs}
+                  periodFilterActive={periodFilterActive}
+                  topN={topN ?? 5}
+                  showBanner={false}
+                  showFooter={false}
+                  displayStart={displayStart}
+                  displayEnd={displayEnd}
+                />
+              </div>
+            );
+          })}
+          {/* Общая сноска «без базовой цены» — по классам направлений из groups;
+              direction вне списка (тип other) отфильтрован. Без кнопки «Настроить»
+              в режиме сводки «Все» (спека §3.2). */}
+          <WithoutPriceFooter
+            withoutPrice={aggregateCalcs(
+              calculations.filter((c) => groups.some((g) => g.code === c.direction)),
+              periodFilterActive,
+            ).filter((c) => c.deviation_pct === null)}
+          />
+        </>
+      ) : (
+        <ChartBody
+          calcs={calculations}
+          periodFilterActive={periodFilterActive}
+          topN={topN}
+          showBanner
+          showFooter
+          onConfigurePrice={onConfigurePrice}
+          displayStart={displayStart}
+          displayEnd={displayEnd}
+        />
       )}
     </div>
   );

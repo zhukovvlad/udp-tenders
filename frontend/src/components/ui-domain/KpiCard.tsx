@@ -4,15 +4,19 @@ import { cn } from "@/lib/utils";
 
 interface KpiCardProps {
   label: string;
-  value: string;
+  value?: string;
   delta?: { value: string; tone: "up" | "down" | "neutral" };
   suffix?: ReactNode;
   valueClassName?: string;
   className?: string;
   breakdown?: { label: string; value: string }[];
+  /** Мультизначный вариант (KPI «Объёмы»): строка на направление — имя слева,
+   * значение в родной единице справа. Имя в именительном падеже («Бетон — 5 677,5 м³»):
+   * никаких склонений в коде — формат масштабируется на любое будущее направление. */
+  values?: { label: string; value: string }[];
 }
 
-export function KpiCard({ label, value, delta, suffix, valueClassName, className, breakdown }: KpiCardProps) {
+export function KpiCard({ label, value, delta, suffix, valueClassName, className, breakdown, values }: KpiCardProps) {
   return (
     <div
       className={cn(
@@ -23,10 +27,21 @@ export function KpiCard({ label, value, delta, suffix, valueClassName, className
       <div className="text-2xs uppercase tracking-wider text-fg-tertiary">
         {label}
       </div>
-      <div className={cn("mt-2 font-mono text-2xl text-fg", valueClassName)}>
-        {value}
-        {suffix && <span className="ml-1.5 text-sm font-normal text-fg-secondary">{suffix}</span>}
-      </div>
+      {values && values.length > 0 ? (
+        <div className="mt-2 space-y-1">
+          {values.map((v) => (
+            <div key={v.label} className="flex items-baseline justify-between gap-2 leading-snug">
+              <span className="text-sm text-fg-secondary">{v.label}</span>
+              <span className="font-mono text-lg text-fg">{v.value}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className={cn("mt-2 font-mono text-2xl text-fg", valueClassName)}>
+          {value}
+          {suffix && <span className="ml-1.5 text-sm font-normal text-fg-secondary">{suffix}</span>}
+        </div>
+      )}
       {breakdown && breakdown.length > 0 && (
         <div className="mt-2 space-y-0.5">
           {breakdown.map((b) => (

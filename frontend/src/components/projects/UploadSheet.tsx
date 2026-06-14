@@ -43,7 +43,7 @@ export function UploadSheet({ projectId, open, onOpenChange }: Props) {
     }
     setStatus(null);
     if (success > 0) {
-      qc.invalidateQueries({ queryKey: qk.dashboard.invoices(projectId) });
+      qc.invalidateQueries({ queryKey: ["dashboard", "invoices", projectId] });
       qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
       qc.invalidateQueries({ queryKey: qk.documents.list() });
       toast.success(`Загружено: ${success} файл(ов)`);

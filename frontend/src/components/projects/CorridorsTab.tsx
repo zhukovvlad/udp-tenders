@@ -17,6 +17,8 @@ import type { CorridorClassResolved } from "@/types/compensationCorridor";
 
 interface Props {
   projectId: ID;
+  /** Скоуп направления (спека §3.3): фильтрация матрицы на фронте, API без изменений (§6.8). */
+  direction?: string;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -25,7 +27,7 @@ const TYPE_LABELS: Record<string, string> = {
   other: "Прочее",
 };
 
-export function CorridorsTab({ projectId }: Props) {
+export function CorridorsTab({ projectId, direction }: Props) {
   const { data: matrix, isLoading } = useCorridors(projectId);
   const setType = useSetTypeCorridor(projectId);
   const deleteType = useDeleteTypeCorridor(projectId);
@@ -50,7 +52,10 @@ export function CorridorsTab({ projectId }: Props) {
     list.push(cls);
     grouped.set(cls.material_type, list);
   }
-  const allTypes = [...new Set([...typeMap.keys(), ...grouped.keys()])].sort();
+  // В режиме направления — только его тип и его классы (фильтрация на фронте, §3.3)
+  const allTypes = direction
+    ? [direction]
+    : [...new Set([...typeMap.keys(), ...grouped.keys()])].sort();
 
   function handleTypeSetup(mt: string) {
     setEditingType(mt);

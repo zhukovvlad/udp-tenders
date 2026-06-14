@@ -53,6 +53,13 @@ export const sampleDocument = {
   ],
 };
 
+export const sampleDirectionConcrete = {
+  code: "concrete", name: "Бетон",
+  turnover: 220000, overpayment: null,
+  volume: 31.5, volume_unit: "м³", volume_excluded_count: 0,
+  invoice_count: 5, mixed_invoice_count: 0,
+};
+
 export const sampleDashboardSummary = {
   doc_count: 3,
   invoice_count: 5,
@@ -64,6 +71,54 @@ export const sampleDashboardSummary = {
   first_invoice_date: "2026-01-01",
   last_invoice_date: "2026-04-15",
   full_deviation_amount: null,
+  directions: [sampleDirectionConcrete],
+  mixed_invoice_count: 0,
+  other_invoice_count: 0,
+  delivery_total: 30000,
+  other_total: 0,
+};
+
+/** Объект с двумя направлениями — для тестов сводки «Все».
+ *
+ * Арифметика (инвариант §5.1):
+ *   concrete.turnover  220 000
+ * + rebar.turnover     120 000
+ * + delivery_total      30 000  (inherited)
+ * + other_total         15 000  (other_invoice_count=1 → сумма > 0)
+ * = total_amount        385 000
+ *
+ * total_amount 385000 = material 340000 + delivery 30000 + other 15000;
+ * other_total 15000 = other_amount (нет other-классовых material-позиций).
+ * material_amount = Σ turnover направлений = 340 000.
+ * mixed_invoice_count=1 → смешанный счёт виден в обоих направлениях;
+ * поэтому concrete-копия получает mixed_invoice_count=1 (sampleDirectionConcrete не меняем).
+ */
+export const sampleDashboardSummaryMulti = {
+  ...sampleDashboardSummary,
+  // total_amount 385000 = material 340000 + delivery 30000 + other 15000; other_total 15000 = other_amount (нет other-классовых material-позиций)
+  total_amount: 385000,
+  material_amount: 340000,
+  delivery_amount: 30000,
+  other_amount: 15000,
+  other_total: 15000,
+  directions: [
+    { ...sampleDirectionConcrete, mixed_invoice_count: 1 },
+    { code: "rebar", name: "Арматура", turnover: 120000, overpayment: 15000,
+      volume: 12.4, volume_unit: "т", volume_excluded_count: 1,
+      invoice_count: 2, mixed_invoice_count: 1 },
+  ],
+  mixed_invoice_count: 1,
+  other_invoice_count: 1,
+};
+
+/** Пустой объект (без счетов) — legacy-режим (ADR #11). */
+export const sampleDashboardSummaryEmpty = {
+  ...sampleDashboardSummary,
+  doc_count: 0, invoice_count: 0, total_amount: 0, material_amount: 0,
+  delivery_amount: 0, other_amount: 0, total_qty: 0,
+  first_invoice_date: null, last_invoice_date: null, full_deviation_amount: null,
+  directions: [], mixed_invoice_count: 0, other_invoice_count: 0,
+  delivery_total: 0, other_total: 0,
 };
 
 export const sampleReferencePrice = {
@@ -91,9 +146,9 @@ const _baseItem = {
 };
 
 export const sampleMonthlySummary = [
-  { year: 2026, month: 1, total_amount: 120000, total_qty: 15.0, invoice_count: 2 },
+  { year: 2026, month: 1, total_amount: 120000, total_qty: 15.0, invoice_count: 2, volume_unit: null },
   // февраль пропущен — фронт должен достроить его
-  { year: 2026, month: 3, total_amount: 80000,  total_qty: 10.0, invoice_count: 1 },
+  { year: 2026, month: 3, total_amount: 80000,  total_qty: 10.0, invoice_count: 1, volume_unit: null },
 ];
 
 export const sampleDashboardInvoices = [
