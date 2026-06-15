@@ -143,3 +143,12 @@ async def detect_rotations(images: list[bytes]) -> list[int]:
         rots = []
     rots += [0] * (n - len(rots))   # добиваем до длины n
     return rots
+
+
+async def deskew_pdf(pdf_bytes: bytes) -> tuple[bytes, list[int]]:
+    """render-for-detect → detect → селективный raster. Все нули → исходные байты как есть."""
+    images = render_pages_for_detect(pdf_bytes)
+    rotations = await detect_rotations(images)
+    if not any(r % 360 for r in rotations):
+        return pdf_bytes, rotations          # short-circuit, без перерисовки
+    return apply_rotations(pdf_bytes, rotations), rotations

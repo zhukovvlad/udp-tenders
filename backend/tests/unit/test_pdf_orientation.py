@@ -181,3 +181,31 @@ async def test_detect_rotations_prose_around_array(monkeypatch, _allow_respx):
         return_value=_openrouter_reply("Страница 1 и 2: ответ [90, 0]")
     )
     assert await po.detect_rotations([b"a", b"b"]) == [90, 0]  # «1»,«2» из прозы не попали
+
+
+@pytest.mark.asyncio
+async def test_deskew_pdf_all_zeros_returns_original(monkeypatch):
+    """Все нули → исходные байты без перерисовки (идентичность)."""
+    original = _sideways_scan_pdf()
+
+    async def fake_detect(images):
+        return [0] * len(images)
+    monkeypatch.setattr(po, "detect_rotations", fake_detect)
+
+    out_bytes, rots = await po.deskew_pdf(original)
+    assert rots == [0]
+    assert out_bytes == original  # тот же объект байтов, без перерисовки
+
+
+@pytest.mark.asyncio
+async def test_deskew_pdf_applies_rotation(monkeypatch):
+    original = _sideways_scan_pdf()
+
+    async def fake_detect(images):
+        return [270] * len(images)
+    monkeypatch.setattr(po, "detect_rotations", fake_detect)
+
+    out_bytes, rots = await po.deskew_pdf(original)
+    assert rots == [270]
+    assert out_bytes != original
+    assert _top_strip_is_dark(_render_first_page_png(out_bytes))  # выпрямлено
