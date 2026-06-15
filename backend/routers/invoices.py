@@ -267,8 +267,23 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     if _inn and not _name:
         raise HTTPException(status_code=422, detail="supplier_name обязателен при указании supplier_inn")
     invoice.vat_rate = data.vat_rate
+
+    warnings: list[dict] = []
     if _name:
         supplier = get_or_create_supplier(db, name=_name, inn=_inn)
+        if _name != supplier.name:
+            # ИНН совпал, имя изменилось → каноническое переименование.
+            # Каскадим в денормализованную витрину всех счетов поставщика
+            # (та же семантика, что crud.suppliers.update_supplier, но без отдельного commit).
+            supplier.name = _name
+            affected = db.query(Invoice).filter(Invoice.supplier_id == supplier.id).update(
+                {Invoice.supplier_name: _name}, synchronize_session=False
+            )
+            warnings.append({
+                "field": "supplier_name",
+                "code": "supplier_renamed",
+                "message": f"Имя поставщика обновлено во всех счетах ({affected})",
+            })
         invoice.supplier_id = supplier.id
         invoice.supplier_name = supplier.name
         invoice.supplier_inn = supplier.inn
@@ -286,7 +301,6 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
             db.delete(existing_item)
 
     aliases = load_alias_map(db)
-    warnings: list[dict] = []
 
     def _normalize(item_data):
         quantity = Decimal(str(item_data.quantity))

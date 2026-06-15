@@ -15,7 +15,7 @@
 
 - `crud.suppliers.get_or_create_supplier(db, name, inn)` — дедуп по ИНН если есть, иначе по точному имени где `inn IS NULL`. Race-safe через `INSERT ... ON CONFLICT DO NOTHING` + re-SELECT. Всегда явно ставит `created_at` (ORM-дефолт не срабатывает через `pg_insert`).
 - `supplier_inn` без `supplier_name` невалиден: `PUT /api/invoices/{id}` → 422; `crud.documents.create_invoice()` тихо чистит `_inn` (нет Supplier без имени).
-- Редактирование инвойса ставит `supplier_name`/`supplier_inn` из **канонической записи БД** (не из сырого ввода), если ИНН совпал с существующим.
+- Редактирование инвойса: при совпадении ИНН ставит `supplier_inn` из канонической записи. Если ИНН совпал, но имя изменилось — это трактуется как каноническое переименование: `Supplier.name` обновляется и каскадится в `supplier_name` всех счетов поставщика (та же семантика, что `update_supplier`; warning `supplier_renamed` в ответе). Имя без ИНН по-прежнему создаёт/линкует нового поставщика по точному совпадению.
 - `PUT /suppliers/{id}` → 409 с разными сообщениями для конфликта ИНН (`suppliers.inn` unique) vs имени (`uq_suppliers_name_no_inn`, partial index для `inn IS NULL`).
 
 ## Исключение поставщиков из расчётов
