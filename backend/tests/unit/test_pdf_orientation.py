@@ -79,10 +79,13 @@ def _render_first_page_png(pdf_bytes: bytes) -> bytes:
 
 
 def test_apply_rotations_sign_makes_upright():
-    """Боковой скан (маркер справа) + корректирующий поворот → маркер снова сверху."""
+    """Контракт: вход = на сколько страница ПОВЁРНУТА по часовой стрелке; apply её выпрямляет.
+
+    `_sideways_scan_pdf` — страница, повёрнутая на 90° CW (маркер-верх уехал вправо).
+    Значит detect вернёт 90, и apply([90]) обязан вернуть маркер наверх (отменив поворот)."""
     sideways = _sideways_scan_pdf()
     assert not _top_strip_is_dark(_render_first_page_png(sideways))  # до: не сверху
-    corrected = po.apply_rotations(sideways, [270])  # 270° CW возвращает наверх
+    corrected = po.apply_rotations(sideways, [90])  # «повёрнута на 90° CW» → apply отменяет
     assert _top_strip_is_dark(_render_first_page_png(corrected))     # после: сверху
 
 
@@ -92,7 +95,7 @@ def test_apply_rotations_resets_rotate_flag():
     src.pages[0].Rotate = 90  # искусственный ненулевой флаг на исходнике
     buf = io.BytesIO()
     src.save(buf)
-    corrected = po.apply_rotations(buf.getvalue(), [270])
+    corrected = po.apply_rotations(buf.getvalue(), [90])
     out = pikepdf.open(io.BytesIO(corrected))
     assert int(out.pages[0].get("/Rotate", 0)) == 0
 
@@ -105,7 +108,7 @@ def test_apply_rotations_zero_delta_keeps_page_untouched():
     two_pages.pages.append(src.pages[0])
     buf = io.BytesIO()
     two_pages.save(buf)
-    corrected = po.apply_rotations(buf.getvalue(), [270, 0])
+    corrected = po.apply_rotations(buf.getvalue(), [90, 0])
     # стр.1 перерисована (маркер сверху), стр.2 — исходная боковая (маркер не сверху)
     assert _top_strip_is_dark(_render_first_page_png(corrected))
     pdf = pdfium.PdfDocument(corrected)
@@ -123,7 +126,7 @@ def test_apply_rotations_two_rotated_pages():
     two.pages.append(src.pages[0])
     buf = io.BytesIO()
     two.save(buf)
-    corrected = po.apply_rotations(buf.getvalue(), [270, 270])
+    corrected = po.apply_rotations(buf.getvalue(), [90, 90])
     out = pikepdf.open(io.BytesIO(corrected))
     assert len(out.pages) == 2
     pdf = pdfium.PdfDocument(corrected)
@@ -208,10 +211,10 @@ async def test_deskew_pdf_applies_rotation(monkeypatch):
     original = _sideways_scan_pdf()
 
     async def fake_detect(images):
-        return [270] * len(images)
+        return [90] * len(images)
     monkeypatch.setattr(po, "detect_rotations", fake_detect)
 
     out_bytes, rots = await po.deskew_pdf(original)
-    assert rots == [270]
+    assert rots == [90]
     assert out_bytes != original
     assert _top_strip_is_dark(_render_first_page_png(out_bytes))  # выпрямлено
