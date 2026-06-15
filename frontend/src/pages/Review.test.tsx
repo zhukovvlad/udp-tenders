@@ -140,8 +140,10 @@ describe("ReviewPage", () => {
       expect(screen.getByDisplayValue(/Бетон В25/)).toBeDisabled();
     });
 
-    // Reparse button disabled
-    expect(screen.getByRole("button", { name: /Переразобрать/i })).toBeDisabled();
+    // Reparse button disabled (exact-match, чтобы не зацепить "Выпрямить и переразобрать")
+    expect(screen.getByRole("button", { name: /^Переразобрать$/i })).toBeDisabled();
+    // Deskew button присутствует и тоже заблокирован при locked
+    expect(screen.getByRole("button", { name: /Выпрямить и переразобрать/i })).toBeDisabled();
   });
 
   it("delete button is disabled when invoice is verified", async () => {

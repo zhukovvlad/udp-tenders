@@ -60,6 +60,7 @@ export const handlers = [
   }),
   http.post("/api/invoices/upload", () => HttpResponse.json(sampleDocument)),
   http.post("/api/invoices/documents/:id/reparse", () => HttpResponse.json(sampleDocument)),
+  http.post("/api/invoices/documents/:id/deskew-reparse", () => HttpResponse.json(sampleDocument)),
   http.put("/api/invoices/:id", ({ params }) =>
     HttpResponse.json({ message: "Сохранено", invoice_id: Number(params.id), warnings: [] })
   ),

@@ -75,7 +75,22 @@ describe("ErrorDocsTab", () => {
     );
     const user = userEvent.setup();
     renderWithProviders(<ErrorDocsTab docs={[makeDoc({ id: 1 })]} />);
-    await user.click(screen.getByRole("button", { name: /переразобрать/i }));
+    // exact-match: "Переразобрать", чтобы не зацепить "Выпрямить и переразобрать"
+    await user.click(screen.getByRole("button", { name: /^переразобрать$/i }));
     await waitFor(() => expect(onReparse).toHaveBeenCalledWith("1"));
+  });
+
+  it("calls deskew-reparse endpoint on button click", async () => {
+    const onDeskew = vi.fn();
+    server.use(
+      http.post("/api/invoices/documents/:id/deskew-reparse", ({ params }) => {
+        onDeskew(params.id);
+        return HttpResponse.json(makeDoc({ id: Number(params.id), status: "parsed" }));
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ErrorDocsTab docs={[makeDoc({ id: 1 })]} />);
+    await user.click(screen.getByRole("button", { name: /Выпрямить и переразобрать/i }));
+    await waitFor(() => expect(onDeskew).toHaveBeenCalledWith("1"));
   });
 });

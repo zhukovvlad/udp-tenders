@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { CheckCircle2, ExternalLink, FileEdit, RefreshCw, Trash2 } from "lucide-react";
+import { CheckCircle2, Crop, ExternalLink, FileEdit, RefreshCw, Trash2 } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -23,7 +23,7 @@ import { Button } from "@/components/ui-domain/Button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { StatusPill } from "@/components/ui-domain/StatusPill";
 import { formatDate } from "@/lib/format";
-import { useReparseDocument, useDeleteDocument } from "@/services/queries";
+import { useReparseDocument, useDeskewReparseDocument, useDeleteDocument } from "@/services/queries";
 import { invoicesApi } from "@/services/api/invoices";
 import type { DocumentSummary } from "@/types/invoice";
 
@@ -35,6 +35,7 @@ export function ErrorDocsTab({ docs }: ErrorDocsTabProps) {
   const errorDocs = docs.filter((d) => d.status === "error" || d.has_issues);
 
   const reparse = useReparseDocument();
+  const deskew = useDeskewReparseDocument();
   const deleteDoc = useDeleteDocument();
 
   const [pendingDelete, setPendingDelete] = useState<DocumentSummary | null>(null);
@@ -151,6 +152,27 @@ export function ErrorDocsTab({ docs }: ErrorDocsTabProps) {
                           }
                         />
                         <TooltipContent>Переразобрать</TooltipContent>
+                      </Tooltip>
+
+                      {/* Deskew + reparse */}
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label="Выпрямить и переразобрать"
+                              disabled={deskew.isPending || reparse.isPending}
+                              onClick={() => deskew.mutate(doc.id)}
+                            >
+                              <Crop
+                                size={14}
+                                className={deskew.isPending && deskew.variables === doc.id ? "animate-pulse" : undefined}
+                              />
+                            </Button>
+                          }
+                        />
+                        <TooltipContent>Выпрямить и переразобрать</TooltipContent>
                       </Tooltip>
 
                       {/* Delete */}
