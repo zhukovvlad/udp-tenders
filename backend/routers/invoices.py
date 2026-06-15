@@ -156,6 +156,42 @@ def get_document_pdf(doc_id: int, db: Session = Depends(get_db)):
     return Response(content=file_bytes, media_type="application/pdf")
 
 
+async def _reparse_from_s3(doc, db: Session, pdf_bytes: bytes | None = None) -> dict:
+    """Удалить старые СФ, распарсить PDF (переданный или скачанный из S3), выставить статус.
+    Возвращает сериализованный документ."""
+    old_count = len(doc.invoices)
+    for inv in list(doc.invoices):
+        db.delete(inv)
+    db.commit()
+    logger.info(f"Reparse: удалено старых СФ для doc={doc.id}: {old_count}")
+
+    if pdf_bytes is None:
+        try:
+            pdf_bytes = download_file(doc.s3_key)
+            logger.info(f"Reparse: скачан PDF из S3 (key={doc.s3_key}, размер={len(pdf_bytes)})")
+        except Exception as e:
+            logger.exception(f"Reparse: ошибка скачивания из S3 для doc={doc.id}")
+            raise HTTPException(status_code=404, detail=f"Файл не найден в хранилище: {e}")
+
+    from pdf_parser import parse_invoice_pdf
+    result = await parse_invoice_pdf(pdf_bytes, db, doc.id)
+
+    if result.get("error"):
+        doc.status = "error"
+        doc.doc_type = "unknown"
+        db.commit()
+        logger.warning(f"Reparse doc={doc.id} завершён с ошибкой: {result['error']}")
+        db.refresh(doc)
+        return _serialize_document(doc)
+
+    doc.doc_type = result.get("doc_type", "invoice")
+    doc.status = "parsed"
+    db.commit()
+    db.refresh(doc)
+    logger.info(f"Reparse doc={doc.id} успешно завершён, СФ: {len(result.get('invoices_created', []))}")
+    return _serialize_document(doc)
+
+
 @router.post("/documents/{doc_id}/reparse")
 async def reparse_document(doc_id: int, db: Session = Depends(get_db)):
     """Повторить парсинг документа. Удаляет ранее распознанные СФ и парсит заново из S3."""
@@ -170,38 +206,7 @@ async def reparse_document(doc_id: int, db: Session = Depends(get_db)):
     if any(inv.verified for inv in doc.invoices):
         raise HTTPException(status_code=409, detail="Документ содержит подтверждённые СФ — снимите подтверждение перед повторным разбором")
 
-    # Удаляем ранее распознанные СФ (cascade удалит позиции)
-    old_count = len(doc.invoices)
-    for inv in list(doc.invoices):
-        db.delete(inv)
-    db.commit()
-    logger.info(f"Reparse: удалено старых СФ для doc={doc_id}: {old_count}")
-
-    try:
-        file_bytes = download_file(doc.s3_key)
-        logger.info(f"Reparse: скачан PDF из S3 (key={doc.s3_key}, размер={len(file_bytes)})")
-    except Exception as e:
-        logger.exception(f"Reparse: ошибка скачивания из S3 для doc={doc_id}")
-        raise HTTPException(status_code=404, detail=f"Файл не найден в хранилище: {e}")
-
-    from pdf_parser import parse_invoice_pdf
-    result = await parse_invoice_pdf(file_bytes, db, doc.id)
-
-    if result.get("error"):
-        doc.status = "error"
-        doc.doc_type = "unknown"
-        db.commit()
-        logger.warning(f"Reparse doc={doc_id} завершён с ошибкой: {result['error']}")
-        db.refresh(doc)
-        return _serialize_document(doc)
-
-    doc.doc_type = result.get("doc_type", "invoice")
-    doc.status = "parsed"
-    db.commit()
-    db.refresh(doc)
-    logger.info(f"Reparse doc={doc_id} успешно завершён, СФ: {len(result.get('invoices_created', []))}")
-
-    return _serialize_document(doc)
+    return await _reparse_from_s3(doc, db)
 
 
 @router.post("/upload")
