@@ -14,3 +14,6 @@ pwdlib[argon2]==0.3.0
 pydantic-settings==2.14.1
 pydantic[email]==2.13.4
 click==8.3.3
+pypdfium2==5.10.1
+pikepdf==10.8.0
+Pillow==12.2.0
