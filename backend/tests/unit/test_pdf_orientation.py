@@ -67,7 +67,7 @@ def _top_strip_is_dark(page_png: bytes) -> bool:
     img = Image.open(io.BytesIO(page_png)).convert("L")
     w, h = img.size
     band = img.crop((0, 0, w, h // 12))
-    return sum(band.getdata()) / (band.size[0] * band.size[1]) < 64  # тёмная полоса сверху
+    return sum(band.get_flattened_data()) / (band.size[0] * band.size[1]) < 64  # тёмная полоса сверху
 
 
 def _render_first_page_png(pdf_bytes: bytes) -> bytes:

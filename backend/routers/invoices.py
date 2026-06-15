@@ -214,6 +214,9 @@ def _is_not_found(exc: Exception) -> bool:
     if isinstance(exc, FileNotFoundError):           # in-memory-фикстура тестов
         return True
     if isinstance(exc, ClientError):                 # boto3 в проде
+        # AWS S3 отдаёт семантические коды NoSuchKey/NoSuchBucket; "404" оставлен
+        # намеренно — MinIO (наш S3-совместимый бэкенд) на HeadObject/GetObject
+        # возвращает именно HTTP-код "404" вместо семантического.
         return exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404", "NoSuchBucket")
     return False
 

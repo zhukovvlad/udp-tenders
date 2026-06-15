@@ -930,14 +930,14 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
               onClick={() => { setUnitWarnings([]); deskew.mutate(docId); }}
               disabled={deskew.isPending || reparse.isPending || verify.isPending || unverify.isPending || documentLocked}
               title={documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
-              className={/* ОБЯЗАТЕЛЬНО: подставить буквальный className соседней кнопки «Переразобрать» из Review.tsx, НЕ оставлять "" */ ""}
+              className="text-fg-secondary underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
             >
               Выпрямить и переразобрать
             </button>
 ```
 
-⚠️ Не оставлять `className=""` — открыть `Review.tsx`, скопировать конкретный `className`
-кнопки «Переразобрать» (строки ~181-189) и подставить буквально, иначе кнопка отрендерится неоформленной.
+ℹ️ `className` выше — буквальный класс кнопки «Переразобрать» из `Review.tsx`
+(строки ~181-189); при реализации он подставлен в обе кнопки, чтобы стиль совпадал.
 
 - [ ] **Step 4: Тесты фронта (зеркало reparse-тестов)**
 
