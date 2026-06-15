@@ -1,5 +1,4 @@
 import io
-import json
 
 import httpx
 import pikepdf
@@ -91,7 +90,8 @@ def test_apply_rotations_resets_rotate_flag():
     """У пересобранной image-страницы /Rotate == 0 (не наследуется)."""
     src = pikepdf.open(io.BytesIO(_sideways_scan_pdf()))
     src.pages[0].Rotate = 90  # искусственный ненулевой флаг на исходнике
-    buf = io.BytesIO(); src.save(buf)
+    buf = io.BytesIO()
+    src.save(buf)
     corrected = po.apply_rotations(buf.getvalue(), [270])
     out = pikepdf.open(io.BytesIO(corrected))
     assert int(out.pages[0].get("/Rotate", 0)) == 0
@@ -103,13 +103,15 @@ def test_apply_rotations_zero_delta_keeps_page_untouched():
     src = pikepdf.open(io.BytesIO(_sideways_scan_pdf()))
     two_pages.pages.append(src.pages[0])
     two_pages.pages.append(src.pages[0])
-    buf = io.BytesIO(); two_pages.save(buf)
+    buf = io.BytesIO()
+    two_pages.save(buf)
     corrected = po.apply_rotations(buf.getvalue(), [270, 0])
-    out = pikepdf.open(io.BytesIO(corrected))
     # стр.1 перерисована (маркер сверху), стр.2 — исходная боковая (маркер не сверху)
     assert _top_strip_is_dark(_render_first_page_png(corrected))
     pdf = pdfium.PdfDocument(corrected)
-    p2 = pdf[1].render(scale=1.0).to_pil(); b = io.BytesIO(); p2.save(b, format="PNG")
+    p2 = pdf[1].render(scale=1.0).to_pil()
+    b = io.BytesIO()
+    p2.save(b, format="PNG")
     assert not _top_strip_is_dark(b.getvalue())
 
 
@@ -117,14 +119,18 @@ def test_apply_rotations_two_rotated_pages():
     """≥2 повёрнутых страниц: обе выпрямлены, foreign-ссылки не оборвались до save."""
     src = pikepdf.open(io.BytesIO(_sideways_scan_pdf()))
     two = pikepdf.new()
-    two.pages.append(src.pages[0]); two.pages.append(src.pages[0])
-    buf = io.BytesIO(); two.save(buf)
+    two.pages.append(src.pages[0])
+    two.pages.append(src.pages[0])
+    buf = io.BytesIO()
+    two.save(buf)
     corrected = po.apply_rotations(buf.getvalue(), [270, 270])
     out = pikepdf.open(io.BytesIO(corrected))
     assert len(out.pages) == 2
     pdf = pdfium.PdfDocument(corrected)
     for idx in range(2):
-        img = pdf[idx].render(scale=1.0).to_pil(); b = io.BytesIO(); img.save(b, format="PNG")
+        img = pdf[idx].render(scale=1.0).to_pil()
+        b = io.BytesIO()
+        img.save(b, format="PNG")
         assert _top_strip_is_dark(b.getvalue())  # обе выпрямлены
 
 

@@ -13,7 +13,6 @@ import httpx
 import pikepdf
 import pypdfium2 as pdfium
 from fastapi import HTTPException
-from PIL import Image
 
 from config import settings
 from pdf_parser import OPENROUTER_URL
@@ -131,7 +130,7 @@ async def detect_rotations(images: list[bytes]) -> list[int]:
         # транспортный сбой / таймаут / не-2xx → НЕ деградируем в нули (иначе переразберём
         # оригинал под видом «исправлено»), а сигналим 502; эндпоинт не тронет S3 и не переразберёт
         logger.warning(f"detect_rotations: vision-запрос упал: {e}")
-        raise HTTPException(status_code=502, detail="Сервис распознавания ориентации недоступен")
+        raise HTTPException(status_code=502, detail="Сервис распознавания ориентации недоступен") from e
     # успешный 200: непарсящееся СОДЕРЖИМОЕ → нули (безопасная деградация на уровне контента)
     try:
         text = resp.json()["choices"][0]["message"]["content"]
