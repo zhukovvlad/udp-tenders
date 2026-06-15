@@ -1,10 +1,25 @@
 import io
+import json
 
+import httpx
 import pikepdf
 import pypdfium2 as pdfium
+import pytest
+import respx
 from PIL import Image
 
 import pdf_orientation as po
+
+# Захватываем настоящий AsyncClient.send на импорте модуля (до autouse-гарда
+# block_real_openrouter из conftest, который рубит любые вызовы к openrouter.ai на
+# уровне send). respx работает на transport-уровне — через настоящий send проходит,
+# поэтому в respx-тестах восстанавливаем его (тот же приём, что в фикстуре mock_openrouter).
+_REAL_SEND = httpx.AsyncClient.send
+
+
+@pytest.fixture
+def _allow_respx(monkeypatch):
+    monkeypatch.setattr(httpx.AsyncClient, "send", _REAL_SEND)
 
 
 def _image_pdf(px_w: int, px_h: int, dpi: float = 150.0, color=(255, 255, 255)) -> bytes:
@@ -111,3 +126,58 @@ def test_apply_rotations_two_rotated_pages():
     for idx in range(2):
         img = pdf[idx].render(scale=1.0).to_pil(); b = io.BytesIO(); img.save(b, format="PNG")
         assert _top_strip_is_dark(b.getvalue())  # обе выпрямлены
+
+
+def _openrouter_reply(text: str) -> httpx.Response:
+    return httpx.Response(200, json={"choices": [{"message": {"content": text}}]})
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_detect_rotations_parses_list(monkeypatch, _allow_respx):
+    monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", "test-key")
+    respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        return_value=_openrouter_reply("Вот повороты: [0, 90, 270]")
+    )
+    out = await po.detect_rotations([b"img0", b"img1", b"img2"])
+    assert out == [0, 90, 270]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_detect_rotations_garbage_to_zeros(monkeypatch, _allow_respx):
+    monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", "test-key")
+    respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        return_value=_openrouter_reply("не смог")
+    )
+    out = await po.detect_rotations([b"img0", b"img1"])
+    assert out == [0, 0]  # длина = числу страниц, всё в 0
+
+
+@pytest.mark.asyncio
+async def test_detect_rotations_too_many_pages():
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as ei:
+        await po.detect_rotations([b"x"] * (po.MAX_DESKEW_PAGES + 1))
+    assert ei.value.status_code == 413
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_detect_rotations_upstream_500_raises_502(monkeypatch, _allow_respx):
+    monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", "test-key")
+    respx.post("https://openrouter.ai/api/v1/chat/completions").mock(return_value=httpx.Response(500))
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as ei:
+        await po.detect_rotations([b"x"])
+    assert ei.value.status_code == 502
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_detect_rotations_prose_around_array(monkeypatch, _allow_respx):
+    monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", "test-key")
+    respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        return_value=_openrouter_reply("Страница 1 и 2: ответ [90, 0]")
+    )
+    assert await po.detect_rotations([b"a", b"b"]) == [90, 0]  # «1»,«2» из прозы не попали

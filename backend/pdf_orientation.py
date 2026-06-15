@@ -3,12 +3,20 @@
 Используется эндпоинтом deskew-reparse. См. спеку
 docs/superpowers/specs/2026-06-15-pdf-orientation-deskew-design.md.
 """
+import base64
 import io
+import json
 import logging
+import re
 
+import httpx
 import pikepdf
 import pypdfium2 as pdfium
+from fastapi import HTTPException
 from PIL import Image
+
+from config import settings
+from pdf_parser import OPENROUTER_URL
 
 logger = logging.getLogger(__name__)
 
@@ -75,3 +83,63 @@ def apply_rotations(pdf_bytes: bytes, rotations: list[int]) -> bytes:
     buf = io.BytesIO()
     result.save(buf)
     return buf.getvalue()
+
+
+DETECT_TIMEOUT = 30.0
+_DETECT_PROMPT = (
+    "На вход — страницы PDF по порядку. Для КАЖДОЙ страницы определи поворот по часовой "
+    "стрелке (0, 90, 180 или 270 градусов), который сделает её вертикально читаемой. "
+    "Верни ТОЛЬКО JSON-массив целых чисел длиной по числу страниц, например [0,90,0]."
+)
+
+
+def render_pages_for_detect(pdf_bytes: bytes, long_side: int = 768) -> list[bytes]:
+    """Уменьшенные JPEG-страницы для vision-детекта (ориентации хватает низкого разрешения)."""
+    pdf = pdfium.PdfDocument(pdf_bytes)
+    images: list[bytes] = []
+    for page in pdf:
+        w, h = page.get_size()
+        scale = long_side / max(w, h)
+        img = page.render(scale=scale, grayscale=True).to_pil()
+        out = io.BytesIO()
+        img.convert("L").save(out, format="JPEG", quality=70)
+        images.append(out.getvalue())
+    return images
+
+
+async def detect_rotations(images: list[bytes]) -> list[int]:
+    """Один vision-запрос: per-page поворот 0/90/180/270. Любой сбой парсинга → нули."""
+    n = len(images)
+    if n > MAX_DESKEW_PAGES:
+        raise HTTPException(status_code=413, detail=f"Слишком много страниц для коррекции (> {MAX_DESKEW_PAGES})")
+    content = [{"type": "text", "text": _DETECT_PROMPT}]
+    for img in images:
+        b64 = base64.b64encode(img).decode()
+        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+    payload = {
+        "model": settings.AI_MODEL,
+        "max_tokens": 200,
+        "messages": [{"role": "user", "content": content}],
+    }
+    headers = {"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}", "Content-Type": "application/json"}
+    timeout = httpx.Timeout(DETECT_TIMEOUT, connect=5.0)  # быстрый фейл на коннекте, долгий read
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(OPENROUTER_URL, headers=headers, json=payload)
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        # транспортный сбой / таймаут / не-2xx → НЕ деградируем в нули (иначе переразберём
+        # оригинал под видом «исправлено»), а сигналим 502; эндпоинт не тронет S3 и не переразберёт
+        logger.warning(f"detect_rotations: vision-запрос упал: {e}")
+        raise HTTPException(status_code=502, detail="Сервис распознавания ориентации недоступен")
+    # успешный 200: непарсящееся СОДЕРЖИМОЕ → нули (безопасная деградация на уровне контента)
+    try:
+        text = resp.json()["choices"][0]["message"]["content"]
+        m = re.search(r"\[[\d,\s]*\]", text)          # берём именно JSON-массив, не любые числа
+        nums = json.loads(m.group(0)) if m else []
+        allowed = {0, 90, 180, 270}
+        rots = [v % 360 if (v % 360) in allowed else 0 for v in nums[:n]]
+    except Exception:  # noqa: BLE001 — кривое содержимое не должно ронять эндпоинт
+        rots = []
+    rots += [0] * (n - len(rots))   # добиваем до длины n
+    return rots
