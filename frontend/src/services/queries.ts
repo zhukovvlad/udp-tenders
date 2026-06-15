@@ -192,6 +192,19 @@ export function useReparseDocument() {
   });
 }
 
+export function useDeskewReparseDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (docId: ID) => invoicesApi.deskewReparseDocument(docId),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: qk.documents.detail(data.id) });
+      qc.invalidateQueries({ queryKey: qk.documents.list(data.project_id) });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      toast.success("Документ выпрямлен и переразобран");
+    },
+  });
+}
+
 export function useUpdateInvoice() {
   const qc = useQueryClient();
   return useMutation({
