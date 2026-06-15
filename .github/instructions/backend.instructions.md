@@ -14,4 +14,4 @@ applyTo: "backend/**"
 - ruff line-length 120, target py3.12, правила E/F/I/B/UP/SIM. `Depends()` в аргументах — ок (B008 игнорится).
 - Все эндпоинты требуют `get_current_user`. Org-level изоляция данных ещё не включена — см. `docs/TECH_DEBT.md`.
 
-Глубже: методология расчётов — `docs/agent/calculations.md`; модели БД — `docs/agent/database.md`; auth — `docs/agent/auth.md`.
+Глубже: методология расчётов — `docs/agent/calculations.md`; модели БД — `docs/agent/database.md`; auth — `docs/agent/auth.md`; парсинг УПД и коррекция ориентации (deskew: detect отдаёт поворот страницы, apply отменяет через `(360−R)`) — `docs/agent/pdf-parsing.md`.
