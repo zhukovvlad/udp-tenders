@@ -398,3 +398,51 @@ def test_update_invoice_inn_without_name_returns_422(client, factories):
         },
     )
     assert resp.status_code == 422
+
+
+def test_update_invoice_renames_supplier_and_cascades(client, factories, db_session):
+    """PUT /invoices/{id}: тот же ИНН, изменённое имя → каноническое переименование
+    поставщика + каскад во все его счета + warning supplier_renamed."""
+    from models import Invoice, Supplier
+
+    supplier = factories.SupplierFactory.create(
+        name="общество с ограниченной ответственностью Ромашка",
+        inn="7707083893",
+    )
+    inv1 = factories.InvoiceFactory.create(
+        supplier_id=supplier.id,
+        supplier_name="общество с ограниченной ответственностью Ромашка",
+        supplier_inn="7707083893",
+    )
+    inv2 = factories.InvoiceFactory.create(
+        supplier_id=supplier.id,
+        supplier_name="общество с ограниченной ответственностью Ромашка",
+        supplier_inn="7707083893",
+    )
+
+    resp = client.put(
+        f"/api/invoices/{inv1.id}",
+        json={
+            "number": inv1.number,
+            "date": str(inv1.date),
+            "supplier_name": "ООО Ромашка",
+            "supplier_inn": "7707083893",
+            "vat_rate": 20.0,
+            "items": [],
+        },
+    )
+    assert resp.status_code == 200
+
+    body = resp.json()
+    assert any(w["code"] == "supplier_renamed" for w in body["warnings"])
+
+    db_session.expire_all()
+    # Каноническое имя обновлено, новый поставщик НЕ создан
+    suppliers = db_session.query(Supplier).filter(Supplier.inn == "7707083893").all()
+    assert len(suppliers) == 1
+    assert suppliers[0].name == "ООО Ромашка"
+    # Каскад: оба счёта получили новое имя
+    for inv_id in (inv1.id, inv2.id):
+        inv = db_session.query(Invoice).filter(Invoice.id == inv_id).first()
+        assert inv.supplier_id == supplier.id
+        assert inv.supplier_name == "ООО Ромашка"
