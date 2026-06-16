@@ -45,6 +45,8 @@ export interface DashboardInvoiceRow {
   vat_rate: number;
   ai_confidence: number | null;
   has_issues: boolean;
+  /** Коды направлений, которых касается счёт (ADR #9: other не направление). [] = прочий. */
+  directions: string[];
   verified: boolean;
   verified_at: ISODateTime | null;
   items: DashboardInvoiceItem[];
