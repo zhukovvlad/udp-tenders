@@ -447,6 +447,14 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                     <TableCell className={`font-medium overflow-hidden border-l-2 ${stage === "review" ? "border-danger" : "border-transparent"}`}>
                       <span className="block whitespace-normal break-all" title={inv.number || "—"}>
                         {inv.number || "—"}
+                        {inv.directions.length === 0 && (
+                          <span
+                            className="ml-1.5 rounded bg-surface-sunken px-1 py-0.5 text-[10px] font-normal text-fg-tertiary align-middle"
+                            title="Без направления (не бетон/арматура)"
+                          >
+                            прочее
+                          </span>
+                        )}
                       </span>
                     </TableCell>
                   )}
