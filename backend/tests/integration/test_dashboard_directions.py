@@ -5,6 +5,7 @@ import pytest
 
 
 def _rebar_class(factories, name="А500С Ø12"):
+    """Класс арматуры (material_type_code=rebar) для тестовых счетов."""
     return factories.MaterialClassFactory.create(material_type_code="rebar", name=name)
 
 
@@ -92,6 +93,7 @@ def test_supplier_project_deviation_additive_scoped(client, factories):
 
 
 def test_calculations_direction_field_and_filter(client, factories):
+    """Поле `direction` в строках calculations + фильтр ?direction= по направлению."""
     project = factories.ProjectFactory.create()
     concrete = factories.MaterialClassFactory.create(name="В25")
     rebar = _rebar_class(factories)
@@ -133,6 +135,7 @@ def test_calculations_direction_filter_does_not_change_class_rows(client, factor
 
 
 def test_calculations_unknown_direction_422(client, factories):
+    """Неизвестное направление в calculations → 422."""
     project = factories.ProjectFactory.create()
     resp = client.get(f"/api/dashboard/calculations?project_id={project.id}&direction=bricks")
     assert resp.status_code == 422
@@ -172,6 +175,7 @@ def _mixed_project(factories):
 
 
 def test_summary_directions_and_invariant(client, factories):
+    """Summary: разбивка по направлениям (оборот/объём/счета/смешанность) + инвариант §5.1."""
     project, *_ = _mixed_project(factories)
     body = client.get(f"/api/dashboard/summary?project_id={project.id}").json()
 
@@ -272,6 +276,7 @@ def test_summary_concrete_only_matches_legacy_fields(client, factories):
 
 
 def test_summary_overpayment_per_direction_sums_to_full(client, factories):
+    """Переплата по направлениям суммируется в полное отклонение объекта (approx)."""
     project, concrete, rebar = _mixed_project(factories)
     factories.ReferencePriceFactory.create(project=project, material_class=concrete, price=8000.0)
     from tests.factories import _unit_id
@@ -323,6 +328,7 @@ def test_invoices_direction_filter_mixed_visible_in_both(client, factories):
 
 
 def test_monthly_summary_direction_scoped(client, factories):
+    """monthly-summary с ?direction= — только позиции направления, в его родной единице."""
     project, *_ = _mixed_project(factories)
     base = f"/api/dashboard/monthly-summary?project_id={project.id}"
     rows = client.get(base + "&direction=concrete").json()
@@ -347,12 +353,14 @@ def test_monthly_summary_without_direction_unchanged(client, factories):
 
 
 def test_invoices_unknown_direction_422(client, factories):
+    """Неизвестное направление в invoices и monthly-summary → 422."""
     project = factories.ProjectFactory.create()
     assert client.get(f"/api/dashboard/invoices?project_id={project.id}&direction=bricks").status_code == 422
     assert client.get(f"/api/dashboard/monthly-summary?project_id={project.id}&direction=bricks").status_code == 422
 
 
 def test_project_suppliers_direction_scoped(client, factories):
+    """Поставщики проекта фильтруются по ?direction= — только касавшиеся направления."""
     project = factories.ProjectFactory.create()
     concrete = factories.MaterialClassFactory.create(name="В25")
     rebar = _rebar_class(factories)
@@ -373,11 +381,13 @@ def test_project_suppliers_direction_scoped(client, factories):
 
 
 def test_project_suppliers_unknown_direction_422(client, factories):
+    """Неизвестное направление в списке поставщиков проекта → 422."""
     project = factories.ProjectFactory.create()
     assert client.get(f"/api/projects/{project.id}/suppliers?direction=bricks").status_code == 422
 
 
 def test_reference_prices_direction_filter(client, factories):
+    """reference-prices фильтруются по ?direction=; неизвестное направление → 422."""
     project = factories.ProjectFactory.create()
     concrete = factories.MaterialClassFactory.create(name="В25")
     rebar = _rebar_class(factories)

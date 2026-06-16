@@ -276,6 +276,7 @@ def list_project_invoices(
     invoices = q.order_by(Invoice.date.desc()).all()
     dir_map = _directions_by_invoice(db, project_id)   # без excl-фильтра: сырой список всех счетов
     def _has_issues(inv):
+        """Счёт «к разбору»: нет позиций или хотя бы одна позиция с проблемой (units)."""
         if not inv.items:
             return True
         return any(item_has_issues(it) for it in inv.items)
