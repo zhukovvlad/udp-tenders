@@ -58,22 +58,13 @@ def _directions_by_invoice(db, project_id, excl_filter=lambda q: q) -> dict[int,
 "directions": sorted(dir_map.get(inv.id, set())),   # [] = прочий
 ```
 
-Поле описательное, не влияет на существующий `?direction=` фильтр эндпоинта.
-
-Дополнительно — добавить `material_type` в сериализацию **позиции** (та же причина: в текущем payload его нет, есть только `material_class` имя и `item_type`):
-
-```python
-"material_type": item.material_class.material_type.code if item.material_class else "other",
-```
-
-`MaterialClass.material_type` — relationship на `MaterialType` (models.py:227), `.code` — код типа (`concrete`/`rebar`/`other`). У сироты `material_class is None` → `"other"`. Поле описательное (как `directions`), ADR #9 не нарушает. Нужно фронту для осмысленной колонки/метки (см. ниже) — сейчас на строке его нет вообще.
+Поле описательное, не влияет на существующий `?direction=` фильтр эндпоинта. Это **единственное** новое поле payload — сигнал «прочий» нужен на уровне счёта (для бейджа и фильтра), per-position тип не сериализуем (см. «Метка сирот» ниже — осознанный YAGNI).
 
 ## Frontend
 
 ### Тип
 
-- `DashboardInvoiceRow` (`types/invoice.ts`): добавить `directions: string[]`.
-- `DashboardInvoiceItem` (`types/invoice.ts`): добавить `material_type: "concrete" | "rebar" | "other"` (бэкенд теперь сериализует его на позиции).
+- `DashboardInvoiceRow` (`types/invoice.ts`): добавить `directions: string[]`. (Это единственное новое поле; `DashboardInvoiceItem` не трогаем.)
 
 ### Размещение списка (пункт согласован — секция, не мини-табы)
 
@@ -89,10 +80,10 @@ def _directions_by_invoice(db, project_id, excl_filter=lambda q: q) -> dict[int,
 - Это гарантирует «бейдж N == строк после фильтра» тавтологически (одна и та же функция над одним массивом), независимо от исключённых поставщиков.
 - **Тонкость с исключёнными поставщиками:** существующий `summary.other_invoice_count` считается с excl-фильтром (исключённые поставщики выкинуты), а `/dashboard/invoices` отдаёт все счета. Поэтому кликабельный счётчик «Прочие» берём из клиентского массива (`invoices`), **не** из `summary.other_invoice_count` — тогда клик→результат всегда совпадают. Это согласуется с тем, как исключения работают везде: KPI-математика их выкидывает, сырой список счетов — показывает все.
 
-### Метка сирот и null-колонки
+### Метка сирот (на уровне счёта, не позиции)
 
-- Колонка «Позиции» сейчас рисует `material_class || item_type`. **Поправка к исходному claim:** у сироты `material_class=null`, `item_type="material"` → отрендерилось бы бессмысленное `"material"` (а не `"other"` — `other` это код `material_type`, которого на позиции раньше не было). С добавленным `material_type` (см. backend) колонка/метка для позиции без класса использует `material_type === "other"` как источник → показываем «прочее» / «—», а не `material`. Существующая ассерта на эту колонку (если появится) должна проверять именно это, не строку `other` из `item_type`.
-- Для строк-сирот (`inv.directions.length === 0`) — мягкий бейдж **«прочее»** рядом с номером (по аналогии с `border-danger` для review). `InvoiceTable` читает `inv.directions` напрямую (поле уже на строке) — доп. проп не нужен. Семантику не трогаем.
+- Сигнал «прочий» вешаем **на счёт**, не на позицию: для строк-сирот (`inv.directions.length === 0`) — мягкий бейдж **«прочее»** рядом с номером (по аналогии с `border-danger` для review). `InvoiceTable` читает `inv.directions` напрямую (поле уже на строке) — доп. проп не нужен. Семантику не трогаем.
+- **Колонку «Позиции» НЕ трогаем (осознанный YAGNI).** Она рисует `material_class || item_type`; у сироты `material_class=null` → покажет `"material"` (по `item_type`). Это мелкая косметика, и она перекрыта бейджем «прочее» на номере счёта — сигнал «это прочий» уже виден на строке. Тянуть `material_type` сквозь payload/тип/моки/рендер ради per-position подписи не оправдано (нет потребителя, который бы это окупил). Если позже в Review-потоке понадобится показывать тип позиции — это отдельная фича со своим потребителем, тогда поле и заводится.
 - **Бейджи ортогональны и могут со-возникать (ожидаемо, не баг).** `has_issues` (danger-border «Разобрать») и «прочее» (`directions=[]`) — независимые оси: `item_has_issues` (`crud/units.py`) реагирует на `quantity<=0` / пустое `raw_name` / ненормализованную единицу / нарушение `qty*price≈amount`, но **не** на `material_class=null` или `material_type=other`. Чистая сирота → `has_issues=false`, бейдж «прочее» без danger-border. Но сирота с ненормализованной единицей (`normalized_unit_id is null`) получит **оба** сигнала одновременно — это корректно (разные оси), при реализации/ревью не принять за дубль рендера.
 
 ## Тесты
@@ -109,9 +100,9 @@ def _directions_by_invoice(db, project_id, excl_filter=lambda q: q) -> dict[int,
 
 ## Файлы
 
-- `backend/routers/dashboard.py` — извлечь `_directions_by_invoice`; переключить `_direction_summaries`; добавить `directions` (на счёт) и `material_type` (на позицию) в `/invoices`.
-- `backend/tests/integration/test_dashboard_directions.py` (или рядом) — тесты резолвера и payload (`directions` + `material_type`).
-- `frontend/src/types/invoice.ts` — `directions: string[]` в `DashboardInvoiceRow`; `material_type` в `DashboardInvoiceItem`.
+- `backend/routers/dashboard.py` — извлечь `_directions_by_invoice`; переключить `_direction_summaries`; добавить `directions` (на счёт) в `/invoices`.
+- `backend/tests/integration/test_dashboard_directions.py` (или рядом) — тесты резолвера и payload (`directions`).
+- `frontend/src/types/invoice.ts` — `directions: string[]` в `DashboardInvoiceRow`.
 - `frontend/src/pages/ProjectPage.tsx` — секция «Счета» в `AllDirectionsSummaryView`, `showOnlyOther`, кликабельный KPI.
-- `frontend/src/components/invoices/InvoiceTable.tsx` — бейдж «прочее» по `inv.directions`; колонка «Позиции» использует `material_type` для позиций без класса.
-- `frontend/src/test/handlers.ts` + тесты — `directions` + `material_type` в моках, новые проверки.
+- `frontend/src/components/invoices/InvoiceTable.tsx` — бейдж «прочее» по `inv.directions`.
+- `frontend/src/test/fixtures.ts` + тесты — `directions` в моках + счёт-сирота, новые проверки.
