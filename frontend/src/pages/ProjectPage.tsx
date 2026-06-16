@@ -201,9 +201,7 @@ function AllDirectionsSummaryView({
     ? invoices.filter((i) => i.directions.length === 0)
     : invoices;
   return (
-    <>
-      <TabBarSlot />
-      <div className="mt-6 space-y-6">
+    <div className="space-y-6">
         {/* KPI ×4 */}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <KpiCard
@@ -321,8 +319,7 @@ function AllDirectionsSummaryView({
             </div>
           )}
         </div>
-      </div>
-    </>
+    </div>
   );
 }
 

@@ -1,17 +1,10 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowDown, ArrowUp, Check, ChevronsUpDown, EyeOff,
+  ArrowDown, ArrowUp, ChevronsUpDown, EyeOff,
   FileEdit, LayoutList, PlusCircle, Search, Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import {
-  Command,
-  CommandGroup,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from "@/components/ui/command";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -21,7 +14,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import {
   Pagination,
@@ -281,9 +273,13 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
           </InputGroupAddon>
         </InputGroup>
 
-        {/* Status facet filter */}
-        <Popover>
-          <PopoverTrigger className="inline-flex items-center gap-1.5 rounded-md border border-input px-2.5 py-1.5 text-sm text-fg-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30">
+        {/* Status facet filter — DropdownMenu (тот же примитив, что «Вид»: корректный
+            фокус-менеджмент Base UI Menu, без скролл-джампа портального Popover) */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-md border border-input px-2.5 py-1.5 text-sm text-fg-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+          >
             <PlusCircle size={13} />
             Статус
             {selectedStages.size > 0 && (
@@ -296,41 +292,31 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                 ))}
               </>
             )}
-          </PopoverTrigger>
-          <PopoverContent className="w-48 p-0" align="start" sideOffset={4}>
-            <Command>
-              <CommandList>
-                <CommandGroup>
-                  {STAGE_FILTER_OPTIONS.map(({ stage, dotClass }) => {
-                    const isSelected = selectedStages.has(stage);
-                    return (
-                      <CommandItem key={stage} onSelect={() => toggleStage(stage)} className="gap-2">
-                        <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${isSelected ? "border-primary bg-primary text-primary-foreground" : "border-border-default"}`}>
-                          {isSelected && <Check size={11} strokeWidth={3} />}
-                        </div>
-                        <span className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} />
-                        {STAGE_CONFIG[stage].label}
-                      </CommandItem>
-                    );
-                  })}
-                </CommandGroup>
-                {selectedStages.size > 0 && (
-                  <>
-                    <CommandSeparator />
-                    <CommandGroup>
-                      <CommandItem
-                        onSelect={() => { setSelectedStages(new Set()); setPage(1); }}
-                        className="justify-center text-xs text-fg-tertiary"
-                      >
-                        Сбросить фильтр
-                      </CommandItem>
-                    </CommandGroup>
-                  </>
-                )}
-              </CommandList>
-            </Command>
-          </PopoverContent>
-        </Popover>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" sideOffset={4} className="min-w-44">
+            {STAGE_FILTER_OPTIONS.map(({ stage, dotClass }) => (
+              <DropdownMenuCheckboxItem
+                key={stage}
+                checked={selectedStages.has(stage)}
+                onCheckedChange={() => toggleStage(stage)}
+              >
+                <span className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} />
+                {STAGE_CONFIG[stage].label}
+              </DropdownMenuCheckboxItem>
+            ))}
+            {selectedStages.size > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="justify-center text-xs text-fg-tertiary"
+                  onClick={() => { setSelectedStages(new Set()); setPage(1); }}
+                >
+                  Сбросить фильтр
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <div className="ml-auto">
           <DropdownMenu>
