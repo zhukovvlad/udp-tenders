@@ -25,6 +25,39 @@ from routers.common import resolve_direction_type
 router = APIRouter()
 
 
+def _directions_by_invoice(db: Session, project_id: int, excl_filter=lambda q: q) -> dict[int, set[str]]:
+    """Коды направлений (material_types, кроме other — ADR #9), которых касается каждый счёт.
+
+    Единый резолвер: match по material_class.material_type_id, item_type='material', distinct.
+    Используется и _direction_summaries (§5.5), и /dashboard/invoices — ОДНА реализация
+    классификации «какие направления у счёта», без второй ветки.
+    excl_filter — опционально (summary передаёт фильтр исключённых поставщиков; список счетов — нет).
+    """
+    direction_types = [t for t in db.query(MaterialType).all() if t.code != "other"]
+    id_to_code = {t.id: t.code for t in direction_types}
+    if not id_to_code:
+        return {}
+    rows = excl_filter(
+        db.query(
+            Invoice.id.label("inv_id"),
+            MaterialClass.material_type_id.label("type_id"),
+        )
+        .join(Document, Invoice.document_id == Document.id)
+        .join(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
+        .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
+        .filter(
+            Document.project_id == project_id,
+            InvoiceItem.item_type == "material",
+            MaterialClass.material_type_id.in_(id_to_code.keys()),
+        )
+        .distinct()
+    ).all()
+    result: dict[int, set[str]] = {}
+    for r in rows:
+        result.setdefault(r.inv_id, set()).add(id_to_code[r.type_id])
+    return result
+
+
 def _direction_summaries(db: Session, project_id: int, excl_filter, calc_rows: list[dict]) -> dict:
     """Разбивка summary по направлениям (спека §5.1–§5.5, §6.1).
 
@@ -76,25 +109,8 @@ def _direction_summaries(db: Session, project_id: int, excl_filter, calc_rows: l
         )
     ).group_by(MaterialClass.material_type_id, UnitOfMeasure.dimension).all()
 
-    # 3) Счета по типам + смешанность (§5.5) — только direction-типы.
-    direction_type_ids = [t.id for t in direction_types]
-    inv_type_rows = []
-    if direction_type_ids:
-        inv_type_rows = excl_filter(
-            db.query(Invoice.id.label("inv_id"), MaterialClass.material_type_id.label("type_id"))
-            .join(Document, Invoice.document_id == Document.id)
-            .join(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
-            .join(MaterialClass, InvoiceItem.material_class_id == MaterialClass.id)
-            .filter(
-                Document.project_id == project_id,
-                InvoiceItem.item_type == "material",
-                MaterialClass.material_type_id.in_(direction_type_ids),
-            )
-            .distinct()
-        ).all()
-    types_by_invoice: dict[int, set[int]] = {}
-    for r in inv_type_rows:
-        types_by_invoice.setdefault(r.inv_id, set()).add(r.type_id)
+    # 3) Счета по направлениям + смешанность (§5.5) — общий резолвер (коды направлений на счёт).
+    types_by_invoice = _directions_by_invoice(db, project_id, excl_filter)
     mixed_invoice_ids = {inv for inv, s in types_by_invoice.items() if len(s) >= 2}
 
     # 4) Переплата по направлениям — из УЖЕ посчитанных calc_rows (ноль лишних прогонов).
@@ -109,7 +125,7 @@ def _direction_summaries(db: Session, project_id: int, excl_filter, calc_rows: l
 
     directions = []
     for t in direction_types:
-        invoice_ids = {inv for inv, s in types_by_invoice.items() if t.id in s}
+        invoice_ids = {inv for inv, s in types_by_invoice.items() if t.code in s}
         if not invoice_ids and not turnover_by_type.get(t.id):
             continue  # направление без данных не показывается (§3.1)
         # default_unit IS NULL → объёма нет (volume=None), все base-позиции уходят в excluded_count — деградация осознанная, у direction-типов default_unit задан сидом
