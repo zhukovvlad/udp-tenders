@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Download, Loader2, Plus, Trash2, Pencil } from "lucide-react";
 
@@ -76,7 +76,7 @@ import { MONTH_NAMES_RU } from "@/lib/constants";
 import type { ID } from "@/types/common";
 import type { ReferencePrice } from "@/types/referencePrice";
 import type { DashboardSummary, DashboardCalculation } from "@/types/dashboard";
-import type { DocumentSummary } from "@/types/invoice";
+import type { DocumentSummary, DashboardInvoiceRow } from "@/types/invoice";
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -161,6 +161,7 @@ function AllDirectionsSummaryView({
   summaryData,
   errorDocCount,
   calculations,
+  invoices,
   onOpenErrors,
   changeDirection,
   periodStart,
@@ -176,6 +177,7 @@ function AllDirectionsSummaryView({
   summaryData: DashboardSummary;
   errorDocCount: number;
   calculations: DashboardCalculation[];
+  invoices: DashboardInvoiceRow[];
   onOpenErrors: () => void;
   changeDirection: (code: string) => void;
   periodStart: string;
@@ -189,6 +191,15 @@ function AllDirectionsSummaryView({
   onPeriodReset: () => void;
 }) {
   const allDev = deviationKpi(summaryData.full_deviation_amount);
+  const [showOnlyOther, setShowOnlyOther] = useState(false);
+  const invoicesSectionRef = useRef<HTMLDivElement>(null);
+  const otherCount = useMemo(
+    () => invoices.filter((i) => i.directions.length === 0).length,
+    [invoices],
+  );
+  const shownInvoices = showOnlyOther
+    ? invoices.filter((i) => i.directions.length === 0)
+    : invoices;
   return (
     <>
       <TabBarSlot />
@@ -225,7 +236,14 @@ function AllDirectionsSummaryView({
             breakdown={[ /* breakdown, не suffix: длинная разбивка в строку у числа теснится */
               ...summaryData.directions.map((d) => ({ label: d.name, value: formatNumber(d.invoice_count) })),
               ...(summaryData.mixed_invoice_count > 0 ? [{ label: "Смешанные", value: formatNumber(summaryData.mixed_invoice_count) }] : []),
-              ...(summaryData.other_invoice_count > 0 ? [{ label: "Прочие", value: formatNumber(summaryData.other_invoice_count) }] : []),
+              ...(otherCount > 0 ? [{
+                label: "Прочие",
+                value: formatNumber(otherCount),
+                onClick: () => {
+                  setShowOnlyOther(true);
+                  invoicesSectionRef.current?.scrollIntoView?.({ behavior: "smooth" });
+                },
+              }] : []),
             ]}
           />
           <KpiCard
@@ -278,6 +296,31 @@ function AllDirectionsSummaryView({
           onPeriodEndChange={onPeriodEndChange}
           onPeriodReset={onPeriodReset}
         />
+
+        {/* Все счета объекта (включая прочие/без направления) */}
+        <div ref={invoicesSectionRef} className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-serif text-lg">
+              Счета{invoices.length > 0 ? ` · ${invoices.length}` : ""}
+            </h2>
+            {showOnlyOther && (
+              <button
+                type="button"
+                className="text-sm text-accent-text hover:underline"
+                onClick={() => setShowOnlyOther(false)}
+              >
+                × все счета
+              </button>
+            )}
+          </div>
+          {invoices.length === 0 ? (
+            <p className="text-sm text-fg-tertiary">Нет счетов.</p>
+          ) : (
+            <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
+              <InvoiceTable invoices={shownInvoices} />
+            </div>
+          )}
+        </div>
       </div>
     </>
   );
@@ -1430,6 +1473,7 @@ export default function ProjectPage() {
             summaryData={summaryData}
             errorDocCount={errorDocCount}
             calculations={calculations}
+            invoices={invoices}
             onOpenErrors={() =>
               setSearchParams((p) => {
                 const n = new URLSearchParams(p);
