@@ -21,6 +21,7 @@ import {
   useDocument,
   useUpdateInvoice,
   useReparseDocument,
+  useDeskewReparseDocument,
   useDeleteDocument,
   useVerifyInvoice,
   useUnverifyInvoice,
@@ -41,6 +42,7 @@ export default function Review() {
   const docQ = useDocument(docId);
   const update = useUpdateInvoice();
   const reparse = useReparseDocument();
+  const deskew = useDeskewReparseDocument();
   const remove = useDeleteDocument();
   const verify = useVerifyInvoice();
   const unverify = useUnverifyInvoice();
@@ -186,6 +188,15 @@ export default function Review() {
               className="text-fg-secondary underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
             >
               Переразобрать
+            </button>
+            <button
+              type="button"
+              onClick={() => { setUnitWarnings([]); deskew.mutate(docId); }}
+              disabled={deskew.isPending || reparse.isPending || verify.isPending || unverify.isPending || documentLocked}
+              title={documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
+              className="text-fg-secondary underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
+            >
+              Выпрямить и переразобрать
             </button>
           </div>
         </div>

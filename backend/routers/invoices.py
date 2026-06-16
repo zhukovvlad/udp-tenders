@@ -3,6 +3,7 @@ import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
+from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
@@ -156,6 +157,42 @@ def get_document_pdf(doc_id: int, db: Session = Depends(get_db)):
     return Response(content=file_bytes, media_type="application/pdf")
 
 
+async def _reparse_from_s3(doc, db: Session, pdf_bytes: bytes | None = None) -> dict:
+    """Удалить старые СФ, распарсить PDF (переданный или скачанный из S3), выставить статус.
+    Возвращает сериализованный документ."""
+    old_count = len(doc.invoices)
+    for inv in list(doc.invoices):
+        db.delete(inv)
+    db.commit()
+    logger.info(f"Reparse: удалено старых СФ для doc={doc.id}: {old_count}")
+
+    if pdf_bytes is None:
+        try:
+            pdf_bytes = download_file(doc.s3_key)
+            logger.info(f"Reparse: скачан PDF из S3 (key={doc.s3_key}, размер={len(pdf_bytes)})")
+        except Exception as e:
+            logger.exception(f"Reparse: ошибка скачивания из S3 для doc={doc.id}")
+            raise HTTPException(status_code=404, detail=f"Файл не найден в хранилище: {e}")
+
+    from pdf_parser import parse_invoice_pdf
+    result = await parse_invoice_pdf(pdf_bytes, db, doc.id)
+
+    if result.get("error"):
+        doc.status = "error"
+        doc.doc_type = "unknown"
+        db.commit()
+        logger.warning(f"Reparse doc={doc.id} завершён с ошибкой: {result['error']}")
+        db.refresh(doc)
+        return _serialize_document(doc)
+
+    doc.doc_type = result.get("doc_type", "invoice")
+    doc.status = "parsed"
+    db.commit()
+    db.refresh(doc)
+    logger.info(f"Reparse doc={doc.id} успешно завершён, СФ: {len(result.get('invoices_created', []))}")
+    return _serialize_document(doc)
+
+
 @router.post("/documents/{doc_id}/reparse")
 async def reparse_document(doc_id: int, db: Session = Depends(get_db)):
     """Повторить парсинг документа. Удаляет ранее распознанные СФ и парсит заново из S3."""
@@ -170,38 +207,67 @@ async def reparse_document(doc_id: int, db: Session = Depends(get_db)):
     if any(inv.verified for inv in doc.invoices):
         raise HTTPException(status_code=409, detail="Документ содержит подтверждённые СФ — снимите подтверждение перед повторным разбором")
 
-    # Удаляем ранее распознанные СФ (cascade удалит позиции)
-    old_count = len(doc.invoices)
-    for inv in list(doc.invoices):
-        db.delete(inv)
-    db.commit()
-    logger.info(f"Reparse: удалено старых СФ для doc={doc_id}: {old_count}")
+    return await _reparse_from_s3(doc, db)
+
+
+def _is_not_found(exc: Exception) -> bool:
+    if isinstance(exc, FileNotFoundError):           # in-memory-фикстура тестов
+        return True
+    if isinstance(exc, ClientError):                 # boto3 в проде
+        # AWS S3 отдаёт семантические коды NoSuchKey/NoSuchBucket; "404" оставлен
+        # намеренно — MinIO (наш S3-совместимый бэкенд) на HeadObject/GetObject
+        # возвращает именно HTTP-код "404" вместо семантического.
+        return exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404", "NoSuchBucket")
+    return False
+
+
+@router.post("/documents/{doc_id}/deskew-reparse")
+async def deskew_reparse_document(doc_id: int, db: Session = Depends(get_db)):
+    """Определить ориентацию страниц, выправить повёрнутые (raster) и переразобрать.
+    Оригинал сохраняется в {s3_key}.orig; deskew всегда стартует от оригинала (идемпотентно)."""
+    import pdf_orientation
+
+    doc = get_document(db, doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    if not doc.s3_key:
+        raise HTTPException(status_code=400, detail="PDF недоступен в хранилище")
+    if any(inv.verified for inv in doc.invoices):
+        raise HTTPException(status_code=409, detail="Документ содержит подтверждённые СФ — снимите подтверждение перед коррекцией")
+
+    orig_key = f"{doc.s3_key}.orig"
+    # Источник — всегда оригинал: если бэкап есть, берём его. Различаем «нет бэкапа»
+    # (ожидаемо → fallback) и транзиентный сбой S3 (→ 502): иначе при живом .orig, но
+    # упавшем чтении, has_backup=False и upload_file(...orig_key) затрёт настоящий оригинал.
+    try:
+        source_bytes = download_file(orig_key)
+        has_backup = True
+    except Exception as e:
+        if not _is_not_found(e):
+            logger.exception(f"Deskew doc={doc_id}: ошибка чтения {orig_key}")
+            raise HTTPException(status_code=502, detail="Хранилище временно недоступно")
+        source_bytes = download_file(doc.s3_key)
+        has_backup = False
 
     try:
-        file_bytes = download_file(doc.s3_key)
-        logger.info(f"Reparse: скачан PDF из S3 (key={doc.s3_key}, размер={len(file_bytes)})")
+        corrected, rotations = await pdf_orientation.deskew_pdf(source_bytes)
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.exception(f"Reparse: ошибка скачивания из S3 для doc={doc_id}")
-        raise HTTPException(status_code=404, detail=f"Файл не найден в хранилище: {e}")
+        logger.exception(f"Deskew doc={doc_id}: ошибка коррекции")
+        raise HTTPException(status_code=422, detail=f"Не удалось обработать PDF: {e}")
 
-    from pdf_parser import parse_invoice_pdf
-    result = await parse_invoice_pdf(file_bytes, db, doc.id)
+    if any(r % 360 for r in rotations):
+        if not has_backup:
+            upload_file(source_bytes, orig_key)   # одноразовый бэкап оригинала
+        upload_file(corrected, doc.s3_key)        # перезапись основным ключом
+        pdf_for_reparse = corrected
+    else:
+        pdf_for_reparse = source_bytes
 
-    if result.get("error"):
-        doc.status = "error"
-        doc.doc_type = "unknown"
-        db.commit()
-        logger.warning(f"Reparse doc={doc_id} завершён с ошибкой: {result['error']}")
-        db.refresh(doc)
-        return _serialize_document(doc)
-
-    doc.doc_type = result.get("doc_type", "invoice")
-    doc.status = "parsed"
-    db.commit()
-    db.refresh(doc)
-    logger.info(f"Reparse doc={doc_id} успешно завершён, СФ: {len(result.get('invoices_created', []))}")
-
-    return _serialize_document(doc)
+    result = await _reparse_from_s3(doc, db, pdf_bytes=pdf_for_reparse)
+    result["rotations_applied"] = rotations
+    return result
 
 
 @router.post("/upload")

@@ -5,7 +5,7 @@
 ## Стек
 Backend: Python 3.12+, FastAPI, SQLAlchemy (sync), Alembic, pydantic-settings; auth — pyjwt HS256 + argon2, httpOnly cookies, CSRF.
 Frontend: React 19, TS (strict), Vite, shadcn/ui, Tailwind v4, Recharts, TanStack Query v5.
-PostgreSQL (Neon) · MinIO (S3) · OpenRouter API (Claude Vision, `PDF_ENGINE=native`).
+PostgreSQL (Neon) · MinIO (S3) · OpenRouter API (Claude Vision, `PDF_ENGINE=native`); pypdfium2 + pikepdf + Pillow — raster-коррекция ориентации страниц (deskew).
 
 ## Команды — только через `just`, никогда `cd backend && ...`
 `install` · `dev-backend` · `dev-frontend` · `test` · `test-backend-unit` · `test-backend-integration` · `test-frontend` · `lint` · `typecheck-frontend` · `db-migrate` · `create-superuser` · `create-org`
@@ -29,7 +29,7 @@ CI: GitHub Actions (`.github/workflows/backend-tests.yml`) гоняет ruff + �
 - Обзор архитектуры и планы → `docs/agent/architecture.md`
 - Модели БД и связи → `docs/agent/database.md`
 - Расчёты (avg_price, направления/direction, разноска, коридор, Decimal, экспорт) → `docs/agent/calculations.md`
-- Парсинг УПД и выбор движка → `docs/agent/pdf-parsing.md`
+- Парсинг УПД, выбор движка, коррекция ориентации (deskew-reparse) → `docs/agent/pdf-parsing.md`
 - Аутентификация и роли → `docs/agent/auth.md`
 - Поставщики: исключения и ограничения MVP → `docs/agent/suppliers.md`
 - Тестирование → `docs/testing.md`

@@ -27,6 +27,12 @@ export const invoicesApi = {
     );
     return data;
   },
+  async deskewReparseDocument(docId: ID): Promise<DocumentDetail> {
+    const { data } = await api.post<DocumentDetail>(
+      `/invoices/documents/${docId}/deskew-reparse`
+    );
+    return data;
+  },
   async update(invoiceId: ID, input: InvoiceUpdateInput): Promise<InvoiceUpdateResult> {
     const { data } = await api.put<InvoiceUpdateResult>(`/invoices/${invoiceId}`, input);
     return data;
