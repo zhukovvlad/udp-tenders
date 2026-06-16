@@ -2,6 +2,7 @@ from datetime import date
 
 
 def test_summary_empty(client, factories):
+    """Пустой объект: нули в агрегатах и None в датах/компенсации за период."""
     project = factories.ProjectFactory.create()
     response = client.get(f"/api/dashboard/summary?project_id={project.id}")
     assert response.status_code == 200
@@ -12,7 +13,7 @@ def test_summary_empty(client, factories):
     assert body["total_qty"] == 0
     assert body["first_invoice_date"] is None
     assert body["last_invoice_date"] is None
-    assert body["full_deviation_amount"] is None
+    assert body["full_compensation_amount"] is None
 
 
 def test_summary_aggregates_materials(client, factories):
@@ -30,7 +31,8 @@ def test_summary_aggregates_materials(client, factories):
     assert body["invoice_count"] == 1
 
 
-def test_summary_with_reference_price_computes_deviation(client, factories):
+def test_summary_with_corridor_computes_compensation(client, factories):
+    """full_compensation_amount считается, когда у класса включён коридор компенсации."""
     project = factories.ProjectFactory.create()
     mc = factories.MaterialClassFactory.create()
     doc = factories.DocumentFactory.create(project=project)
@@ -39,18 +41,23 @@ def test_summary_with_reference_price_computes_deviation(client, factories):
         invoice=inv, material_class=mc, item_type="material",
         quantity=10, unit_price=9000, amount=90000,
     )
-    # avg_price includes VAT: (90000+18000)/10=10800; ref=8000; deviation=(10800-8000)*10=28000
+    # avg_price includes VAT: (90000+18000)/10=10800; ref=8000.
     factories.ReferencePriceFactory.create(
         project=project, material_class=mc,
         price=8000.0,
         period_start=date(2026, 1, 1), period_end=date(2026, 12, 31),
+    )
+    # corridor_pct=0 → любое отклонение компенсируется: comp=(10800-8000)*10=28000
+    client.put(
+        f"/api/projects/{project.id}/corridors/class/{mc.id}",
+        json={"is_compensable": True, "corridor_pct": 0},
     )
 
     response = client.get(f"/api/dashboard/summary?project_id={project.id}")
     body = response.json()
     assert body["first_invoice_date"] == "2026-03-15"
     assert body["last_invoice_date"] == "2026-03-15"
-    assert body["full_deviation_amount"] == 28000.0
+    assert body["full_compensation_amount"] == 28000.0
 
 
 def test_calculations_endpoint_returns_live_data(client, factories):

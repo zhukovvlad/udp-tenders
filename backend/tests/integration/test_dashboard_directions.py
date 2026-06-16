@@ -275,20 +275,26 @@ def test_summary_concrete_only_matches_legacy_fields(client, factories):
     assert body["mixed_invoice_count"] == 0 and body["other_invoice_count"] == 0
 
 
-def test_summary_overpayment_per_direction_sums_to_full(client, factories):
-    """Переплата по направлениям суммируется в полное отклонение объекта (approx)."""
+def test_summary_compensation_per_direction_sums_to_full(client, factories):
+    """Компенсация по направлениям суммируется в полную компенсацию объекта (approx)."""
     project, concrete, rebar = _mixed_project(factories)
     factories.ReferencePriceFactory.create(project=project, material_class=concrete, price=8000.0)
     from tests.factories import _unit_id
     factories.ReferencePriceFactory.create(
         project=project, material_class=rebar, price=10000.0, unit_id=_unit_id("TON"))
+    # corridor_pct=0 → любое отклонение компенсируется (whitelist по типам).
+    for code in ("concrete", "rebar"):
+        client.put(
+            f"/api/projects/{project.id}/corridors/type/{code}",
+            json={"is_compensable": True, "corridor_pct": 0},
+        )
 
     body = client.get(f"/api/dashboard/summary?project_id={project.id}").json()
     by_code = {d["code"]: d for d in body["directions"]}
     overpayments = [d["overpayment"] for d in body["directions"] if d["overpayment"] is not None]
     # Слагаемые округлены независимо при сериализации → approx (та же причина,
     # что у инварианта оборота; источник один — calc_rows, потерь быть не может).
-    assert sum(overpayments) == pytest.approx(body["full_deviation_amount"], abs=0.05)
+    assert sum(overpayments) == pytest.approx(body["full_compensation_amount"], abs=0.05)
     assert by_code["concrete"]["overpayment"] is not None
 
 

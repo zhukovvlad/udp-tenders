@@ -313,12 +313,12 @@ describe("Секции по направлениям (groups)", () => {
       <DeviationChart
         periodFilterActive
         calculations={[
-          makeCalc({ material_class_id: 1, material_class_name: "В25", deviation_amount: 10000 }),
+          makeCalc({ material_class_id: 1, material_class_name: "В25", compensation_amount: 10000 }),
           makeCalc({
             material_class_id: 2,
             material_class_name: "А500С Ø12",
             direction: "rebar",
-            deviation_amount: 5000,
+            compensation_amount: 5000,
           }),
         ]}
         groups={[
@@ -329,7 +329,7 @@ describe("Секции по направлениям (groups)", () => {
     );
     expect(screen.getByTestId("deviation-group-concrete")).toHaveTextContent("Бетон");
     expect(screen.getByTestId("deviation-group-rebar")).toHaveTextContent("Арматура");
-    // Subtotals: deviation_amount=10000 → "+10 000 ₽", deviation_amount=5000 → "+5 000 ₽"
+    // Subtotals = Σ компенсаций: compensation_amount=10000 → "+10 000 ₽", 5000 → "+5 000 ₽"
     // formatMoney uses ru-RU locale with non-breaking space (U+00A0) as thousands separator
     expect(screen.getByTestId("deviation-group-concrete")).toHaveTextContent(/\+10[\s]000/);
     expect(screen.getByTestId("deviation-group-rebar")).toHaveTextContent(/\+5[\s]000/);
@@ -353,8 +353,8 @@ describe("Секции по направлениям (groups)", () => {
     );
     expect(screen.getByTestId("deviation-group-concrete")).toBeInTheDocument();
     expect(screen.queryByTestId("deviation-group-rebar")).not.toBeInTheDocument();
-    // Баннер «Переплата/Экономия» не дублируется в режиме секций
-    expect(screen.queryByText(/Переплата|Экономия/)).not.toBeInTheDocument();
+    // Баннер «Компенсация подрядчику/подрядчиком» не дублируется в режиме секций
+    expect(screen.queryByText(/Компенсация подрядчик/)).not.toBeInTheDocument();
   });
 });
 

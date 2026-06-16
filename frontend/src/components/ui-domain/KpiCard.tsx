@@ -7,6 +7,9 @@ interface KpiCardProps {
   value?: string;
   delta?: { value: string; tone: "up" | "down" | "neutral" };
   suffix?: ReactNode;
+  /** Подпись под основным значением, отдельной строкой (в один ряд, без переноса) —
+   * для длинных пояснений вроде «70% оборота объекта», которые ломаются как inline-suffix. */
+  caption?: ReactNode;
   valueClassName?: string;
   className?: string;
   breakdown?: { label: string; value: string; onClick?: () => void }[];
@@ -16,7 +19,7 @@ interface KpiCardProps {
   values?: { label: string; value: string }[];
 }
 
-export function KpiCard({ label, value, delta, suffix, valueClassName, className, breakdown, values }: KpiCardProps) {
+export function KpiCard({ label, value, delta, suffix, caption, valueClassName, className, breakdown, values }: KpiCardProps) {
   return (
     <div
       className={cn(
@@ -41,6 +44,9 @@ export function KpiCard({ label, value, delta, suffix, valueClassName, className
           {value}
           {suffix && <span className="ml-1.5 text-sm font-normal text-fg-secondary">{suffix}</span>}
         </div>
+      )}
+      {caption && (
+        <div className="mt-1 whitespace-nowrap text-xs text-fg-tertiary">{caption}</div>
       )}
       {breakdown && breakdown.length > 0 && (
         <div className="mt-2 space-y-0.5">

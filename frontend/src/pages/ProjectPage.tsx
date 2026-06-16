@@ -82,17 +82,19 @@ import type { DocumentSummary, DashboardInvoiceRow } from "@/types/invoice";
 // Helpers
 // ─────────────────────────────────────────────
 
-/** KPI «Переплата/Экономия» — подпись, значение и danger/accent-классы.
- * Используется и на сводке «Все» (full_deviation_amount), и в режиме
- * направления (direction.overpayment). */
+/** KPI «Компенсация» — подпись, значение и danger/accent-классы. Значение —
+ * компенсация за пределами коридора: на сводке «Все» (full_compensation_amount),
+ * в режиме направления (direction.overpayment). Знак задаёт сторону: + (доплата
+ * поставщику) → «подрядчику», − (возврат заказчику) → «подрядчиком». Период
+ * вынесен в подвал KPI-ряда, поэтому в знаковых подписях его не дублируем. */
 function deviationKpi(amount: number | null | undefined) {
   return {
     label:
       amount != null
         ? amount > 0
-          ? "Переплата за весь период"
-          : "Экономия за весь период"
-        : "Отклонение (весь период)",
+          ? "Компенсация подрядчику"
+          : "Компенсация подрядчиком"
+        : "Компенсация за весь период",
     value:
       amount != null
         ? amount > 0
@@ -190,7 +192,7 @@ function AllDirectionsSummaryView({
   onPeriodEndChange: (v: string) => void;
   onPeriodReset: () => void;
 }) {
-  const allDev = deviationKpi(summaryData.full_deviation_amount);
+  const allDev = deviationKpi(summaryData.full_compensation_amount);
   const [showOnlyOther, setShowOnlyOther] = useState(false);
   const invoicesSectionRef = useRef<HTMLDivElement>(null);
   const otherCount = useMemo(
@@ -519,19 +521,23 @@ export default function ProjectPage() {
 
   const hasCalculations = calculations.length > 0;
 
-  // Effective period: user's filter OR auto-detected from returned data (cosmetic display only,
+  // Effective period: user's filter OR auto-detected range (cosmetic display only,
   // not sent to the API — API auto-detects when periodStart/periodEnd are empty).
+  // Дефолт календаря — точные даты первой/последней СФ (из summary), как в подвале
+  // KPI-ряда; calc-строки помесячные (конец месяца) — потому fallback, не источник.
   const dataStart = useMemo(
-    () => calculations.length > 0
-      ? calculations.reduce((m, c) => (c.period_start < m ? c.period_start : m), calculations[0].period_start)
-      : "",
-    [calculations],
+    () => summaryQ.data?.first_invoice_date
+      ?? (calculations.length > 0
+        ? calculations.reduce((m, c) => (c.period_start < m ? c.period_start : m), calculations[0].period_start)
+        : ""),
+    [calculations, summaryQ.data?.first_invoice_date],
   );
   const dataEnd = useMemo(
-    () => calculations.length > 0
-      ? calculations.reduce((m, c) => (c.period_end > m ? c.period_end : m), calculations[0].period_end)
-      : "",
-    [calculations],
+    () => summaryQ.data?.last_invoice_date
+      ?? (calculations.length > 0
+        ? calculations.reduce((m, c) => (c.period_end > m ? c.period_end : m), calculations[0].period_end)
+        : ""),
+    [calculations, summaryQ.data?.last_invoice_date],
   );
   const displayStart = periodStart || dataStart;
   const displayEnd   = periodEnd   || dataEnd;
@@ -685,7 +691,7 @@ export default function ProjectPage() {
                 leftIcon={<Plus size={14} />}
                 onClick={() => setUploadOpen(true)}
               >
-                + Добавить счёт
+                Добавить счёт
               </Button>
             </>
           }
@@ -748,11 +754,11 @@ export default function ProjectPage() {
           <TabsContent value="overview" className="mt-6 space-y-6">
             {/* KPI row */}
             {summaryQ.data && (() => {
-              const { first_invoice_date, last_invoice_date, full_deviation_amount } = summaryQ.data;
+              const { first_invoice_date, last_invoice_date, full_compensation_amount } = summaryQ.data;
 
               // Срез направления (§3.3); undefined в legacy-режиме → старый KPI-блок
               const dir = directions?.find((d) => d.code === scopedDirection);
-              const dev = deviationKpi(dir ? dir.overpayment : full_deviation_amount);
+              const dev = deviationKpi(dir ? dir.overpayment : full_compensation_amount);
 
               return (
                 <>
@@ -761,7 +767,7 @@ export default function ProjectPage() {
                       <KpiCard
                         label="Оборот, ₽ с НДС"
                         value={formatMoney(dir.turnover)}
-                        suffix={
+                        caption={
                           summaryQ.data.total_amount > 0
                             ? `${Math.round((dir.turnover / summaryQ.data.total_amount) * 100)}% оборота объекта`
                             : undefined

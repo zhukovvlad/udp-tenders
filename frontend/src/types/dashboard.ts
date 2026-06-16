@@ -6,7 +6,8 @@ export interface DirectionSummary {
   name: string;
   /** Оборот направления по позициям, ₽ с НДС (спека §5.1). */
   turnover: number;
-  /** Σ deviation_amount классов направления; null — нет базовых цен. */
+  /** Σ compensation_amount классов направления (компенсация за пределами
+   * коридора); null — ни один класс направления не компенсируется. */
   overpayment: number | null;
   /** Объём в родной единице направления (только base-классы, §5.2). */
   volume: number | null;
@@ -28,7 +29,9 @@ export interface DashboardSummary {
   total_qty: number;
   first_invoice_date: ISODate | null;
   last_invoice_date: ISODate | null;
-  full_deviation_amount: number | null;
+  /** Σ compensation_amount всех классов за весь период; null — ничего не
+   * компенсируется. Используется в KPI «Переплата за весь период». */
+  full_compensation_amount: number | null;
   /** Направления с данными, без типа other (ADR #9); порядок — по id типа. */
   directions: DirectionSummary[];
   /** Счета с позициями ≥2 направлений (§5.5). */
