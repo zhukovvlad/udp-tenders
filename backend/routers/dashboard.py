@@ -274,6 +274,7 @@ def list_project_invoices(
         )
         q = q.filter(direction_exists)
     invoices = q.order_by(Invoice.date.desc()).all()
+    dir_map = _directions_by_invoice(db, project_id)   # без excl-фильтра: сырой список всех счетов
     def _has_issues(inv):
         if not inv.items:
             return True
@@ -290,6 +291,7 @@ def list_project_invoices(
             "vat_rate": inv.vat_rate,
             "ai_confidence": inv.ai_confidence,
             "has_issues": _has_issues(inv),
+            "directions": sorted(dir_map.get(inv.id, set())),   # [] = прочий
             "verified": inv.verified,
             "verified_at": inv.verified_at.isoformat() if inv.verified_at else None,
             "items": [

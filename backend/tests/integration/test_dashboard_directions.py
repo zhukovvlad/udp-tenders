@@ -424,3 +424,29 @@ def test_reference_price_patch_for_other_type_class_rejected(client, factories):
     resp = client.patch(f"/api/reference-prices/{rp.id}", json={"price": 200})
     assert resp.status_code == 422
     assert "Прочее" in resp.json()["detail"]
+
+
+def test_dashboard_invoices_directions_field(client, factories):
+    """Каждый счёт несёт directions: коды направлений; смешанный — оба, прочий — []."""
+    project = factories.ProjectFactory.create()
+    concrete = factories.MaterialClassFactory.create(name="В25")          # concrete
+    rebar = _rebar_class(factories)                                        # rebar
+    doc = factories.DocumentFactory.create(project=project)
+
+    # смешанный счёт: бетон + арматура
+    mixed = factories.InvoiceFactory.create(document=doc, number="MIX", date=date(2026, 3, 10))
+    factories.InvoiceItemFactory.create(
+        invoice=mixed, material_class=concrete, item_type="material",
+        quantity=10, unit_price=8000, amount=80000)
+    _rebar_item(factories, mixed, rebar, qty=2, unit_price=10000)
+
+    # счёт-сирота: материал без класса (material_class=None)
+    orphan = factories.InvoiceFactory.create(document=doc, number="ORPHAN", date=date(2026, 3, 11))
+    factories.InvoiceItemFactory.create(
+        invoice=orphan, material_class=None, item_type="material",
+        quantity=1, unit_price=5000, amount=5000)
+
+    rows = client.get(f"/api/dashboard/invoices?project_id={project.id}").json()
+    by_number = {r["number"]: r for r in rows}
+    assert sorted(by_number["MIX"]["directions"]) == ["concrete", "rebar"]
+    assert by_number["ORPHAN"]["directions"] == []
