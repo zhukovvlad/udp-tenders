@@ -2,6 +2,7 @@ from datetime import date
 
 
 def test_summary_empty(client, factories):
+    """Пустой объект: нули в агрегатах и None в датах/компенсации за период."""
     project = factories.ProjectFactory.create()
     response = client.get(f"/api/dashboard/summary?project_id={project.id}")
     assert response.status_code == 200
@@ -31,6 +32,7 @@ def test_summary_aggregates_materials(client, factories):
 
 
 def test_summary_with_corridor_computes_compensation(client, factories):
+    """full_compensation_amount считается, когда у класса включён коридор компенсации."""
     project = factories.ProjectFactory.create()
     mc = factories.MaterialClassFactory.create()
     doc = factories.DocumentFactory.create(project=project)
