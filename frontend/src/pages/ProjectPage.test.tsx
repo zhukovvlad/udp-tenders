@@ -185,8 +185,9 @@ describe("ProjectPage", () => {
 
   it("shows all three invoice stages in the invoices tab", async () => {
     server.use(
+      // только три stage-репрезентативных счёта (без счёта-сироты — он здесь шум)
       http.get("/api/dashboard/invoices", () =>
-        HttpResponse.json(sampleDashboardInvoices)
+        HttpResponse.json(sampleDashboardInvoices.filter((i) => i.directions.length > 0))
       )
     );
 
@@ -210,8 +211,9 @@ describe("ProjectPage", () => {
       http.get("/api/settings", () =>
         HttpResponse.json({ api_key_set: true, model: "m", confidence_threshold: 0.9 })
       ),
+      // без счёта-сироты — тест про порог классификации на трёх счетах
       http.get("/api/dashboard/invoices", () =>
-        HttpResponse.json(sampleDashboardInvoices)
+        HttpResponse.json(sampleDashboardInvoices.filter((i) => i.directions.length > 0))
       )
     );
 
@@ -1101,6 +1103,30 @@ describe("ProjectPage", () => {
       renderProject("1", "?direction=rebar");
       await screen.findByTestId("project-page-tabs-list");
       await waitFor(() => expect(seen).toContain("rebar"));
+    });
+  });
+
+  it("shows all invoices (including orphan) in «Все направления» summary", async () => {
+    mockSummary(sampleDashboardSummaryMulti);
+    renderProject("1", "?direction=all");
+    // СФ-OTHER (directions=[]) виден в общем списке сводки
+    expect(await screen.findByText("СФ-OTHER")).toBeInTheDocument();
+    // и несёт бейдж «прочее»
+    expect(screen.getByText("прочее")).toBeInTheDocument();
+  });
+
+  it("«Прочие · N» KPI filters the invoice list to orphans only", async () => {
+    mockSummary(sampleDashboardSummaryMulti);
+    const user = userEvent.setup();
+    renderProject("1", "?direction=all");
+    // дождаться полного списка (есть бетонный СФ-CONFIRMED)
+    expect(await screen.findByText("СФ-CONFIRMED")).toBeInTheDocument();
+    // клик по кликабельной строке «Прочие» (label содержит число прочих = 1)
+    await user.click(screen.getByRole("button", { name: /Прочие/i }));
+    await waitFor(() => {
+      // после фильтра остаются только сироты
+      expect(screen.getByText("СФ-OTHER")).toBeInTheDocument();
+      expect(screen.queryByText("СФ-CONFIRMED")).not.toBeInTheDocument();
     });
   });
 });

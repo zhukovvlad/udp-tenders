@@ -9,7 +9,7 @@ interface KpiCardProps {
   suffix?: ReactNode;
   valueClassName?: string;
   className?: string;
-  breakdown?: { label: string; value: string }[];
+  breakdown?: { label: string; value: string; onClick?: () => void }[];
   /** Мультизначный вариант (KPI «Объёмы»): строка на направление — имя слева,
    * значение в родной единице справа. Имя в именительном падеже («Бетон — 5 677,5 м³»):
    * никаких склонений в коде — формат масштабируется на любое будущее направление. */
@@ -44,12 +44,24 @@ export function KpiCard({ label, value, delta, suffix, valueClassName, className
       )}
       {breakdown && breakdown.length > 0 && (
         <div className="mt-2 space-y-0.5">
-          {breakdown.map((b) => (
-            <div key={b.label} className="flex items-center justify-between gap-2 text-xs text-fg-tertiary">
-              <span>{b.label}</span>
-              <span className="font-mono">{b.value}</span>
-            </div>
-          ))}
+          {breakdown.map((b) =>
+            b.onClick ? (
+              <button
+                key={b.label}
+                type="button"
+                onClick={b.onClick}
+                className="flex w-full items-center justify-between gap-2 text-xs text-accent-text hover:underline"
+              >
+                <span>{b.label}</span>
+                <span className="font-mono">{b.value}</span>
+              </button>
+            ) : (
+              <div key={b.label} className="flex items-center justify-between gap-2 text-xs text-fg-tertiary">
+                <span>{b.label}</span>
+                <span className="font-mono">{b.value}</span>
+              </div>
+            ),
+          )}
         </div>
       )}
       {delta && (
