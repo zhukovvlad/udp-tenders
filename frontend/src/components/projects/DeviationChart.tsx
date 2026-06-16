@@ -170,8 +170,10 @@ function FilterHeader({
         <div className="flex items-center gap-2">
           <Input
             type="date"
-            value={periodStart}
-            placeholder={dataStart}
+            // Дефолт — диапазон данных (первая/последняя СФ): native type=date
+            // игнорирует placeholder, поэтому подставляем как value. Фильтр при этом
+            // «не активен» (periodStart пуст), «Сбросить» остаётся выключенным.
+            value={periodStart || dataStart || ""}
             onChange={handleStartChange}
             onInput={handleStartInput}
             onBlur={handleStartBlur}
@@ -186,8 +188,7 @@ function FilterHeader({
           <span className="text-xs text-fg-tertiary">—</span>
           <Input
             type="date"
-            value={periodEnd}
-            placeholder={dataEnd}
+            value={periodEnd || dataEnd || ""}
             onChange={handleEndChange}
             onInput={handleEndInput}
             onBlur={handleEndBlur}
@@ -250,6 +251,13 @@ function aggregateCalcs(
             ? null
             : coveredRows.reduce((s, r) => s + (r.deviation_amount ?? 0), 0);
 
+          // Компенсация (за пределами коридора) — отдельный котёл: строка
+          // компенсируется независимо от наличия базовой цены в этом месяце.
+          const compRows = rows.filter((r) => r.compensation_amount !== null);
+          const compensationAmount = compRows.length === 0
+            ? null
+            : compRows.reduce((s, r) => s + (r.compensation_amount ?? 0), 0);
+
           const refQtyTotal = coveredRows.length === 0
             ? null
             : coveredRows.reduce((s, r) => s + r.reference_price! * (r.total_qty ?? 0), 0);
@@ -278,6 +286,7 @@ function aggregateCalcs(
             reference_price: referencePrice,
             deviation_amount: deviationAmount,
             deviation_pct: deviationPct,
+            compensation_amount: compensationAmount,
             covered_qty: coveredRows.length === 0 ? null : coveredQty,
           };
         });
@@ -361,9 +370,11 @@ function ChartBody({
         .slice(0, topN)
     : withPrice;
 
-  const anyHasDeviation = displayCalcs.some((c) => c.deviation_amount !== null);
-  const totalBannerDev = anyHasDeviation
-    ? displayCalcs.reduce((s, c) => s + (c.deviation_amount ?? 0), 0)
+  // Баннер «Переплата/Экономия» = Σ компенсаций (за пределами коридора), а не
+  // сырых отклонений: согласовано с KPI-карточкой «Переплата за весь период».
+  const anyHasComp = displayCalcs.some((c) => c.compensation_amount !== null);
+  const totalBannerComp = anyHasComp
+    ? displayCalcs.reduce((s, c) => s + (c.compensation_amount ?? 0), 0)
     : null;
 
   const maxAbsPct = shown.length
@@ -385,10 +396,10 @@ function ChartBody({
   return (
     <>
       {/* ── Period summary banner ── */}
-      {showBanner && totalBannerDev !== null && (
+      {showBanner && totalBannerComp !== null && (
         <div
           className={
-            totalBannerDev > 0
+            totalBannerComp > 0
               ? "flex items-center justify-between px-5 py-3 bg-danger-soft border-b border-danger-border"
               : "flex items-center justify-between px-5 py-3 bg-accent-soft border-b border-accent-border"
           }
@@ -402,12 +413,12 @@ function ChartBody({
           <span
             className={
               "text-sm font-medium " +
-              (totalBannerDev > 0 ? "text-danger-text" : "text-accent-text")
+              (totalBannerComp > 0 ? "text-danger-text" : "text-accent-text")
             }
           >
-            {totalBannerDev > 0
-              ? `Переплата: +${formatMoney(totalBannerDev)}`
-              : `Экономия: ${formatMoney(Math.abs(totalBannerDev))}`}
+            {totalBannerComp > 0
+              ? `Компенсация подрядчику: +${formatMoney(totalBannerComp)}`
+              : `Компенсация подрядчиком: ${formatMoney(Math.abs(totalBannerComp))}`}
           </span>
         </div>
       )}
@@ -592,11 +603,12 @@ export function DeviationChart({
           {groups.map((g) => {
             const groupCalcs = calculations.filter((c) => c.direction === g.code);
             if (groupCalcs.length === 0) return null;
-            // Subtotal — по той же выборке, что и график ниже (aggregateCalcs с тем же
+            // Подытог направления = Σ компенсаций (согласован с KPI «Переплата»).
+            // Выборка та же, что и график ниже (aggregateCalcs с тем же
             // periodFilterActive), иначе при periodFilterActive=false подытог по всем
-            // периодам разойдётся с графиком по последнему месяцу.
+            // периодам разошёлся бы с графиком по последнему месяцу.
             const subtotal = aggregateCalcs(groupCalcs, periodFilterActive).reduce(
-              (s, c) => (c.deviation_amount != null ? (s ?? 0) + c.deviation_amount : s),
+              (s, c) => (c.compensation_amount != null ? (s ?? 0) + c.compensation_amount : s),
               null as number | null,
             );
             return (

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import distinct, extract, func, literal, or_
 from sqlalchemy.orm import Session
 
-from crud.calculations import compute_calculations, full_deviation_from_rows
+from crud.calculations import compute_calculations, full_compensation_from_rows
 from crud.supplier_exclusions import get_excluded_supplier_ids
 from crud.units import item_has_issues
 from database import get_db
@@ -113,14 +113,16 @@ def _direction_summaries(db: Session, project_id: int, excl_filter, calc_rows: l
     types_by_invoice = _directions_by_invoice(db, project_id, excl_filter)
     mixed_invoice_ids = {inv for inv, s in types_by_invoice.items() if len(s) >= 2}
 
-    # 4) Переплата по направлениям — из УЖЕ посчитанных calc_rows (ноль лишних прогонов).
+    # 4) Переплата по направлениям = Σ компенсаций (за пределами коридора) из УЖЕ
+    #    посчитанных calc_rows (ноль лишних прогонов). None у направления = нет ни
+    #    одного компенсируемого класса (нет коридора / вне whitelist).
     overpayment_by_code: dict[str, Decimal] = {}
-    has_ref_by_code: set[str] = set()
+    has_comp_by_code: set[str] = set()
     for r in calc_rows:
-        if r["deviation_amount"] is not None:
-            has_ref_by_code.add(r["direction"])
+        if r["compensation_amount"] is not None:
+            has_comp_by_code.add(r["direction"])
             overpayment_by_code[r["direction"]] = (
-                overpayment_by_code.get(r["direction"], Decimal("0")) + r["deviation_amount"]
+                overpayment_by_code.get(r["direction"], Decimal("0")) + r["compensation_amount"]
             )
 
     directions = []
@@ -144,7 +146,7 @@ def _direction_summaries(db: Session, project_id: int, excl_filter, calc_rows: l
             "name": t.name,
             "turnover": round(float(turnover_by_type.get(t.id, 0) or 0), 2),
             "overpayment": (
-                round(float(overpayment_by_code[t.code]), 2) if t.code in has_ref_by_code else None
+                round(float(overpayment_by_code[t.code]), 2) if t.code in has_comp_by_code else None
             ),
             "volume": round(float(volume), 2) if t.default_unit else None,
             "volume_unit": t.default_unit.symbol if t.default_unit else None,
@@ -169,7 +171,7 @@ def _direction_summaries(db: Session, project_id: int, excl_filter, calc_rows: l
 
 @router.get("/summary")
 def get_project_summary(project_id: int, db: Session = Depends(get_db)):
-    """Сводка по проекту: кол-во документов, СФ, позиций, общие суммы + отклонение за весь период."""
+    """Сводка по проекту: кол-во документов, СФ, позиций, общие суммы + компенсация за весь период."""
     excluded = get_excluded_supplier_ids(db, project_id)
 
     def _excl_filter(q):
@@ -215,7 +217,7 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db)):
     first_invoice_date, last_invoice_date = date_bounds if date_bounds else (None, None)
 
     calc_rows: list[dict] = []
-    full_deviation = None
+    full_compensation = None
     if first_invoice_date and last_invoice_date:
         period_start = first_invoice_date.replace(day=1)
         last_day = monthrange(last_invoice_date.year, last_invoice_date.month)[1]
@@ -224,7 +226,7 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db)):
             db, project_id, period_start, period_end,
             excluded_supplier_ids=excluded or None,
         )
-        full_deviation = full_deviation_from_rows(calc_rows)
+        full_compensation = full_compensation_from_rows(calc_rows)
 
     dir_data = _direction_summaries(db, project_id, _excl_filter, calc_rows)
 
@@ -238,7 +240,7 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db)):
         "total_qty": round(float(total_qty), 2),
         "first_invoice_date": first_invoice_date.isoformat() if first_invoice_date else None,
         "last_invoice_date": last_invoice_date.isoformat() if last_invoice_date else None,
-        "full_deviation_amount": full_deviation,
+        "full_compensation_amount": full_compensation,
         "directions": dir_data["directions"],
         "mixed_invoice_count": dir_data["mixed_invoice_count"],
         "other_invoice_count": (invoice_count or 0) - len(dir_data["directed_invoice_ids"]),

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse, type JsonBodyType } from "msw";
 import { Link, Routes, Route, useParams } from "react-router-dom";
@@ -390,14 +390,15 @@ describe("ProjectPage", () => {
       })
     );
 
-    const user = userEvent.setup();
     renderProject();
 
     const startInput = await screen.findByTestId("period-start-input");
     const endInput = screen.getByTestId("period-end-input");
 
-    await user.type(startInput, "2025-01-01");
-    await user.type(endInput, "2025-03-31");
+    // fireEvent.change: инпуты предзаполнены дефолтным диапазоном, поэтому
+    // посегментный user.type на type=date в jsdom не заменяет значение начисто.
+    fireEvent.change(startInput, { target: { value: "2025-01-01" } });
+    fireEvent.change(endInput, { target: { value: "2025-03-31" } });
 
     // Wait for debounce to fire and a request with both params to arrive
     await waitFor(() => {
@@ -438,8 +439,10 @@ describe("ProjectPage", () => {
     const startInput = await screen.findByTestId("period-start-input");
     const endInput = screen.getByTestId("period-end-input");
 
-    await user.type(startInput, "2025-01-01");
-    await user.type(endInput, "2025-03-31");
+    // fireEvent.change: инпуты предзаполнены дефолтным диапазоном, поэтому
+    // посегментный user.type на type=date в jsdom не заменяет значение начисто.
+    fireEvent.change(startInput, { target: { value: "2025-01-01" } });
+    fireEvent.change(endInput, { target: { value: "2025-03-31" } });
 
     await waitFor(() => {
       expect(receivedParams.some((p) => p.get("period_start") === "2025-01-01")).toBe(true);
@@ -457,8 +460,10 @@ describe("ProjectPage", () => {
       expect(withoutPeriod).toBeDefined();
     }, { timeout: 2000 });
 
-    expect((startInput as HTMLInputElement).value).toBe("");
-    expect((endInput as HTMLInputElement).value).toBe("");
+    // После сброса инпуты возвращаются к дефолтному диапазону (первая/последняя СФ
+    // из summary), а не к пустым плейсхолдерам — native type=date их игнорирует.
+    expect((startInput as HTMLInputElement).value).toBe("2026-01-01");
+    expect((endInput as HTMLInputElement).value).toBe("2026-04-15");
   });
 
   it("invalid date shows error banner and does not send period params to API", async () => {
@@ -670,8 +675,8 @@ describe("ProjectPage", () => {
 
       const startInput = await screen.findByTestId("period-start-input");
       const endInput = screen.getByTestId("period-end-input");
-      await user.type(startInput, "2026-03-01");
-      await user.type(endInput, "2026-03-31");
+      fireEvent.change(startInput, { target: { value: "2026-03-01" } });
+      fireEvent.change(endInput, { target: { value: "2026-03-31" } });
 
       const btn = screen.getByRole("button", { name: /экспорт/i });
       await user.click(btn);
@@ -946,7 +951,7 @@ describe("ProjectPage", () => {
       expect(screen.queryByTestId("project-page-tabs-list")).not.toBeInTheDocument();
       expect(screen.getByText("Объёмы")).toBeInTheDocument();
       expect(screen.getByText(/12,4/)).toBeInTheDocument(); // т арматуры
-      expect(screen.getByText(/Переплата за весь период|Отклонение/)).toBeInTheDocument();
+      expect(screen.getByText(/Компенсация (подрядчик|за весь период)/)).toBeInTheDocument();
     });
 
     it("empty object: legacy tabs, no switcher (ADR #11)", async () => {

@@ -379,6 +379,16 @@ def full_deviation_from_rows(rows: list[dict]) -> Decimal | None:
     return money_round(sum(amounts, Decimal("0")), 2) if amounts else None
 
 
+def full_compensation_from_rows(rows: list[dict]) -> Decimal | None:
+    """Total compensation over precomputed compute_calculations rows.
+    Returns None if ни один класс не компенсируется (нет коридора или вне
+    whitelist), а не 0.0. Слагаемые уже money_round-нуты до копеек, поэтому
+    итог точен; money_round здесь — соблюдение конвенции."""
+    from finance import money_round  # noqa: PLC0415
+    amounts = [r["compensation_amount"] for r in rows if r["compensation_amount"] is not None]
+    return money_round(sum(amounts, Decimal("0")), 2) if amounts else None
+
+
 def compute_full_deviation(
     db: Session,
     project_id: int,

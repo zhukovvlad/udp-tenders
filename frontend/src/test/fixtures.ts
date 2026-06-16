@@ -70,7 +70,7 @@ export const sampleDashboardSummary = {
   total_qty: 31.5,
   first_invoice_date: "2026-01-01",
   last_invoice_date: "2026-04-15",
-  full_deviation_amount: null,
+  full_compensation_amount: null,
   directions: [sampleDirectionConcrete],
   mixed_invoice_count: 0,
   other_invoice_count: 0,
@@ -116,7 +116,7 @@ export const sampleDashboardSummaryEmpty = {
   ...sampleDashboardSummary,
   doc_count: 0, invoice_count: 0, total_amount: 0, material_amount: 0,
   delivery_amount: 0, other_amount: 0, total_qty: 0,
-  first_invoice_date: null, last_invoice_date: null, full_deviation_amount: null,
+  first_invoice_date: null, last_invoice_date: null, full_compensation_amount: null,
   directions: [], mixed_invoice_count: 0, other_invoice_count: 0,
   delivery_total: 0, other_total: 0,
 };
