@@ -60,11 +60,20 @@ def _directions_by_invoice(db, project_id, excl_filter=lambda q: q) -> dict[int,
 
 Поле описательное, не влияет на существующий `?direction=` фильтр эндпоинта.
 
+Дополнительно — добавить `material_type` в сериализацию **позиции** (та же причина: в текущем payload его нет, есть только `material_class` имя и `item_type`):
+
+```python
+"material_type": item.material_class.material_type.code if item.material_class else "other",
+```
+
+`MaterialClass.material_type` — relationship на `MaterialType` (models.py:227), `.code` — код типа (`concrete`/`rebar`/`other`). У сироты `material_class is None` → `"other"`. Поле описательное (как `directions`), ADR #9 не нарушает. Нужно фронту для осмысленной колонки/метки (см. ниже) — сейчас на строке его нет вообще.
+
 ## Frontend
 
 ### Тип
 
-`DashboardInvoiceRow` (`types/invoice.ts`): добавить `directions: string[]`.
+- `DashboardInvoiceRow` (`types/invoice.ts`): добавить `directions: string[]`.
+- `DashboardInvoiceItem` (`types/invoice.ts`): добавить `material_type: "concrete" | "rebar" | "other"` (бэкенд теперь сериализует его на позиции).
 
 ### Размещение списка (пункт согласован — секция, не мини-табы)
 
@@ -82,8 +91,9 @@ def _directions_by_invoice(db, project_id, excl_filter=lambda q: q) -> dict[int,
 
 ### Метка сирот и null-колонки
 
-- Колонка «Позиции» уже рисует `material_class || item_type` — для `other`-позиции покажет `other` (не пусто). Оставляем, но `other` визуально мягко (как сейчас `text-fg-tertiary`).
+- Колонка «Позиции» сейчас рисует `material_class || item_type`. **Поправка к исходному claim:** у сироты `material_class=null`, `item_type="material"` → отрендерилось бы бессмысленное `"material"` (а не `"other"` — `other` это код `material_type`, которого на позиции раньше не было). С добавленным `material_type` (см. backend) колонка/метка для позиции без класса использует `material_type === "other"` как источник → показываем «прочее» / «—», а не `material`. Существующая ассерта на эту колонку (если появится) должна проверять именно это, не строку `other` из `item_type`.
 - Для строк-сирот (`inv.directions.length === 0`) — мягкий бейдж **«прочее»** рядом с номером (по аналогии с `border-danger` для review). `InvoiceTable` читает `inv.directions` напрямую (поле уже на строке) — доп. проп не нужен. Семантику не трогаем.
+- **Бейджи ортогональны и могут со-возникать (ожидаемо, не баг).** `has_issues` (danger-border «Разобрать») и «прочее» (`directions=[]`) — независимые оси: `item_has_issues` (`crud/units.py`) реагирует на `quantity<=0` / пустое `raw_name` / ненормализованную единицу / нарушение `qty*price≈amount`, но **не** на `material_class=null` или `material_type=other`. Чистая сирота → `has_issues=false`, бейдж «прочее» без danger-border. Но сирота с ненормализованной единицей (`normalized_unit_id is null`) получит **оба** сигнала одновременно — это корректно (разные оси), при реализации/ревью не принять за дубль рендера.
 
 ## Тесты
 
@@ -99,9 +109,9 @@ def _directions_by_invoice(db, project_id, excl_filter=lambda q: q) -> dict[int,
 
 ## Файлы
 
-- `backend/routers/dashboard.py` — извлечь `_directions_by_invoice`; переключить `_direction_summaries`; добавить `directions` в `/invoices`.
-- `backend/tests/integration/test_dashboard_directions.py` (или рядом) — тесты резолвера и payload.
-- `frontend/src/types/invoice.ts` — `directions: string[]` в `DashboardInvoiceRow`.
+- `backend/routers/dashboard.py` — извлечь `_directions_by_invoice`; переключить `_direction_summaries`; добавить `directions` (на счёт) и `material_type` (на позицию) в `/invoices`.
+- `backend/tests/integration/test_dashboard_directions.py` (или рядом) — тесты резолвера и payload (`directions` + `material_type`).
+- `frontend/src/types/invoice.ts` — `directions: string[]` в `DashboardInvoiceRow`; `material_type` в `DashboardInvoiceItem`.
 - `frontend/src/pages/ProjectPage.tsx` — секция «Счета» в `AllDirectionsSummaryView`, `showOnlyOther`, кликабельный KPI.
-- `frontend/src/components/invoices/InvoiceTable.tsx` — бейдж «прочее» по `inv.directions`.
-- `frontend/src/test/handlers.ts` + тесты — `directions` в моках, новые проверки.
+- `frontend/src/components/invoices/InvoiceTable.tsx` — бейдж «прочее» по `inv.directions`; колонка «Позиции» использует `material_type` для позиций без класса.
+- `frontend/src/test/handlers.ts` + тесты — `directions` + `material_type` в моках, новые проверки.
