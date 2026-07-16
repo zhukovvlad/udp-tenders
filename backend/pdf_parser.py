@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 from datetime import date
+from decimal import Decimal
 
 import httpx
 from sqlalchemy.orm import Session
@@ -122,8 +123,21 @@ OPENROUTER_BASE_URL = settings.OPENROUTER_BASE_URL or "https://openrouter.ai/api
 OPENROUTER_URL = f"{OPENROUTER_BASE_URL.rstrip('/')}/chat/completions"
 
 
+def _with_cost(result: dict, cost: Decimal | None) -> dict:
+    """Кладёт стоимость вызова в результат, только если вызов OpenRouter состоялся.
+
+    Структурный инвариант «был HTTP 200 → в ответе есть parse_cost_usd» без
+    перечисления веток: каждый return после response.json() оборачивается этим
+    хелпером, а до платного ответа cost остаётся None и ключ не добавляется.
+    """
+    if cost is not None:
+        result["parse_cost_usd"] = cost
+    return result
+
+
 async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> dict:
     """Parse PDF via OpenRouter API. Returns structured data and creates DB entities."""
+    cost: Decimal | None = None  # стоимость вызова; заполняется после HTTP 200
     logger.info(f"[doc={document_id}] Старт парсинга, размер PDF: {len(file_data)} байт ({len(file_data)/1024:.1f} КБ)")
 
     try:
@@ -151,6 +165,7 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
         payload = {
             "model": model,
             "max_tokens": max_tokens,
+            "usage": {"include": True},  # OpenRouter вернёт реальный usage.cost ($)
             "plugins": [
                 {
                     "id": "file-parser",
@@ -192,6 +207,8 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
             return {"error": f"OpenRouter API ошибка: {response.status_code} — {response.text}"}
 
         data = response.json()
+        cost = Decimal(str(data.get("usage", {}).get("cost") or 0))
+        logger.info(f"[doc={document_id}] Стоимость вызова OpenRouter: ${cost}")
         usage = data.get("usage", {})
         completion_tokens = usage.get("completion_tokens", 0)
         finish_reason = (data.get("choices") or [{}])[0].get("finish_reason")
@@ -209,7 +226,7 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
                 f"[doc={document_id}] Ответ ОБРЕЗАН по лимиту токенов (finish_reason=length). "
                 f"Часть позиций потеряна. Увеличьте AI_MAX_TOKENS."
             )
-            return {"error": "Ответ модели обрезан по лимиту токенов — часть позиций счёта потеряна. Попробуйте повторить разбор."}
+            return _with_cost({"error": "Ответ модели обрезан по лимиту токенов — часть позиций счёта потеряна. Попробуйте повторить разбор."}, cost)
 
         # Резервный guard: completion_tokens достиг лимита (модель не вернула finish_reason)
         if completion_tokens and completion_tokens >= max_tokens:
@@ -231,14 +248,14 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
             parsed = json.loads(response_text.strip())
         except json.JSONDecodeError as e:
             logger.error(f"[doc={document_id}] Невалидный JSON от модели: {e}\nТекст: {response_text[:1000]}")
-            return {"error": "Не удалось разобрать ответ модели (невалидный JSON)"}
+            return _with_cost({"error": "Не удалось разобрать ответ модели (невалидный JSON)"}, cost)
 
         doc_type = parsed.get("doc_type")
         logger.info(f"[doc={document_id}] doc_type={doc_type}, invoices в ответе: {len(parsed.get('invoices', []))}")
 
         if doc_type != "invoice":
             logger.warning(f"[doc={document_id}] Документ классифицирован как '{doc_type}', не СФ")
-            return {"doc_type": "unknown", "error": "Документ не является счётом-фактурой"}
+            return _with_cost({"doc_type": "unknown", "error": "Документ не является счётом-фактурой"}, cost)
 
         # Process each invoice
         invoices_created = []
@@ -339,7 +356,7 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
                 logger.error(
                     f"[doc={document_id}] СФ №{inv_number}: разбор НЕПОЛНЫЙ — {reconcile_detail}"
                 )
-                return {"error": f"Разбор счёта №{inv_number} неполный: {reconcile_detail}"}
+                return _with_cost({"error": f"Разбор счёта №{inv_number} неполный: {reconcile_detail}"}, cost)
 
             invoice = create_invoice(
                 db,
@@ -356,14 +373,14 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
             logger.info(f"[doc={document_id}] СФ №{inv_number} сохранена в БД (id={invoice.id})")
 
         logger.info(f"[doc={document_id}] Парсинг завершён, создано СФ: {len(invoices_created)}")
-        return {"doc_type": "invoice", "invoices_created": invoices_created}
+        return _with_cost({"doc_type": "invoice", "invoices_created": invoices_created}, cost)
 
     except httpx.TimeoutException:
         logger.exception(f"[doc={document_id}] Таймаут запроса к OpenRouter")
         return {"error": "Таймаут запроса к OpenRouter (180с)"}
     except Exception as e:
         logger.exception(f"[doc={document_id}] Неожиданная ошибка парсинга")
-        return {"error": f"Ошибка парсинга: {str(e)}"}
+        return _with_cost({"error": f"Ошибка парсинга: {str(e)}"}, cost)
 
 
 def _reconcile_totals(
