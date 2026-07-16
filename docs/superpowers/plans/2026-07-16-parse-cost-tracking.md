@@ -333,7 +333,7 @@ git commit -m "feat(be): накопление parse_cost_usd в роутере +
   "usage": {"prompt_tokens": 100, "completion_tokens": 200, "total_tokens": 300, "cost": 0.0021}
 ```
 
-Для остальных — добавить `"cost": 0.0021` в их `usage`-объект (значение одинаковое, важно лишь `> 0`). Если у сценария нет блока `usage` (напр. `unparseable`/`invalid_json` могут не иметь) — добавить `"usage": {"cost": 0.0021}` на верхний уровень JSON-объекта ответа.
+Для остальных четырёх — добавить `"cost": 0.0021` в существующий `usage`-объект каждого файла (блок `usage` присутствует во всех пяти фикстурах; значение одинаковое, важно лишь `> 0`).
 
 - [ ] **Step 2: Создать фикстуру без cost**
 
@@ -358,20 +358,16 @@ git commit -m "feat(be): накопление parse_cost_usd в роутере +
 
 - [ ] **Step 3: Написать падающие интеграционные тесты**
 
-В `backend/tests/integration/test_invoices.py` добавить (эндпоинт upload требует `project_id`; посмотреть, как это делают существующие upload-тесты в файле, и повторить их способ передачи project и multipart-файла):
+В `backend/tests/integration/test_invoices.py` добавить. Файл/проект передаём так же, как соседние upload-тесты: multipart-файл из фикстуры `sample_pdf_bytes` (conftest) + `project_id` в `data`. Содержимое PDF не важно — `mock_openrouter` перехватывает httpx.
 
 ```python
-def test_upload_records_parse_cost(client, mock_openrouter, factories):
+def test_upload_records_parse_cost(client, mock_openrouter, factories, sample_pdf_bytes):
     """Успешный разбор записывает стоимость и счётчик разборов на документ."""
-    from decimal import Decimal
-
-    from crud.documents import get_document
-
     project = factories.ProjectFactory.create()
     resp = client.post(
         "/api/invoices/upload",
         data={"project_id": project.id},
-        files={"file": ("sf.pdf", b"%PDF-1.4 minimal", "application/pdf")},
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -379,13 +375,13 @@ def test_upload_records_parse_cost(client, mock_openrouter, factories):
     assert body["parse_count"] == 1
 
 
-def test_reparse_accumulates_parse_cost(client, mock_openrouter, factories):
+def test_reparse_accumulates_parse_cost(client, mock_openrouter, factories, sample_pdf_bytes):
     """Повторный разбор суммирует стоимость, а не перезаписывает."""
     project = factories.ProjectFactory.create()
     up = client.post(
         "/api/invoices/upload",
         data={"project_id": project.id},
-        files={"file": ("sf.pdf", b"%PDF-1.4 minimal", "application/pdf")},
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
     )
     doc_id = up.json()["id"]
     first_cost = up.json()["parse_cost_usd"]
@@ -396,14 +392,14 @@ def test_reparse_accumulates_parse_cost(client, mock_openrouter, factories):
     assert re.json()["parse_cost_usd"] > first_cost
 
 
-def test_failed_parse_is_still_billed(client, mock_openrouter, factories):
+def test_failed_parse_is_still_billed(client, mock_openrouter, factories, sample_pdf_bytes):
     """КЛЮЧЕВОЙ ИНВАРИАНТ: провал сверки итогов — платный, стоимость учтена."""
     mock_openrouter.use_scenario("incomplete_totals")
     project = factories.ProjectFactory.create()
     resp = client.post(
         "/api/invoices/upload",
         data={"project_id": project.id},
-        files={"file": ("sf.pdf", b"%PDF-1.4 minimal", "application/pdf")},
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -412,22 +408,20 @@ def test_failed_parse_is_still_billed(client, mock_openrouter, factories):
     assert body["parse_count"] == 1
 
 
-def test_missing_cost_defaults_zero_but_counts(client, mock_openrouter, factories):
+def test_missing_cost_defaults_zero_but_counts(client, mock_openrouter, factories, sample_pdf_bytes):
     """usage.cost отсутствует → стоимость 0, но вызов был — parse_count растёт."""
     mock_openrouter.use_scenario("happy_path_no_cost")
     project = factories.ProjectFactory.create()
     resp = client.post(
         "/api/invoices/upload",
         data={"project_id": project.id},
-        files={"file": ("sf.pdf", b"%PDF-1.4 minimal", "application/pdf")},
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["parse_cost_usd"] == 0
     assert body["parse_count"] == 1
 ```
-
-> Примечание: если существующие upload-тесты в файле передают `project_id`/файл иначе (напр. через фикстуру проекта или другой синтаксис multipart) — скопировать их способ, не изобретать свой. Реальный формат вызова смотреть по соседним тестам upload в этом же файле.
 
 - [ ] **Step 4: Запустить — убедиться, что падают, затем что проходят**
 
@@ -473,6 +467,9 @@ describe("formatUsd", () => {
     expect(formatUsd(0.002)).toBe("$0.002");
     expect(formatUsd(0.0021)).toBe("$0.0021");
   });
+  it("суммы < $0.0001 — герметичный guard", () => {
+    expect(formatUsd(0.00001)).toBe("<$0.0001");
+  });
   it("суммы >= 1¢ — два знака", () => {
     expect(formatUsd(0.06)).toBe("$0.06");
     expect(formatUsd(1.5)).toBe("$1.50");
@@ -500,6 +497,9 @@ Expected: FAIL — `formatUsd is not exported`.
 export function formatUsd(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
   if (value === 0) return "$0.00";
+  // Guard: суммы < $0.0001 округлились бы toFixed(4) до "0.0000" → трим дал бы "$0".
+  // На практике OpenRouter такого не возвращает, но держим формат герметичным.
+  if (value < 0.0001) return "<$0.0001";
   if (value < 0.01) {
     const trimmed = value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
     return `$${trimmed}`;
