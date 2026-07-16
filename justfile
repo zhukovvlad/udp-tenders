@@ -24,7 +24,7 @@ install-frontend:
 # === Dev ===
 
 dev-backend:
-    cd backend && uvicorn main:app --reload --port 8000
+    cd backend && uvicorn main:app --reload --port 8259
 
 dev-frontend:
     cd frontend && npm run dev
