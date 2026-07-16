@@ -206,6 +206,10 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
             logger.error(f"[doc={document_id}] OpenRouter вернул {response.status_code}: {response.text[:500]}")
             return {"error": f"OpenRouter API ошибка: {response.status_code} — {response.text}"}
 
+        # HTTP 200 ⇒ платный вызов состоялся. Фиксируем факт биллинга ДО чтения тела:
+        # если тело не распарсится (битый/непустой не-JSON от прокси), вызов всё равно
+        # должен учитываться (parse_count++), а usage.cost уточнит стоимость ниже.
+        cost = Decimal(0)
         data = response.json()
         cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
         logger.info(f"[doc={document_id}] Стоимость вызова OpenRouter: ${cost}")

@@ -13,7 +13,7 @@ from crud.documents import create_document, delete_document, get_document, get_d
 from crud.suppliers import get_or_create_supplier
 from crud.units import item_has_issues, load_alias_map, normalize_item
 from database import get_db
-from models import Invoice, InvoiceItem, MaterialClass
+from models import Document, Invoice, InvoiceItem, MaterialClass
 from s3 import delete_file, download_file, ensure_bucket, upload_file
 
 logger = logging.getLogger(__name__)
@@ -183,8 +183,10 @@ async def _reparse_from_s3(doc, db: Session, pdf_bytes: bytes | None = None) -> 
     result = await parse_invoice_pdf(pdf_bytes, db, doc.id)
 
     if "parse_cost_usd" in result:          # был платный HTTP 200
-        doc.parse_cost_usd += result["parse_cost_usd"]
-        doc.parse_count += 1
+        # Атомарный инкремент на уровне SQL (UPDATE ... SET x = x + :v) — не read-modify-write,
+        # чтобы параллельные reparse не затирали накопление друг друга. db.refresh ниже вернёт факт.
+        doc.parse_cost_usd = Document.parse_cost_usd + result["parse_cost_usd"]
+        doc.parse_count = Document.parse_count + 1
 
     if result.get("error"):
         doc.status = "error"
@@ -311,8 +313,10 @@ async def upload_pdf(
     result = await parse_invoice_pdf(file_bytes, db, doc.id)
 
     if "parse_cost_usd" in result:          # был платный HTTP 200
-        doc.parse_cost_usd += result["parse_cost_usd"]
-        doc.parse_count += 1
+        # Атомарный инкремент на уровне SQL (см. _reparse_from_s3) — защита от гонки
+        # параллельных разборов одного документа.
+        doc.parse_cost_usd = Document.parse_cost_usd + result["parse_cost_usd"]
+        doc.parse_count = Document.parse_count + 1
 
     if result.get("error"):
         doc.status = "error"

@@ -180,7 +180,7 @@ export default function Review() {
           </h2>
           <div className="flex items-center gap-3 text-xs text-fg-tertiary">
             <span>{doc.filename}</span>
-            {doc.parse_cost_usd > 0 && (
+            {doc.parse_count > 0 && (
               <span title={`${doc.parse_count} разбор${pluralRu(doc.parse_count)}`}>
                 ИИ-разбор: {formatUsd(doc.parse_cost_usd)}
                 {doc.parse_count > 1 ? ` · ${doc.parse_count}×` : ""}

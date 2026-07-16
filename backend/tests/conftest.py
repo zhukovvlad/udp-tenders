@@ -272,6 +272,7 @@ def mock_openrouter(openrouter_fixtures_dir, monkeypatch):
             self.scenario = "happy_path"
             self.calls = []
             self.status_code = 200
+            self.raw_body = None
 
         def use_scenario(self, name: str) -> None:
             self.scenario = name
@@ -279,6 +280,10 @@ def mock_openrouter(openrouter_fixtures_dir, monkeypatch):
         def use_http_status(self, code: int) -> None:
             """Задаёт HTTP-статус, который вернёт мок OpenRouter вместо 200."""
             self.status_code = code
+
+        def use_raw_body(self, body: bytes) -> None:
+            """Заставляет мок вернуть сырое (не-JSON) тело вместо фикстуры-сценария."""
+            self.raw_body = body
 
         def _load(self) -> dict:
             path = openrouter_fixtures_dir / f"{self.scenario}.json"
@@ -302,6 +307,8 @@ def mock_openrouter(openrouter_fixtures_dir, monkeypatch):
 
             def handler(request):
                 self.calls.append(request)
+                if self.raw_body is not None:
+                    return _httpx_module.Response(self.status_code, content=self.raw_body)
                 return _httpx_module.Response(self.status_code, json=self._load())
 
             self._respx.post("/api/v1/chat/completions").mock(side_effect=handler)
