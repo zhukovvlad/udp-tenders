@@ -207,7 +207,7 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
             return {"error": f"OpenRouter API ошибка: {response.status_code} — {response.text}"}
 
         data = response.json()
-        cost = Decimal(str(data.get("usage", {}).get("cost") or 0))
+        cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
         logger.info(f"[doc={document_id}] Стоимость вызова OpenRouter: ${cost}")
         usage = data.get("usage", {})
         completion_tokens = usage.get("completion_tokens", 0)

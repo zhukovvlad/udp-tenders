@@ -594,3 +594,19 @@ def test_missing_cost_defaults_zero_but_counts(client, mock_openrouter, factorie
     body = resp.json()
     assert body["parse_cost_usd"] == 0
     assert body["parse_count"] == 1
+
+
+def test_non_200_is_not_billed(client, mock_openrouter, factories, sample_pdf_bytes):
+    """Ошибка ДО платного ответа (OpenRouter != 200) → документ не биллится."""
+    mock_openrouter.use_http_status(500)
+    project = factories.ProjectFactory.create()
+    resp = client.post(
+        "/api/invoices/upload",
+        data={"project_id": project.id},
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "error"
+    assert body["parse_cost_usd"] == 0
+    assert body["parse_count"] == 0
