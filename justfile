@@ -110,3 +110,9 @@ create-org name:
 clean:
     rm -rf backend/.pytest_cache backend/htmlcov backend/.coverage backend/coverage.xml
     find backend -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+# === Storage ===
+
+# Локальный MinIO (S3): API :9000, консоль :9001, данные — ./minio-data
+minio:
+    minio server ./minio-data --console-address ":9001"
