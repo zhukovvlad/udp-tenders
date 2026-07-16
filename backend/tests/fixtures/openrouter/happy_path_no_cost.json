@@ -1,6 +1,6 @@
 {
-  "id": "gen-test-1",
-  "model": "anthropic/claude-sonnet-4.6",
+  "id": "gen-test-nocost",
+  "model": "anthropic/claude-sonnet-5",
   "choices": [
     {
       "message": {
@@ -10,5 +10,5 @@
       "finish_reason": "stop"
     }
   ],
-  "usage": {"prompt_tokens": 100, "completion_tokens": 200, "total_tokens": 300, "cost": 0.0021}
+  "usage": {"prompt_tokens": 100, "completion_tokens": 200, "total_tokens": 300}
 }

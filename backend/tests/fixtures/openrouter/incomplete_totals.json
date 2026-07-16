@@ -11,5 +11,5 @@
       "finish_reason": "stop"
     }
   ],
-  "usage": {"prompt_tokens": 100, "completion_tokens": 200, "total_tokens": 300}
+  "usage": {"prompt_tokens": 100, "completion_tokens": 200, "total_tokens": 300, "cost": 0.0021}
 }
