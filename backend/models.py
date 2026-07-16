@@ -262,6 +262,11 @@ class Document(Base):
     uploaded_by_org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
     uploaded_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     uploaded_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
+    # Стоимость ИИ-разбора (OpenRouter usage.cost), накопительно по всем разборам
+    # документа — upload + reparse + deskew-reparse. USD. Numeric(10,6): доли цента.
+    parse_cost_usd = Column(Numeric(10, 6), nullable=False, server_default="0")
+    # Число платных вызовов OpenRouter по этому документу (честность накопления).
+    parse_count = Column(Integer, nullable=False, server_default="0")
 
     __table_args__ = (
         UniqueConstraint("project_id", "file_hash", name="uq_documents_project_file_hash"),

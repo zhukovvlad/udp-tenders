@@ -519,3 +519,16 @@ def test_deskew_reparse_vision_failure_502(client, factories, in_memory_s3, monk
     assert resp.status_code == 502
     assert "k/x.pdf.orig" not in in_memory_s3
     assert in_memory_s3["k/x.pdf"] == b"%PDF-x"   # оригинал не тронут
+
+
+def test_new_document_defaults_parse_cost_zero(db_session, factories):
+    """Свежесозданный документ имеет нулевую стоимость и нулевой счётчик разборов."""
+    from decimal import Decimal
+
+    from crud.documents import create_document
+
+    project = factories.ProjectFactory.create()
+    doc = create_document(db_session, project.id, "x.pdf", "2026/07/x.pdf")
+
+    assert doc.parse_cost_usd == Decimal("0")
+    assert doc.parse_count == 0
