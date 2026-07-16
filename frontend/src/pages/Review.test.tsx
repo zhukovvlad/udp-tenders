@@ -173,6 +173,21 @@ describe("ReviewPage", () => {
       expect(screen.getByText(/Низкая уверенность/i)).toBeInTheDocument();
     });
   });
+
+  it("shows «ИИ-разбор: $0.00» when a parse happened but cost is 0 (parse_count > 0)", async () => {
+    // Регресс: разбор состоялся (parse_count=1), но OpenRouter не вернул usage.cost
+    // (стоимость 0). Гейт parse_count > 0 (а не parse_cost_usd > 0) обязан показать метрику.
+    server.use(
+      http.get("/api/invoices/documents/:id", () =>
+        HttpResponse.json({ ...sampleDocument, parse_cost_usd: 0, parse_count: 1 })
+      )
+    );
+
+    renderWithProviders(<Review />);
+
+    const costLabel = await screen.findByText(/ИИ-разбор:/);
+    expect(costLabel).toHaveTextContent(/ИИ-разбор:\s*\$0\.00/);
+  });
 });
 
 describe("Review — save warnings", () => {
