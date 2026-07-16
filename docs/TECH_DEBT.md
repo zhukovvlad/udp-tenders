@@ -72,11 +72,16 @@
   автогенерации миграции для колонок parse-cost эти диффы всплыли и были исключены вручную
   (миграция `1859523e53de` написана как ровно две column-операции). Будет всплывать при каждом
   будущем `--autogenerate`, пока не устранено.
-  **Решение:** объявить недостающие индексы в моделях через `Index(...)` / `index=True` в
-  `__table_args__` (`Supplier.name` trigram GIN, partial unique `uq_suppliers_name_no_inn`,
-  `Invoice.supplier_id`, `InvoiceItem(invoice_id, item_type)`, `Supplier.id`), затем сгенерировать
-  пустую no-op миграцию, чтобы синхронизировать метаданные. Отдельной сфокусированной задачей,
-  не на зелёной feature-ветке.
+  **Решение:** для четырёх `drop_index`-диффов — объявить недостающие индексы в моделях
+  (`Supplier.name` trigram GIN, partial unique `uq_suppliers_name_no_inn`,
+  `Invoice.supplier_id`, `InvoiceItem(invoice_id, item_type)`) через `Index(...)` /
+  `index=True` в `__table_args__`. Именно объявление в метаданных убирает диффы (как
+  только метаданные совпадут с БД, автоген перестанет предлагать drop) — отдельная
+  no-op миграция для этого не нужна и не помогает. Для `create_index('ix_suppliers_id')`
+  ситуация обратная: `Supplier.id` уже имеет `index=True` (models.py:282), но индекса нет
+  в БД — либо создать его реальной миграцией, либо убрать избыточный `index=True` с PK
+  (первичный ключ и так проиндексирован). Отдельной сфокусированной задачей, не на зелёной
+  feature-ветке.
 
 ---
 

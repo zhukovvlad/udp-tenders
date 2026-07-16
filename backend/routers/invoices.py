@@ -122,6 +122,7 @@ def _serialize_document(doc) -> dict:
 
 @router.get("/documents")
 def list_documents(project_id: int | None = None, db: Session = Depends(get_db)):
+    """Список документов (опц. фильтр по проекту) со статусами и метриками для UI."""
     docs = get_documents(db, project_id)
     return [
         {
@@ -284,6 +285,7 @@ async def upload_pdf(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
+    """Загрузить PDF: сохранить в S3, создать документ, распарсить через OpenRouter и учесть стоимость разбора."""
     if not file.filename.lower().endswith(".pdf"):
         logger.warning(f"Upload: попытка загрузить не-PDF '{file.filename}' (project={project_id})")
         raise HTTPException(status_code=400, detail="Только PDF-файлы")
