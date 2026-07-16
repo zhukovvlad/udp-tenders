@@ -78,6 +78,8 @@ def _serialize_document(doc) -> dict:
         "invoice_count": len(doc.invoices),
         "has_issues": _doc_has_issues(doc) if doc.status == "parsed" else False,
         "ai_confidence": _avg_confidence(doc),
+        "parse_cost_usd": float(doc.parse_cost_usd),
+        "parse_count": doc.parse_count,
         "invoices": [
             {
                 "id": inv.id,
@@ -132,6 +134,8 @@ def list_documents(project_id: int | None = None, db: Session = Depends(get_db))
             "invoice_count": len(doc.invoices),
             "has_issues": _doc_has_issues(doc) if doc.status == "parsed" else False,
             "ai_confidence": _avg_confidence(doc),
+            "parse_cost_usd": float(doc.parse_cost_usd),
+            "parse_count": doc.parse_count,
         }
         for doc in docs
     ]
@@ -176,6 +180,10 @@ async def _reparse_from_s3(doc, db: Session, pdf_bytes: bytes | None = None) -> 
 
     from pdf_parser import parse_invoice_pdf
     result = await parse_invoice_pdf(pdf_bytes, db, doc.id)
+
+    if "parse_cost_usd" in result:          # был платный HTTP 200
+        doc.parse_cost_usd += result["parse_cost_usd"]
+        doc.parse_count += 1
 
     if result.get("error"):
         doc.status = "error"
@@ -299,6 +307,10 @@ async def upload_pdf(
 
     from pdf_parser import parse_invoice_pdf
     result = await parse_invoice_pdf(file_bytes, db, doc.id)
+
+    if "parse_cost_usd" in result:          # был платный HTTP 200
+        doc.parse_cost_usd += result["parse_cost_usd"]
+        doc.parse_count += 1
 
     if result.get("error"):
         doc.status = "error"
