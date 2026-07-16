@@ -50,6 +50,23 @@
   (старые корректные данные уже удалены). Правильная схема: разобрать → провалидировать → затем
   удалить старое и записать новое (parse-then-swap).
 
+- [ ] **Дрейф ORM/БД: индексы созданы raw SQL, но не объявлены в моделях**
+  `alembic revision --autogenerate` устойчиво предлагает лишние диффы, не связанные с текущими
+  изменениями: `drop_index('ix_invoice_items_invoice_id_item_type')`, `drop_index('ix_invoices_supplier_id')`,
+  `drop_index('ix_suppliers_name_trgm')` (GIN trigram), `drop_index('uq_suppliers_name_no_inn')`
+  (partial unique) и `create_index('ix_suppliers_id')`. Причина: эти индексы созданы через
+  `op.create_index`/raw SQL в старых миграциях (`2026_05_15_1200-b3c7e9f12a45_add_suppliers_table.py`,
+  `2026_05_21_1200-add_calc_role_to_material_classes.py`), но никогда не объявлены в SQLAlchemy-моделях
+  (`Supplier`, `Invoice`, `InvoiceItem`). Дрейф предшествует ветке `feat/parse-cost-tracking`; при
+  автогенерации миграции для колонок parse-cost эти диффы всплыли и были исключены вручную
+  (миграция `1859523e53de` написана как ровно две column-операции). Будет всплывать при каждом
+  будущем `--autogenerate`, пока не устранено.
+  **Решение:** объявить недостающие индексы в моделях через `Index(...)` / `index=True` в
+  `__table_args__` (`Supplier.name` trigram GIN, partial unique `uq_suppliers_name_no_inn`,
+  `Invoice.supplier_id`, `InvoiceItem(invoice_id, item_type)`, `Supplier.id`), затем сгенерировать
+  пустую no-op миграцию, чтобы синхронизировать метаданные. Отдельной сфокусированной задачей,
+  не на зелёной feature-ветке.
+
 ---
 
 ## Frontend
