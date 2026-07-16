@@ -93,7 +93,7 @@ just create-superuser admin@example.com
 В двух отдельных терминалах:
 
 ```bash
-just dev-backend   # http://localhost:8000  (Swagger: /docs)
+just dev-backend   # http://localhost:8259  (Swagger: /docs)
 just dev-frontend  # http://localhost:5173
 ```
 

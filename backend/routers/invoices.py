@@ -13,7 +13,7 @@ from crud.documents import create_document, delete_document, get_document, get_d
 from crud.suppliers import get_or_create_supplier
 from crud.units import item_has_issues, load_alias_map, normalize_item
 from database import get_db
-from models import Invoice, InvoiceItem, MaterialClass
+from models import Document, Invoice, InvoiceItem, MaterialClass
 from s3 import delete_file, download_file, ensure_bucket, upload_file
 
 logger = logging.getLogger(__name__)
@@ -78,6 +78,8 @@ def _serialize_document(doc) -> dict:
         "invoice_count": len(doc.invoices),
         "has_issues": _doc_has_issues(doc) if doc.status == "parsed" else False,
         "ai_confidence": _avg_confidence(doc),
+        "parse_cost_usd": float(doc.parse_cost_usd),
+        "parse_count": doc.parse_count,
         "invoices": [
             {
                 "id": inv.id,
@@ -120,6 +122,7 @@ def _serialize_document(doc) -> dict:
 
 @router.get("/documents")
 def list_documents(project_id: int | None = None, db: Session = Depends(get_db)):
+    """Список документов (опц. фильтр по проекту) со статусами и метриками для UI."""
     docs = get_documents(db, project_id)
     return [
         {
@@ -132,6 +135,8 @@ def list_documents(project_id: int | None = None, db: Session = Depends(get_db))
             "invoice_count": len(doc.invoices),
             "has_issues": _doc_has_issues(doc) if doc.status == "parsed" else False,
             "ai_confidence": _avg_confidence(doc),
+            "parse_cost_usd": float(doc.parse_cost_usd),
+            "parse_count": doc.parse_count,
         }
         for doc in docs
     ]
@@ -176,6 +181,12 @@ async def _reparse_from_s3(doc, db: Session, pdf_bytes: bytes | None = None) -> 
 
     from pdf_parser import parse_invoice_pdf
     result = await parse_invoice_pdf(pdf_bytes, db, doc.id)
+
+    if "parse_cost_usd" in result:          # был платный HTTP 200
+        # Атомарный инкремент на уровне SQL (UPDATE ... SET x = x + :v) — не read-modify-write,
+        # чтобы параллельные reparse не затирали накопление друг друга. db.refresh ниже вернёт факт.
+        doc.parse_cost_usd = Document.parse_cost_usd + result["parse_cost_usd"]
+        doc.parse_count = Document.parse_count + 1
 
     if result.get("error"):
         doc.status = "error"
@@ -276,6 +287,7 @@ async def upload_pdf(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
+    """Загрузить PDF: сохранить в S3, создать документ, распарсить через OpenRouter и учесть стоимость разбора."""
     if not file.filename.lower().endswith(".pdf"):
         logger.warning(f"Upload: попытка загрузить не-PDF '{file.filename}' (project={project_id})")
         raise HTTPException(status_code=400, detail="Только PDF-файлы")
@@ -299,6 +311,12 @@ async def upload_pdf(
 
     from pdf_parser import parse_invoice_pdf
     result = await parse_invoice_pdf(file_bytes, db, doc.id)
+
+    if "parse_cost_usd" in result:          # был платный HTTP 200
+        # Атомарный инкремент на уровне SQL (см. _reparse_from_s3) — защита от гонки
+        # параллельных разборов одного документа.
+        doc.parse_cost_usd = Document.parse_cost_usd + result["parse_cost_usd"]
+        doc.parse_count = Document.parse_count + 1
 
     if result.get("error"):
         doc.status = "error"

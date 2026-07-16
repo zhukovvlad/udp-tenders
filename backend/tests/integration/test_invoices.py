@@ -519,3 +519,110 @@ def test_deskew_reparse_vision_failure_502(client, factories, in_memory_s3, monk
     assert resp.status_code == 502
     assert "k/x.pdf.orig" not in in_memory_s3
     assert in_memory_s3["k/x.pdf"] == b"%PDF-x"   # оригинал не тронут
+
+
+def test_new_document_defaults_parse_cost_zero(db_session, factories):
+    """Свежесозданный документ имеет нулевую стоимость и нулевой счётчик разборов."""
+    from decimal import Decimal
+
+    from crud.documents import create_document
+
+    project = factories.ProjectFactory.create()
+    doc = create_document(db_session, project.id, "x.pdf", "2026/07/x.pdf")
+
+    assert doc.parse_cost_usd == Decimal("0")
+    assert doc.parse_count == 0
+
+
+def test_upload_records_parse_cost(client, mock_openrouter, factories, sample_pdf_bytes):
+    """Успешный разбор записывает стоимость и счётчик разборов на документ."""
+    project = factories.ProjectFactory.create()
+    resp = client.post(
+        "/api/invoices/upload",
+        data={"project_id": project.id},
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["parse_cost_usd"] > 0
+    assert body["parse_count"] == 1
+
+
+def test_reparse_accumulates_parse_cost(client, mock_openrouter, factories, sample_pdf_bytes):
+    """Повторный разбор суммирует стоимость, а не перезаписывает."""
+    project = factories.ProjectFactory.create()
+    up = client.post(
+        "/api/invoices/upload",
+        data={"project_id": project.id},
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
+    )
+    doc_id = up.json()["id"]
+    first_cost = up.json()["parse_cost_usd"]
+
+    re = client.post(f"/api/invoices/documents/{doc_id}/reparse")
+    assert re.status_code == 200
+    assert re.json()["parse_count"] == 2
+    assert re.json()["parse_cost_usd"] > first_cost
+
+
+def test_failed_parse_is_still_billed(client, mock_openrouter, factories, sample_pdf_bytes):
+    """КЛЮЧЕВОЙ ИНВАРИАНТ: провал сверки итогов — платный, стоимость учтена."""
+    mock_openrouter.use_scenario("incomplete_totals")
+    project = factories.ProjectFactory.create()
+    resp = client.post(
+        "/api/invoices/upload",
+        data={"project_id": project.id},
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "error"
+    assert body["parse_cost_usd"] > 0
+    assert body["parse_count"] == 1
+
+
+def test_missing_cost_defaults_zero_but_counts(client, mock_openrouter, factories, sample_pdf_bytes):
+    """usage.cost отсутствует → стоимость 0, но вызов был — parse_count растёт."""
+    mock_openrouter.use_scenario("happy_path_no_cost")
+    project = factories.ProjectFactory.create()
+    resp = client.post(
+        "/api/invoices/upload",
+        data={"project_id": project.id},
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["parse_cost_usd"] == 0
+    assert body["parse_count"] == 1
+
+
+def test_non_200_is_not_billed(client, mock_openrouter, factories, sample_pdf_bytes):
+    """Ошибка ДО платного ответа (OpenRouter != 200) → документ не биллится."""
+    mock_openrouter.use_http_status(500)
+    project = factories.ProjectFactory.create()
+    resp = client.post(
+        "/api/invoices/upload",
+        data={"project_id": project.id},
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "error"
+    assert body["parse_cost_usd"] == 0
+    assert body["parse_count"] == 0
+
+
+def test_200_invalid_json_is_billed(client, mock_openrouter, factories, sample_pdf_bytes):
+    """HTTP 200 с непарсящимся телом — платный вызов: parse_count растёт, стоимость 0."""
+    mock_openrouter.use_raw_body(b"not a json body")
+    project = factories.ProjectFactory.create()
+    resp = client.post(
+        "/api/invoices/upload",
+        data={"project_id": project.id},
+        files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "error"
+    assert body["parse_cost_usd"] == 0
+    assert body["parse_count"] == 1

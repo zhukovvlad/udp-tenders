@@ -17,6 +17,8 @@ const makeDoc = (overrides: Partial<DocumentSummary> = {}): DocumentSummary => (
   invoice_count: 0,
   has_issues: false,
   ai_confidence: null,
+  parse_cost_usd: 0,
+  parse_count: 1,
   ...overrides,
 });
 

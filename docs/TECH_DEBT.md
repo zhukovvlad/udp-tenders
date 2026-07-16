@@ -44,11 +44,44 @@
   от mistral-ocr занимает ~24K токенов на 8-страничном бланке (повторяющиеся шапки/подвалы
   каждой страницы) — сжатие prompt-нагрузки оставило бы больше места для completion.
 
+- [ ] **Parser: `usage: null` в ответе OpenRouter крашит разбор (строка ~212)**
+  `pdf_parser.parse_invoice_pdf` после HTTP 200 делает `usage = data.get("usage", {})` — дефолт
+  срабатывает только когда ключ *отсутствует*; явный JSON `null` вернёт `None`, и следующий
+  `usage.get("completion_tokens")` бросит `AttributeError` (перехватится общим `except`, документ
+  уйдёт в ошибку). Захват стоимости (строка захвата `cost`) уже устойчив к этому случаю
+  (`(data.get("usage") or {}).get("cost")`), поэтому платный вызов при `usage: null` всё равно
+  корректно биллится через `_with_cost`; но сам разбор падает. На практике OpenRouter при
+  `usage: {include: true}` всегда возвращает объект usage на 200 — низкий приоритет.
+  **Решение:** заменить `data.get("usage", {})` на `data.get("usage") or {}` в строке чтения usage
+  (и заодно проверить прочие `.get("usage", {})` в модуле). Отдельной задачей, не на feature-ветке.
+
 - [ ] **Parser: reparse удаляет данные до валидации**
   `routers/invoices.reparse_document` удаляет существующие Invoice-строки *до* запуска нового
   разбора. Если новый разбор отклонён guard'ом completeness, документ остаётся с 0 инвойсов
   (старые корректные данные уже удалены). Правильная схема: разобрать → провалидировать → затем
   удалить старое и записать новое (parse-then-swap).
+
+- [ ] **Дрейф ORM/БД: индексы созданы raw SQL, но не объявлены в моделях**
+  `alembic revision --autogenerate` устойчиво предлагает лишние диффы, не связанные с текущими
+  изменениями: `drop_index('ix_invoice_items_invoice_id_item_type')`, `drop_index('ix_invoices_supplier_id')`,
+  `drop_index('ix_suppliers_name_trgm')` (GIN trigram), `drop_index('uq_suppliers_name_no_inn')`
+  (partial unique) и `create_index('ix_suppliers_id')`. Причина: эти индексы созданы через
+  `op.create_index`/raw SQL в старых миграциях (`2026_05_15_1200-b3c7e9f12a45_add_suppliers_table.py`,
+  `2026_05_21_1200-add_calc_role_to_material_classes.py`), но никогда не объявлены в SQLAlchemy-моделях
+  (`Supplier`, `Invoice`, `InvoiceItem`). Дрейф предшествует ветке `feat/parse-cost-tracking`; при
+  автогенерации миграции для колонок parse-cost эти диффы всплыли и были исключены вручную
+  (миграция `1859523e53de` написана как ровно две column-операции). Будет всплывать при каждом
+  будущем `--autogenerate`, пока не устранено.
+  **Решение:** для четырёх `drop_index`-диффов — объявить недостающие индексы в моделях
+  (`Supplier.name` trigram GIN, partial unique `uq_suppliers_name_no_inn`,
+  `Invoice.supplier_id`, `InvoiceItem(invoice_id, item_type)`) через `Index(...)` /
+  `index=True` в `__table_args__`. Именно объявление в метаданных убирает диффы (как
+  только метаданные совпадут с БД, автоген перестанет предлагать drop) — отдельная
+  no-op миграция для этого не нужна и не помогает. Для `create_index('ix_suppliers_id')`
+  ситуация обратная: `Supplier.id` уже имеет `index=True` (models.py:282), но индекса нет
+  в БД — либо создать его реальной миграцией, либо убрать избыточный `index=True` с PK
+  (первичный ключ и так проиндексирован). Отдельной сфокусированной задачей, не на зелёной
+  feature-ветке.
 
 ---
 

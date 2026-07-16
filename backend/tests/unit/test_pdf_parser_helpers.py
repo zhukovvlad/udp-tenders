@@ -109,6 +109,24 @@ class TestReconcileTotals:
         assert ok is True
 
 
+def test_with_cost_adds_key_when_cost_known():
+    """cost известен → ключ parse_cost_usd появляется в результате."""
+    from decimal import Decimal
+
+    from pdf_parser import _with_cost
+
+    result = _with_cost({"error": "boom"}, Decimal("0.0021"))
+    assert result["parse_cost_usd"] == Decimal("0.0021")
+
+
+def test_with_cost_skips_key_when_cost_none():
+    """cost is None (вызов не состоялся) → ключа нет."""
+    from pdf_parser import _with_cost
+
+    result = _with_cost({"error": "timeout"}, None)
+    assert "parse_cost_usd" not in result
+
+
 class TestUnknownMaterialTypeFallback:
     """Регрессионный тест: парсер должен откатываться к 'other'
     при неизвестном material_type от LLM, а не падать."""

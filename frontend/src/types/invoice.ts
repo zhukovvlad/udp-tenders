@@ -77,6 +77,10 @@ export interface DocumentSummary {
   invoice_count: number;
   has_issues: boolean;
   ai_confidence: number | null;
+  /** Накопленная стоимость ИИ-разбора, USD (OpenRouter usage.cost). */
+  parse_cost_usd: number;
+  /** Число платных вызовов OpenRouter по документу. */
+  parse_count: number;
 }
 
 export interface DocumentDetail extends DocumentSummary {
