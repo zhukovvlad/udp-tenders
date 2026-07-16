@@ -195,6 +195,13 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
         logger.info(f"[doc={document_id}] Стоимость вызова OpenRouter: ${cost}")
 ```
 
+> **Амендменты (пост-ревью Codex, коммит `248144d`)** — реализация отошла от плана в двух местах:
+> 1. `cost = Decimal(0)` присваивается **до** `response.json()` (сразу после `status_code == 200`),
+>    чтобы 200 с непарсящимся телом тоже биллился. Захват `usage.cost` уточняет значение после парсинга.
+> 2. Накопление в роутере (Task 3) — атомарный SQL-инкремент `doc.parse_cost_usd = Document.parse_cost_usd + ...`
+>    вместо `+=` (защита от гонки параллельных reparse). Итоговое состояние см. в
+>    [devlog](../../devlog/2026-07-16-parse-cost-tracking.md).
+
 **(d)** Обернуть **каждый** `return` после этой точки в `_with_cost(..., cost)`:
 
 - ветка `finish_reason == "length"`:
