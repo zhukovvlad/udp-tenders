@@ -28,7 +28,7 @@ import {
   useSettings,
 } from "@/services/queries";
 import { invoicesApi } from "@/services/api/invoices";
-import { formatDate, formatUsd } from "@/lib/format";
+import { formatDate, formatUsd, pluralRu } from "@/lib/format";
 import { DEFAULT_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import type { InvoiceRow, InvoiceUpdateWarning } from "@/types/invoice";
 
@@ -181,7 +181,7 @@ export default function Review() {
           <div className="flex items-center gap-3 text-xs text-fg-tertiary">
             <span>{doc.filename}</span>
             {doc.parse_cost_usd > 0 && (
-              <span title={doc.parse_count > 1 ? `${doc.parse_count} разбора` : "ИИ-разбор"}>
+              <span title={`${doc.parse_count} разбор${pluralRu(doc.parse_count)}`}>
                 ИИ-разбор: {formatUsd(doc.parse_cost_usd)}
                 {doc.parse_count > 1 ? ` · ${doc.parse_count}×` : ""}
               </span>

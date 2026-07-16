@@ -21,4 +21,8 @@ describe("formatUsd", () => {
     expect(formatUsd(undefined)).toBe("—");
     expect(formatUsd(NaN)).toBe("—");
   });
+  it("границы веток", () => {
+    expect(formatUsd(0.0001)).toBe("$0.0001");
+    expect(formatUsd(0.01)).toBe("$0.01");
+  });
 });
