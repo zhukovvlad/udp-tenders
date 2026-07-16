@@ -68,5 +68,6 @@ CompensationCorridor.material_type_id FK → MaterialType
 - `InvoiceItem.normalized_unit_price` — NUMERIC(24,6)
 - `CompensationCorridor.corridor_pct` — NUMERIC(5,2), nullable (NULL когда `is_compensable=false`)
 - `UnitOfMeasure.to_base_multiplier` — NUMERIC(30,15)
+- `Document.parse_cost_usd` — NUMERIC(10,6), NOT NULL, server_default 0 (стоимость ИИ-разбора, USD, накопительно; парная `parse_count` — Integer). См. `docs/agent/pdf-parsing.md` → «Трекинг стоимости».
 
 Подробности денежного слоя и сериализации — `docs/agent/calculations.md`.

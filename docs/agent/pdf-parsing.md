@@ -2,6 +2,10 @@
 
 Парсинг через OpenRouter API (`OPENROUTER_API_KEY`) в `pdf_parser.py`.
 
+## Трекинг стоимости разбора
+
+`parse_invoice_pdf` шлёт `usage: {include: true}` и захватывает реальную стоимость вызова (`usage.cost`). `cost` фиксируется сразу после проверки `status_code == 200` (до `response.json()`), поэтому даже 200 с непарсящимся телом учитывается как платный вызов. Хелпер `_with_cost` прикрепляет её к каждому результату после HTTP 200; роутеры (`upload_pdf`, `_reparse_from_s3`) накапливают в `documents.parse_cost_usd` / `parse_count` атомарным SQL-инкрементом (до ветвления `if error`, чтобы провальный-но-платный разбор тоже биллился). Инвариант, движок `native` vs OCR-плагин и детали — `docs/superpowers/specs/2026-07-16-parse-cost-tracking-design.md`; итог — `docs/devlog/2026-07-16-parse-cost-tracking.md`.
+
 ## Guard полноты разбора
 
 `pdf_parser.parse_invoice_pdf` отклоняет разбор (возвращает `{"error": ...}`, строки не сохраняются) в двух случаях:
