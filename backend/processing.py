@@ -286,7 +286,14 @@ async def _run_deskew(s3_key: str) -> tuple[bytes, Decimal, int]:
     except Exception as e:  # noqa: BLE001 — до detect: сбой S3 не оплачен
         if not _is_not_found(e):
             raise TransientError("Хранилище временно недоступно", http_status=502) from e
-        source_bytes = await download_file_async(s3_key)
+        # .orig не найден (ожидаемо — бэкапа ещё нет) → fallback на исходный s3_key.
+        # Транзиентный сбой ЭТОГО скачивания — симметрично .orig-ветке выше: detect ещё
+        # не оплачен, поэтому тоже без cost, но обязан стать классифицированным 502,
+        # а не голым исключением.
+        try:
+            source_bytes = await download_file_async(s3_key)
+        except Exception as e2:  # noqa: BLE001 — до detect: сбой S3 не оплачен
+            raise TransientError("Хранилище временно недоступно", http_status=502) from e2
         has_backup = False
 
     # deskew_pdf бросает TransientError ДО чтения cost при транспортном сбое detect
@@ -320,7 +327,8 @@ async def _run_deskew(s3_key: str) -> tuple[bytes, Decimal, int]:
 
 
 async def run_processing_attempt(session_factory, doc_id: int, *, mode: str,
-                                 pdf_bytes: bytes | None = None) -> None:
+                                 pdf_bytes: bytes | None = None,
+                                 accounting: dict | None = None) -> None:
     """Одна попытка обработки: (скачать / deskew) → фаза A → фаза B.
 
     Доменные ошибки (Transient/Permanent) НЕ гасит — пробрасывает наверх с учётом
@@ -328,6 +336,14 @@ async def run_processing_attempt(session_factory, doc_id: int, *, mode: str,
     mode="deskew": коррекция ориентации от оригинала (`_run_deskew`) ДО фазы A; её
     оплаченная стоимость (detect_cost/detect_calls) прибавляется к исходу фазы A —
     как к успеху, так и к ошибке парсинга (составная попытка, §2.5, AC-S0-10).
+
+    accounting — необязательный mutable-аккумулятор {"cost_usd", "paid_calls"},
+    который process_document передаёт, чтобы НЕ-ProcessingError пути (CancelledError,
+    generic Exception) тоже видели оплаченный detect (FIX 3, P1). Записываем в него
+    оплаченный detect СРАЗУ после `_run_deskew`, а не в конце — если сам parse_pdf/
+    persist_parse_result упадёт CancelledError/generic-исключением ДО возврата из этой
+    функции, детект всё равно уже учтён. Для ProcessingError-пути аккумулятор НЕ
+    используется вообще — cost уже слит в exc.cost_usd ниже, чтобы не задвоить.
     """
     from pdf_parser import parse_pdf  # локальный импорт против кругового; патчится через pdf_parser (F6)
     from s3 import download_file_async
@@ -343,6 +359,9 @@ async def run_processing_attempt(session_factory, doc_id: int, *, mode: str,
             s3_key = doc.s3_key
         if mode == "deskew":
             pdf_bytes, detect_cost, detect_calls = await _run_deskew(s3_key)
+            if accounting is not None:
+                accounting["cost_usd"] += detect_cost
+                accounting["paid_calls"] += detect_calls
         else:
             try:
                 pdf_bytes = await download_file_async(s3_key)
@@ -353,6 +372,8 @@ async def run_processing_attempt(session_factory, doc_id: int, *, mode: str,
         outcome = await parse_pdf(pdf_bytes, document_id=doc_id)
     except ProcessingError as exc:
         # Составная попытка (§2.5): прибавляем оплаченный detect к ошибке парсинга.
+        # НЕ трогаем accounting здесь — этот путь читает cost из exc.cost_usd, не из
+        # аккумулятора (иначе detect задвоился бы: он уже добавлен и сюда, и в accounting).
         exc.cost_usd = exc.cost_usd + detect_cost
         exc.paid_calls = exc.paid_calls + detect_calls
         raise
@@ -378,11 +399,23 @@ async def process_document(doc_id: int, *, mode: str, pdf_bytes: bytes | None = 
 
     CancelledError (обрыв клиента / отмена таски) → error + 'Обработка прервана' + re-raise
     (детерминированный исход, AC-S0-2). Успех фиксируется внутри фазы B.
+
+    accounting — mutable-аккумулятор {"cost_usd", "paid_calls"}, передаётся в
+    run_processing_attempt; тот заполняет его оплаченным detect-стоимостью СРАЗУ
+    после `_run_deskew` (mode="deskew"), ДО фазы A/B. Если после этого прилетит
+    CancelledError или неклассифицированное исключение (FIX 3, P1: обрыв
+    страницы/клиента посреди составной попытки deskew+parse) — эти два except
+    читают cost из accounting, а не пишут 0/0, иначе оплаченный detect терялся бы.
+    Ветка ProcessingError аккумулятор НЕ читает — там cost уже в exc.cost_usd
+    (run_processing_attempt сливает detect туда же); чтение из accounting тоже
+    задвоило бы стоимость.
     """
     if session_factory is None:
         session_factory = get_processing_session_factory()
+    accounting = {"cost_usd": Decimal(0), "paid_calls": 0}
     try:
-        await run_processing_attempt(session_factory, doc_id, mode=mode, pdf_bytes=pdf_bytes)
+        await run_processing_attempt(session_factory, doc_id, mode=mode, pdf_bytes=pdf_bytes,
+                                     accounting=accounting)
     except ProcessingError as exc:
         logger.warning(f"[doc={doc_id}] обработка завершилась ошибкой: {exc.message}")
         write_processing_error(session_factory, doc_id, exc.message,
@@ -392,9 +425,9 @@ async def process_document(doc_id: int, *, mode: str, pdf_bytes: bytes | None = 
     except asyncio.CancelledError:
         logger.warning(f"[doc={doc_id}] обработка прервана (CancelledError)")
         write_processing_error(session_factory, doc_id, "Обработка прервана",
-                               cost_usd=Decimal(0), paid_calls=0)
+                               cost_usd=accounting["cost_usd"], paid_calls=accounting["paid_calls"])
         raise
     except Exception as exc:  # noqa: BLE001 — подлинно непредвиденное (не ProcessingError)
         logger.exception(f"[doc={doc_id}] непредвиденная ошибка обработки")
         write_processing_error(session_factory, doc_id, f"Ошибка обработки: {exc}",
-                               cost_usd=Decimal(0), paid_calls=0)
+                               cost_usd=accounting["cost_usd"], paid_calls=accounting["paid_calls"])

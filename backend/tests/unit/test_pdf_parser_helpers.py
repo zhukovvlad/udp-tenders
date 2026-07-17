@@ -135,6 +135,8 @@ class TestUnknownMaterialTypeFallback:
         call_count = 0
 
         def mock_get_or_create(db, name, material_type, calc_role="base", *, commit=True):
+            """Первый вызов (material_type='wood') бросает UnknownMaterialType, второй
+            (material_type='other', после fallback) возвращает fake_mc."""
             nonlocal call_count
             call_count += 1
             if material_type == "wood":

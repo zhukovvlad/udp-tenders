@@ -150,6 +150,41 @@ async def test_process_document_cancelled_sets_error(
     assert saved.last_error == "Обработка прервана"
 
 
+@pytest.mark.asyncio
+async def test_deskew_cancelled_after_paid_detect_keeps_detect_cost(
+    factories, db_session, in_memory_s3, monkeypatch, session_factory_test,
+):
+    """mode="deskew": detect уже оплачен (`_run_deskew` вернул detect_cost/detect_calls),
+    затем CancelledError прилетает из фазы A/персистенции — этот путь идёт НЕ через
+    ProcessingError, а через `except asyncio.CancelledError` в process_document, который
+    раньше писал cost_usd=0/paid_calls=0 и тем самым терял оплаченный detect (P1: обрыв
+    страницы посреди composite-попытки). Ожидаем, что оплаченный detect дойдёт до
+    error-записи через accounting-аккумулятор (FIX 3)."""
+    import pdf_orientation
+    import pdf_parser
+
+    doc = _proc_doc(factories, db_session, in_memory_s3)
+
+    async def fake_deskew(pdf_bytes):
+        """detect оплачен (cost=0.002), поворотов нет — ротация не требуется."""
+        return pdf_bytes, [0], Decimal("0.002")
+    monkeypatch.setattr(pdf_orientation, "deskew_pdf", fake_deskew)
+
+    async def boom_parse(*a, **k):
+        """Эмулирует отмену таски ПОСЛЕ того, как detect уже оплачен."""
+        raise asyncio.CancelledError()
+    monkeypatch.setattr(pdf_parser, "parse_pdf", boom_parse)
+
+    with pytest.raises(asyncio.CancelledError):
+        await process_document(doc.id, mode="deskew", session_factory=session_factory_test)
+
+    db_session.expire_all()
+    saved = db_session.query(Document).filter(Document.id == doc.id).first()
+    assert saved.status == "error"
+    assert saved.parse_count == 1
+    assert saved.parse_cost_usd == Decimal("0.002")
+
+
 def test_write_error_conditional_skips_when_already_parsed(
     factories, db_session, session_factory_test,
 ):
@@ -243,6 +278,37 @@ async def test_deskew_carries_detect_cost_when_s3_write_fails(
     assert saved.status == "error"
     assert saved.parse_count == 1                       # оплаченный detect учтён
     assert saved.parse_cost_usd == Decimal("0.002")     # detect cost не потерян
+
+
+@pytest.mark.asyncio
+async def test_deskew_fallback_download_transient_failure_raises_502(
+    factories, db_session, in_memory_s3, monkeypatch, session_factory_test,
+):
+    """`.orig` не найден → fallback на s3_key; сам fallback-download падает транзиентно
+    (не FileNotFoundError) → классифицированный TransientError(502), а не голое исключение
+    (симметрия с сестринской .orig-веткой; detect не оплачен → cost=0) (FIX 4)."""
+    import s3
+    from processing import TransientError
+
+    doc = _proc_doc(factories, db_session, in_memory_s3)
+
+    def boom_download(object_name):
+        """`.orig` — «не найдено» (ожидаемо, has_backup=False); сам s3_key (fallback) —
+        транзиентный сбой S3, а не отсутствие объекта."""
+        if object_name.endswith(".orig"):
+            raise FileNotFoundError(object_name)
+        raise RuntimeError("S3 read failed")
+    monkeypatch.setattr(s3, "download_file", boom_download)
+
+    with pytest.raises(TransientError) as exc_info:
+        await process_document(doc.id, mode="deskew", reraise=True, session_factory=session_factory_test)
+    assert exc_info.value.http_status == 502
+
+    db_session.expire_all()
+    saved = db_session.query(Document).filter(Document.id == doc.id).first()
+    assert saved.status == "error"
+    assert saved.parse_count == 0
+    assert saved.parse_cost_usd == Decimal(0)
 
 
 @pytest.mark.asyncio

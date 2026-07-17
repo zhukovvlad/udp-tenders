@@ -8,7 +8,7 @@ from decimal import Decimal
 import httpx
 
 from config import settings
-from processing import PermanentError, TransientError
+from processing import PermanentError, ProcessingError, TransientError
 
 logger = logging.getLogger(__name__)
 
@@ -258,66 +258,75 @@ async def parse_pdf(file_data: bytes, *, document_id: int) -> ParseOutcome:
         raise PermanentError("Не удалось разобрать ответ модели (невалидный JSON)",
                              cost_usd=cost, paid_calls=paid_calls) from exc
 
-    if parsed.get("doc_type") != "invoice":
-        raise PermanentError("Документ не является счётом-фактурой",
-                             cost_usd=cost, paid_calls=paid_calls)
-
-    invoices: list[ParsedInvoice] = []
-    for _inv_idx, inv_data in enumerate(parsed.get("invoices", [])):
-        confidence = _final_confidence(inv_data.get("confidence"), _calculate_completeness(inv_data))
-        items: list[ParsedItem] = []
-        for item in inv_data.get("items", []):
-            items.append(ParsedItem(
-                raw_name=item.get("raw_name") or "",
-                item_type=item.get("item_type") or "other",
-                material_class=item.get("material_class"),
-                material_type=item.get("material_type"),
-                calc_role=item.get("calc_role"),
-                quantity=float(item.get("quantity") or 0),
-                unit=item.get("unit"),
-                unit_price=float(item.get("unit_price") or 0),
-                amount=float(item.get("amount") or 0),
-                vat_amount=item.get("vat_amount"),
-            ))
-
-        inv_number = inv_data.get("number", "?")
-        try:
-            invoice_date_str = inv_data.get("date")
-            if not invoice_date_str:
-                raise ValueError("Дата СФ отсутствует в ответе модели")
-            invoice_date = date.fromisoformat(invoice_date_str)
-        except (ValueError, TypeError) as e:
-            logger.error(f"[doc={document_id}] СФ №{inv_number}: некорректная дата: {e} — пропуск СФ")
-            continue
-
-        doc_total = inv_data.get("doc_total_without_vat")
-        try:
-            doc_total = float(doc_total) if doc_total is not None else None
-        except (TypeError, ValueError):
-            doc_total = None
-        reconciled, detail = _reconcile_totals(
-            doc_total, [{"amount": it.amount} for it in items]
-        )
-        if not reconciled:
-            raise PermanentError(f"Разбор счёта №{inv_number} неполный: {detail}",
+    try:
+        if parsed.get("doc_type") != "invoice":
+            raise PermanentError("Документ не является счётом-фактурой",
                                  cost_usd=cost, paid_calls=paid_calls)
 
-        invoices.append(ParsedInvoice(
-            number=inv_data.get("number", ""),
-            date=invoice_date,
-            supplier_name=inv_data.get("supplier_name"),
-            supplier_inn=inv_data.get("supplier_inn"),
-            vat_rate=inv_data.get("vat_rate", 20),
-            confidence=confidence,
-            items=items,
-        ))
+        invoices: list[ParsedInvoice] = []
+        for _inv_idx, inv_data in enumerate(parsed.get("invoices", [])):
+            confidence = _final_confidence(inv_data.get("confidence"), _calculate_completeness(inv_data))
+            items: list[ParsedItem] = []
+            for item in inv_data.get("items", []):
+                items.append(ParsedItem(
+                    raw_name=item.get("raw_name") or "",
+                    item_type=item.get("item_type") or "other",
+                    material_class=item.get("material_class"),
+                    material_type=item.get("material_type"),
+                    calc_role=item.get("calc_role"),
+                    quantity=float(item.get("quantity") or 0),
+                    unit=item.get("unit"),
+                    unit_price=float(item.get("unit_price") or 0),
+                    amount=float(item.get("amount") or 0),
+                    vat_amount=item.get("vat_amount"),
+                ))
 
-    if not invoices:
-        # doc_type=invoice, но ни одной СФ не разобрано (пустой invoices или все даты кривые
-        # → continue выше). Не создаём документ «parsed с 0 СФ» — это тот артефакт, ради
-        # устранения которого вводилась статусная модель (Q2, класс 2).
-        raise PermanentError("Ни одной СФ не удалось разобрать из документа",
-                             cost_usd=cost, paid_calls=paid_calls)
+            inv_number = inv_data.get("number", "?")
+            try:
+                invoice_date_str = inv_data.get("date")
+                if not invoice_date_str:
+                    raise ValueError("Дата СФ отсутствует в ответе модели")
+                invoice_date = date.fromisoformat(invoice_date_str)
+            except (ValueError, TypeError) as e:
+                logger.error(f"[doc={document_id}] СФ №{inv_number}: некорректная дата: {e} — пропуск СФ")
+                continue
+
+            doc_total = inv_data.get("doc_total_without_vat")
+            try:
+                doc_total = float(doc_total) if doc_total is not None else None
+            except (TypeError, ValueError):
+                doc_total = None
+            reconciled, detail = _reconcile_totals(
+                doc_total, [{"amount": it.amount} for it in items]
+            )
+            if not reconciled:
+                raise PermanentError(f"Разбор счёта №{inv_number} неполный: {detail}",
+                                     cost_usd=cost, paid_calls=paid_calls)
+
+            invoices.append(ParsedInvoice(
+                number=inv_data.get("number", ""),
+                date=invoice_date,
+                supplier_name=inv_data.get("supplier_name"),
+                supplier_inn=inv_data.get("supplier_inn"),
+                vat_rate=inv_data.get("vat_rate", 20),
+                confidence=confidence,
+                items=items,
+            ))
+
+        if not invoices:
+            # doc_type=invoice, но ни одной СФ не разобрано (пустой invoices или все даты кривые
+            # → continue выше). Не создаём документ «parsed с 0 СФ» — это тот артефакт, ради
+            # устранения которого вводилась статусная модель (Q2, класс 2).
+            raise PermanentError("Ни одной СФ не удалось разобрать из документа",
+                                 cost_usd=cost, paid_calls=paid_calls)
+    except ProcessingError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — недоверенный контент LLM после платного 200:
+        # неклассифицированная форма (например top-level JSON-массив вместо объекта →
+        # AttributeError на .get, либо ValueError/TypeError на кривых числах) не должна
+        # улететь наверх неучтённой — платный вызов уже состоялся (инвариант §2.3).
+        raise PermanentError(f"Ошибка разбора ответа модели: {exc}",
+                             cost_usd=cost, paid_calls=paid_calls) from exc
 
     logger.info(f"[doc={document_id}] Фаза A: разобрано СФ {len(invoices)}, cost=${cost}")
     return ParseOutcome(doc_type="invoice", invoices=invoices, cost_usd=cost, paid_calls=paid_calls)

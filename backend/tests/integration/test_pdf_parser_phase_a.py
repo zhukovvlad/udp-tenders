@@ -55,3 +55,18 @@ async def test_parse_pdf_429_raises_transient(sample_pdf_bytes, mock_openrouter)
     mock_openrouter.use_http_status(429)
     with pytest.raises(TransientError):
         await parse_pdf(sample_pdf_bytes, document_id=1)
+
+
+@pytest.mark.asyncio
+async def test_parse_pdf_wrong_shape_content_raises_permanent_with_cost(sample_pdf_bytes, mock_openrouter):
+    """HTTP 200 + валидный JSON, но НЕВЕРНОЙ формы (top-level массив вместо объекта) —
+    `json.loads` проходит, но `parsed.get(...)` бросил бы AttributeError. Такое
+    неклассифицированное исключение обязано стать PermanentError с учтённой
+    стоимостью оплаченного вызова (post-200 catch-all), а не улететь наверх
+    неклассифицированным и обнулить cost/paid_calls в process_document (регрессия
+    инварианта «HTTP 200 → стоимость учтена»)."""
+    mock_openrouter.use_scenario("wrong_shape")
+    with pytest.raises(PermanentError) as exc:
+        await parse_pdf(sample_pdf_bytes, document_id=1)
+    assert exc.value.paid_calls == 1
+    assert exc.value.cost_usd >= 0
