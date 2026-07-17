@@ -301,6 +301,8 @@ async def _run_deskew(s3_key: str) -> tuple[bytes, Decimal, int]:
             return current, detect_cost, detect_calls
         return source_bytes, detect_cost, detect_calls
     except ProcessingError:
+        # Доменная ошибка (Transient/Permanent) уже несёт свой http_status/cost — не переупаковываем,
+        # пробрасываем как есть.
         raise
     except Exception as exc:  # noqa: BLE001 — S3-сбой ПОСЛЕ оплаченного detect
         raise TransientError(f"Ошибка S3 после коррекции ориентации: {exc}",

@@ -250,6 +250,75 @@ async def test_process_document_reraises_deskew_error_with_http_status(
     assert saved.parse_cost_usd == Decimal(0)
 
 
+@pytest.mark.asyncio
+async def test_deskew_has_backup_zero_rotations_parses_current_key(
+    factories, db_session, in_memory_s3, mock_openrouter, monkeypatch, session_factory_test,
+):
+    """has_backup=True + нулевые повороты: детект флейкнул в нули, но .orig уже существует
+    (прошлый deskew уже исправил s3_key) → должны парсить ТЕКУЩИЙ s3_key (исправленную
+    версию), а не повёрнутый .orig. .orig-бэкап при этом не трогаем (review Task 7)."""
+    import pdf_orientation
+    import pdf_parser
+
+    doc = _proc_doc(factories, db_session, in_memory_s3)
+    orig_bytes = b"%PDF-ORIGINAL"
+    current_bytes = b"%PDF-CORRECTED"
+    in_memory_s3[f"{doc.s3_key}.orig"] = orig_bytes
+    in_memory_s3[doc.s3_key] = current_bytes
+
+    async def fake_deskew(pdf_bytes):
+        """Детект флейкнул в нули поверх текущего (уже исправленного) s3_key."""
+        return pdf_bytes, [0], Decimal("0.001")
+    monkeypatch.setattr(pdf_orientation, "deskew_pdf", fake_deskew)
+
+    parsed_bytes: list[bytes] = []
+    real_parse_pdf = pdf_parser.parse_pdf
+
+    async def recording_parse_pdf(file_data, *, document_id):
+        """Фиксирует байты, реально переданные в фазу A, и делегирует настоящей parse_pdf."""
+        parsed_bytes.append(file_data)
+        return await real_parse_pdf(file_data, document_id=document_id)
+    monkeypatch.setattr(pdf_parser, "parse_pdf", recording_parse_pdf)
+
+    await process_document(doc.id, mode="deskew", session_factory=session_factory_test)
+
+    assert in_memory_s3[f"{doc.s3_key}.orig"] == orig_bytes    # бэкап не тронут
+    assert parsed_bytes == [current_bytes]                     # парсили текущий, не .orig
+
+    db_session.expire_all()
+    saved = db_session.query(Document).filter(Document.id == doc.id).first()
+    assert saved.status == "parsed"
+
+
+@pytest.mark.asyncio
+async def test_deskew_has_backup_nonzero_rotations_keeps_original_backup(
+    factories, db_session, in_memory_s3, mock_openrouter, monkeypatch, session_factory_test,
+):
+    """has_backup=True + ненулевые повороты: бэкап .orig одноразовый — при повторном
+    deskew с уже существующим .orig НЕ перезаписываем его, но текущий s3_key
+    перезаписываем свежескорректированными байтами (review Task 7)."""
+    import pdf_orientation
+
+    doc = _proc_doc(factories, db_session, in_memory_s3)
+    orig_bytes = b"%PDF-ORIGINAL"
+    in_memory_s3[f"{doc.s3_key}.orig"] = orig_bytes
+    in_memory_s3[doc.s3_key] = b"%PDF-STALE-CURRENT"
+
+    async def fake_deskew(pdf_bytes):
+        """Детект нашёл ненулевой поворот на повторном прогоне."""
+        return b"%PDF-NEWCORRECTED", [270], Decimal("0.001")
+    monkeypatch.setattr(pdf_orientation, "deskew_pdf", fake_deskew)
+
+    await process_document(doc.id, mode="deskew", session_factory=session_factory_test)
+
+    assert in_memory_s3[f"{doc.s3_key}.orig"] == orig_bytes            # бэкап не перезаписан
+    assert in_memory_s3[doc.s3_key] == b"%PDF-NEWCORRECTED"            # текущий перезаписан
+
+    db_session.expire_all()
+    saved = db_session.query(Document).filter(Document.id == doc.id).first()
+    assert saved.status == "parsed"
+
+
 def test_write_error_retries_on_connection_loss():
     """connection_invalidated=True → ретраит до retries, затем critical-лог без проброса (F8)."""
     from contextlib import contextmanager
