@@ -43,6 +43,14 @@ test-backend-unit:
 test-backend-integration:
     cd backend && pytest tests/integration -v
 
+# Точечный прогон integration по -k паттерну
+test-int-k pattern:
+    cd backend && pytest tests/integration -v -k "{{pattern}}"
+
+# Точечный прогон unit по -k паттерну
+test-unit-k pattern:
+    cd backend && pytest tests/unit -v -k "{{pattern}}"
+
 # Watch-режим (нужен pytest-watch)
 test-backend-watch:
     cd backend && ptw tests -- -v
@@ -90,6 +98,11 @@ format-backend:
     cd backend && ruff format .
 
 # === DB ===
+
+# Создать НОВУЮ ревизию Alembic (без autogenerate — тело заполняется вручную).
+# Это создание нового файла в versions/, НЕ правка исторических миграций.
+db-revision message:
+    cd backend && alembic revision -m "{{message}}"
 
 db-migrate:
     cd backend && alembic upgrade head

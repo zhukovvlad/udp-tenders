@@ -534,6 +534,18 @@ def test_new_document_defaults_parse_cost_zero(db_session, factories):
     assert doc.parse_count == 0
 
 
+def test_new_document_defaults_to_pending(db_session, factories):
+    """create_document создаёт документ в статусе pending, не parsed (S0-1, AC-S0-5)."""
+    from crud.documents import create_document
+
+    project = factories.ProjectFactory.create()
+    doc = create_document(db_session, project.id, "x.pdf", "2026/07/x.pdf")
+
+    assert doc.status == "pending"
+    assert doc.processing_started_at is None
+    assert doc.last_error is None
+
+
 def test_upload_records_parse_cost(client, mock_openrouter, factories, sample_pdf_bytes):
     """Успешный разбор записывает стоимость и счётчик разборов на документ."""
     project = factories.ProjectFactory.create()

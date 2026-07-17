@@ -256,7 +256,9 @@ class Document(Base):
     filename = Column(String, nullable=False)
     s3_key = Column(String)
     doc_type = Column(String, default="unknown")
-    status = Column(String, default="parsed")
+    # Статусная модель обработки: pending → processing → parsed | error.
+    # server_default='pending' для новых строк; исторические строки не трогаем (бэкфилл — Q2).
+    status = Column(String, nullable=False, server_default="pending", default="pending")
     # sha256 hex дайджест файла — дедупликация до парсинга (экономит вызовы AI)
     file_hash = Column(String(64), nullable=True, index=True)
     uploaded_by_org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
@@ -267,6 +269,13 @@ class Document(Base):
     parse_cost_usd = Column(Numeric(10, 6), nullable=False, server_default="0")
     # Число платных вызовов OpenRouter по этому документу (честность накопления).
     parse_count = Column(Integer, nullable=False, server_default="0")
+    # Момент захвата обработки (guard S0-5) — для детекции зависших задач.
+    processing_started_at = Column(DateTime, nullable=True)
+    # Человекочитаемая причина последней ошибки (раньше жила только в логах).
+    last_error = Column(String, nullable=True)
+    # Ownership-токен запуска. Зарезервировано под ступень 2 (поздний retry);
+    # на ступени 0 всегда NULL, но колонка заводится сразу, чтобы не делать вторую миграцию.
+    processing_run_id = Column(String, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("project_id", "file_hash", name="uq_documents_project_file_hash"),
