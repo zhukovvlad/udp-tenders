@@ -45,6 +45,12 @@ describe("ErrorDocsTab", () => {
     expect(screen.getByText("Ошибка парсинга")).toBeInTheDocument();
   });
 
+  it("shows last_error reason instead of generic label when present", () => {
+    const doc = makeDoc({ last_error: "Разбор счёта №5 неполный" });
+    renderWithProviders(<ErrorDocsTab docs={[doc]} />);
+    expect(screen.getByText("Разбор счёта №5 неполный")).toBeInTheDocument();
+  });
+
   it("opens delete confirmation dialog before deleting", async () => {
     const user = userEvent.setup();
     renderWithProviders(<ErrorDocsTab docs={[makeDoc()]} />);

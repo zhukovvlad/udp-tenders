@@ -73,6 +73,8 @@ export interface DocumentSummary {
   filename: string;
   doc_type: string;
   status: string;
+  /** Причина последней ошибки парсинга/деcкью (S0-7); заполнена только при status="error". */
+  last_error?: string | null;
   uploaded_at: ISODateTime;
   invoice_count: number;
   has_issues: boolean;
