@@ -1,4 +1,5 @@
 """Integration tests for routers/invoices.py — upload, reparse, update, delete."""
+import pytest
 
 
 def test_upload_rejects_non_pdf(client, factories):
@@ -283,6 +284,56 @@ def test_delete_document_with_verified_invoice_returns_409(client, factories):
 
     response = client.delete(f"/api/invoices/documents/{doc.id}")
     assert response.status_code == 409
+
+
+# --- Блокировка мутаций СФ во время обработки документа (S0-8) ---
+
+@pytest.mark.parametrize("method,path_tmpl,body", [
+    ("put", "/api/invoices/{invoice_id}", {"number": "X", "date": "2026-05-01", "vat_rate": 20, "items": []}),
+    ("post", "/api/invoices/{invoice_id}/verify", None),
+    ("post", "/api/invoices/{invoice_id}/unverify", None),
+    ("delete", "/api/invoices/{invoice_id}", None),
+])
+def test_invoice_mutations_return_409_while_processing(client, factories, method, path_tmpl, body):
+    """Любая мутация СФ документа в processing → 409 (S0-8)."""
+    doc = factories.DocumentFactory.create(status="processing")
+    inv = factories.InvoiceFactory.create(document=doc)
+    url = path_tmpl.format(invoice_id=inv.id)
+    resp = getattr(client, method)(url, json=body) if body is not None else getattr(client, method)(url)
+    assert resp.status_code == 409
+
+
+def test_bulk_delete_returns_409_when_any_document_processing(client, factories, db_session):
+    """bulk-delete, если хоть один документ набора в processing → 409, НИЧЕГО не удалено (S0-8)."""
+    from models import Invoice
+
+    doc_busy = factories.DocumentFactory.create(status="processing")
+    doc_free = factories.DocumentFactory.create(status="parsed")
+    inv_busy = factories.InvoiceFactory.create(document=doc_busy)
+    inv_free = factories.InvoiceFactory.create(document=doc_free)
+    resp = client.request("DELETE", "/api/invoices/bulk", json={"ids": [inv_free.id, inv_busy.id]})
+    assert resp.status_code == 409
+    # атомарность bulk (часть контракта): 409 ⇒ не удалили НИ ОДНОЙ СФ, включая свободную.
+    db_session.expire_all()
+    remaining = {i.id for i in db_session.query(Invoice).all()}
+    assert inv_free.id in remaining and inv_busy.id in remaining
+
+
+def test_bulk_delete_locks_documents_in_id_order(client, factories):
+    """bulk-delete с несколькими документами (разный порядок id) не дедлокает и работает (S0-8, анти-дедлок)."""
+    docs = [factories.DocumentFactory.create(status="parsed") for _ in range(3)]
+    invs = [factories.InvoiceFactory.create(document=d) for d in docs]
+    # Порядок id во входе обратный — блокировка всё равно по возрастанию id.
+    resp = client.request("DELETE", "/api/invoices/bulk", json={"ids": [i.id for i in reversed(invs)]})
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] == 3
+
+
+def test_delete_document_returns_409_while_processing(client, factories):
+    """delete документа в processing → 409 (S0-8)."""
+    doc = factories.DocumentFactory.create(status="processing")
+    resp = client.delete(f"/api/invoices/documents/{doc.id}")
+    assert resp.status_code == 409
 
 
 # --- Интеграция с поставщиками ---

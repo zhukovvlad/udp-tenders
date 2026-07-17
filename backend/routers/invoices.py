@@ -18,12 +18,29 @@ from crud.documents import (
 from crud.suppliers import get_or_create_supplier
 from crud.units import item_has_issues, load_alias_map, normalize_item
 from database import get_db
-from models import Invoice, InvoiceItem, MaterialClass
+from models import Document, Invoice, InvoiceItem, MaterialClass
 from processing import get_processing_session_factory
 from s3 import delete_file, download_file, upload_file_async
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _load_document_locked(db: Session, doc_id: int) -> Document | None:
+    """SELECT ... FOR UPDATE строки документа — сериализует мутации СФ с фазой B (S0-8).
+
+    Держит блокировку строки documents до конца транзакции запроса: пока она
+    жива, фаза B (persist_parse_result) не сможет пройти свой собственный
+    FOR UPDATE и будет ждать (или наоборот) — мутации СФ и переразбор одного
+    документа никогда не пересекаются гонкой.
+    """
+    return db.query(Document).filter(Document.id == doc_id).with_for_update().first()
+
+
+def _reject_if_processing(doc: Document | None) -> None:
+    """409, если документ в обработке — мутации СФ запрещены до терминального статуса."""
+    if doc is not None and doc.status == "processing":
+        raise HTTPException(status_code=409, detail="Документ обрабатывается — дождитесь завершения")
 
 
 class InvoiceItemEdit(BaseModel):
@@ -257,7 +274,20 @@ async def upload_pdf(
 
 @router.put("/{invoice_id}")
 def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(get_db)):
-    """Обновить СФ и её позиции. Удаляет позиции, которых нет в новом списке."""
+    """Обновить СФ и её позиции. Удаляет позиции, которых нет в новом списке.
+
+    Запрещено во время обработки документа (S0-8): лочим Document, отклоняем
+    processing 409, затем перезапрашиваем СФ под блокировкой — фаза B могла
+    успеть её удалить (parse-then-swap) до того, как мы получили блокировку.
+    """
+    # 1) первичный lookup — только чтобы узнать document_id, без мутации устаревшего ORM-объекта.
+    row = db.query(Invoice.document_id).filter(Invoice.id == invoice_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="СФ не найдена")
+    # 2) блокируем документ; 3) отклоняем, если обрабатывается.
+    doc = _load_document_locked(db, row.document_id)
+    _reject_if_processing(doc)
+    # 4) перезапрашиваем СФ ПОД блокировкой — фаза B могла её удалить.
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="СФ не найдена")
@@ -358,10 +388,19 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
 
 @router.post("/{invoice_id}/verify")
 def verify_invoice(invoice_id: int, db: Session = Depends(get_db)):
-    """Отметить СФ как проверенную человеком."""
+    """Отметить СФ как проверенную человеком (запрещено во время обработки документа, S0-8)."""
+    # 1) первичный lookup — только чтобы узнать document_id.
+    row = db.query(Invoice.document_id).filter(Invoice.id == invoice_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="СФ не найдена")
+    # 2) блокируем документ; 3) отклоняем, если обрабатывается.
+    doc = _load_document_locked(db, row.document_id)
+    _reject_if_processing(doc)
+    # 4) перезапрашиваем СФ ПОД блокировкой — фаза B могла её удалить (parse-then-swap).
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="СФ не найдена")
+    # 5) мутируем.
     invoice.verified = True
     invoice.verified_at = datetime.now(UTC).replace(tzinfo=None)
     db.commit()
@@ -371,10 +410,19 @@ def verify_invoice(invoice_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{invoice_id}/unverify")
 def unverify_invoice(invoice_id: int, db: Session = Depends(get_db)):
-    """Снять отметку о проверке с СФ."""
+    """Снять отметку о проверке с СФ (запрещено во время обработки документа, S0-8)."""
+    # 1) первичный lookup — только чтобы узнать document_id.
+    row = db.query(Invoice.document_id).filter(Invoice.id == invoice_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="СФ не найдена")
+    # 2) блокируем документ; 3) отклоняем, если обрабатывается.
+    doc = _load_document_locked(db, row.document_id)
+    _reject_if_processing(doc)
+    # 4) перезапрашиваем СФ ПОД блокировкой — фаза B могла её удалить (parse-then-swap).
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="СФ не найдена")
+    # 5) мутируем.
     invoice.verified = False
     invoice.verified_at = None
     db.commit()
@@ -388,10 +436,22 @@ class BulkDeleteRequest(BaseModel):
 
 @router.delete("/bulk", status_code=200)
 def bulk_delete_invoices(body: BulkDeleteRequest, db: Session = Depends(get_db)):
-    """Удалить несколько СФ за раз. Подтверждённые пропускаются (не удаляются)."""
+    """Удалить несколько СФ за раз. Документы в processing → 409 (атомарно — НИЧЕГО не
+    удаляется, если хоть один документ набора обрабатывается, S0-8). Подтверждённые
+    пропускаются (не удаляются)."""
     if not body.ids:
         return {"deleted": 0, "skipped": []}
 
+    # 1) узнаём document_id по входным СФ (без блокировки), 2) лочим документы по
+    # возрастанию id — общий порядок для всех транзакций исключает дедлок.
+    doc_ids = sorted({
+        r.document_id for r in
+        db.query(Invoice.document_id).filter(Invoice.id.in_(body.ids)).all()
+    })
+    for did in doc_ids:
+        _reject_if_processing(_load_document_locked(db, did))
+
+    # 3) перезапрашиваем СФ ПОД блокировкой документов — фаза B могла часть удалить.
     invoices = db.query(Invoice).filter(Invoice.id.in_(body.ids)).all()
     deleted = 0
     skipped: list[int] = []
@@ -407,7 +467,16 @@ def bulk_delete_invoices(body: BulkDeleteRequest, db: Session = Depends(get_db))
 
 @router.delete("/{invoice_id}")
 def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
-    """Удалить одну СФ из документа (PDF документ остаётся)."""
+    """Удалить одну СФ из документа (PDF документ остаётся). Запрещено во время
+    обработки документа (S0-8)."""
+    # 1) первичный lookup — только чтобы узнать document_id.
+    row = db.query(Invoice.document_id).filter(Invoice.id == invoice_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="СФ не найдена")
+    # 2) блокируем документ; 3) отклоняем, если обрабатывается.
+    doc = _load_document_locked(db, row.document_id)
+    _reject_if_processing(doc)
+    # 4) перезапрашиваем СФ ПОД блокировкой — фаза B могла её удалить (parse-then-swap).
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="СФ не найдена")
@@ -420,9 +489,11 @@ def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
 
 @router.delete("/documents/{doc_id}")
 def delete_document_route(doc_id: int, db: Session = Depends(get_db)):
-    doc = get_document(db, doc_id)
+    """Удалить документ вместе с СФ (запрещено во время обработки, S0-8)."""
+    doc = _load_document_locked(db, doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
+    _reject_if_processing(doc)
     if any(inv.verified for inv in doc.invoices):
         raise HTTPException(status_code=409, detail="Документ содержит подтверждённые СФ — снимите подтверждение перед удалением")
     if doc.s3_key:

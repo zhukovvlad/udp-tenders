@@ -112,9 +112,19 @@ def persist_parse_result(db: Session, doc_id: int, outcome: ParseOutcome) -> Non
     сессию упадёт PendingRollbackError) + TransientError с учётом. Сбой из commit
     (ambiguous) → тоже TransientError; условная error-запись (§2.3) разрулит, лёг ли swap.
     """
-    doc = db.query(Document).filter(Document.id == doc_id).first()
+    # FOR UPDATE: сериализует фазу B с мутирующими эндпоинтами роутера (S0-8) —
+    # верификация/удаление СФ, удаление/переразбор документа ждут эту блокировку
+    # или блокируют её сами (см. routers/invoices._load_document_locked).
+    doc = db.query(Document).filter(Document.id == doc_id).with_for_update().first()
     if doc is None:
         raise PermanentError(f"Документ id={doc_id} не найден на фазе B",
+                             cost_usd=outcome.cost_usd, paid_calls=outcome.paid_calls)
+    # Повторная проверка под блокировкой строки: verified-СФ могла появиться после
+    # guard-перехода (try_acquire_processing), пока шёл длительный LLM-вызов фазы A
+    # (S0-8) — эндпоинт-проверка на входе в reparse/deskew этого уже не гарантирует.
+    # Ошибка несёт cost — фаза A оплачена (инвариант §2.3); старый набор СФ не трогаем.
+    if any(inv.verified for inv in doc.invoices):
+        raise PermanentError("Документ содержит подтверждённые СФ — переразбор отменён",
                              cost_usd=outcome.cost_usd, paid_calls=outcome.paid_calls)
 
     try:

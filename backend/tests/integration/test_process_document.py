@@ -104,6 +104,30 @@ async def test_process_document_phase_b_failure_writes_error_with_cost(
 
 
 @pytest.mark.asyncio
+async def test_phase_b_aborts_when_verified_appeared(
+    factories, db_session, in_memory_s3, mock_openrouter, session_factory_test,
+):
+    """Появившаяся verified-СФ к моменту фазы B → error, старый набор не тронут (AC-S0-9, S0-8).
+
+    Имитирует гонку: verified-СФ появляется, пока идёт длительный LLM-вызов фазы A —
+    эндпоинт-проверка на входе (reparse/deskew) её не видела. Повторная проверка под
+    FOR UPDATE строки документа в persist_parse_result обязана поймать её ДО удаления
+    старых СФ.
+    """
+    doc = _proc_doc(factories, db_session, in_memory_s3)
+    factories.InvoiceFactory.create(document=doc, number="СФ-VER", verified=True)
+    db_session.commit()
+
+    await process_document(doc.id, mode="parse", session_factory=session_factory_test)
+
+    db_session.expire_all()
+    saved = db_session.query(Document).filter(Document.id == doc.id).first()
+    assert saved.status == "error"
+    numbers = [i.number for i in db_session.query(Invoice).filter(Invoice.document_id == doc.id)]
+    assert "СФ-VER" in numbers  # verified-СФ не удалена
+
+
+@pytest.mark.asyncio
 async def test_process_document_cancelled_sets_error(
     factories, db_session, in_memory_s3, monkeypatch, session_factory_test,
 ):

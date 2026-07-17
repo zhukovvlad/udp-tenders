@@ -1,19 +1,40 @@
 """Unit-тесты для bulk_delete_invoices (DELETE /api/invoices/bulk)."""
 from unittest.mock import MagicMock, call
 
+from models import Document, Invoice
 from routers.invoices import BulkDeleteRequest, bulk_delete_invoices
 
 
-def _make_invoice(id_: int, verified: bool) -> MagicMock:
+def _make_invoice(id_: int, verified: bool, document_id: int | None = None) -> MagicMock:
+    """СФ-мок; document_id по умолчанию = id_ (не важно для теста, лишь бы был int)."""
     inv = MagicMock()
     inv.id = id_
     inv.verified = verified
+    inv.document_id = document_id if document_id is not None else id_
     return inv
 
 
 def _make_db(invoices: list) -> MagicMock:
+    """Мок Session с 3 разными query()-путями, которые появились с блокировкой
+    документов (S0-8): document_id-lookup, FOR UPDATE документа (всегда не
+    processing в этих тестах — сама блокировка проверяется интеграционными
+    тестами на реальной БД), и re-fetch СФ под блокировкой перед удалением."""
     db = MagicMock()
-    db.query.return_value.filter.return_value.all.return_value = invoices
+
+    def query_side_effect(entity):
+        """Возвращает отдельную цепочку query().filter()... в зависимости от entity."""
+        chain = MagicMock()
+        if entity is Invoice.document_id:
+            rows = [MagicMock(document_id=inv.document_id) for inv in invoices]
+            chain.filter.return_value.all.return_value = rows
+        elif entity is Document:
+            doc = MagicMock(status="parsed")
+            chain.filter.return_value.with_for_update.return_value.first.return_value = doc
+        else:  # entity is Invoice — финальный re-fetch под блокировкой
+            chain.filter.return_value.all.return_value = invoices
+        return chain
+
+    db.query.side_effect = query_side_effect
     return db
 
 
