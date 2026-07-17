@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from models import Document, Invoice
-from processing import process_document, write_processing_error
+from processing import get_processing_session_factory, process_document, write_processing_error
 
 
 def _proc_doc(factories, db_session, s3, s3_key="k/p.pdf"):
@@ -23,6 +23,32 @@ async def test_process_document_success_sets_parsed(
     """Успешный reparse ставит parsed и создаёт СФ."""
     doc = _proc_doc(factories, db_session, in_memory_s3)
     await process_document(doc.id, mode="parse", session_factory=session_factory_test)
+    db_session.expire_all()
+    saved = db_session.query(Document).filter(Document.id == doc.id).first()
+    assert saved.status == "parsed"
+
+
+def test_get_processing_session_factory_returns_patched_session_local(monkeypatch):
+    """Поздний импорт database.SessionLocal внутри функции подхватывает monkeypatch (F1)."""
+    import database
+
+    sentinel = object()
+    monkeypatch.setattr(database, "SessionLocal", sentinel)
+    assert get_processing_session_factory() is sentinel
+
+
+@pytest.mark.asyncio
+async def test_process_document_none_session_factory_resolves_via_database(
+    factories, db_session, in_memory_s3, mock_openrouter, monkeypatch, session_factory_test,
+):
+    """session_factory=None → поздний резолв через get_processing_session_factory доходит до parsed (F1 e2e)."""
+    import database
+
+    monkeypatch.setattr(database, "SessionLocal", session_factory_test)
+    doc = _proc_doc(factories, db_session, in_memory_s3)
+
+    await process_document(doc.id, mode="parse")
+
     db_session.expire_all()
     saved = db_session.query(Document).filter(Document.id == doc.id).first()
     assert saved.status == "parsed"
