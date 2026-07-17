@@ -55,6 +55,38 @@ CompensationCorridor.material_type_id FK → MaterialType
 
 Миграция: `2026_05_30_1200-a7b8c9d0e1f2_add_organization_kind` (VARCHAR+CHECK, `server_default` заполняет существующие строки).
 
+## Document — статусная модель обработки (ступень 0)
+
+`documents.status`: `pending → processing → parsed | error` (ORM `default='pending'`,
+`server_default='pending'`, `NOT NULL` — миграция
+`2026_07_17_1159-d184fbac0a71_async_processing_status_model`). Переход
+`pending/error/parsed → processing` — атомарный guard
+(`crud.documents.try_acquire_processing`, коммитится немедленно); `processing → parsed`
+— единственный commit фазы B (`persist_parse_result`); любой другой исход →
+условная error-запись. Полная архитектура (фазы A/B, guard, доменные ошибки,
+условная error-запись) — `docs/agent/pdf-parsing.md`.
+
+Поля той же миграции на `documents`:
+
+- `processing_started_at` (`DateTime`, nullable) — момент захвата обработки
+  guard'ом, для будущей детекции зависших задач (startup-sweep, ступень 1).
+- `last_error` (`String`, nullable) — человекочитаемая причина последней
+  ошибки обработки (раньше жила только в логах); отдаётся в API и рендерится
+  в ErrorDocsTab.
+- `processing_run_id` (`String`, nullable) — ownership-токен запуска.
+  **Зарезервирован под ступень 2** (поздний retry / воркер, чтобы устаревший
+  запуск не мог перезаписать статус актуального); на ступени 0 всегда `NULL`
+  — колонка завелась в этой миграции, чтобы не делать вторую под ступень 2.
+
+Исторические строки (созданные до миграции) не бэкфиллятся: `status` у них уже
+был заполнен приложением (ORM-default до миграции — `'parsed'`), поэтому
+`NOT NULL` безопасен без бэкфилла самой колонки. Отдельно рассматривался
+бэкфилл зависших исторических артефактов «`parsed` без единой СФ» (Q2, класс
+2 из спеки) — задача была явно **GATED**: сначала SELECT-подсчёт кандидатов по
+реальной БД, и только при >0 — миграция. На dev-БД (прод не развёрнут — dev
+здесь единственная база с реальными данными) оба счётчика вернули 0 —
+**задача закрыта без миграции**. Детали — `docs/devlog/2026-07-17-async-processing-stage-0.md`.
+
 ## Точность Decimal по колонкам
 
 Финансовые колонки — `Numeric` (не `Float`). SQLAlchemy возвращает их как `decimal.Decimal`.

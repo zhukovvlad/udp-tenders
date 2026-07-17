@@ -53,6 +53,13 @@ just typecheck-frontend      # tsc --noEmit
 - **`.env.test`** в корне репо (в `.gitignore`) с `TEST_DATABASE_URL` — отдельная Neon test-ветка, **не прод**.
   Шаблон: `.env.test.example`. Префикс должен быть `postgresql+psycopg://`.
 - В CI (backend-tests.yml) переменные приходят из GitHub Actions env/secrets, `.env.test` не нужен.
+- **`TEST_DATABASE_URL` не появляется в raw shell env автоматически.** Внутри
+  `pytest` её подхватывает плагин `pytest-dotenv` через `env_files = [".env.test"]`
+  (`backend/pyproject.toml`, `[tool.pytest.ini_options]`) — переменная видна
+  ТОЛЬКО внутри процесса `pytest`. `just db-test-migrate` (читает `$TEST_DATABASE_URL`
+  из шелла) и любой ad-hoc `psql`/`alembic` вне pytest её не увидят, если
+  `.env.test` не подгружен в сам шелл вручную (`export $(cat .env.test)` / аналог
+  в PowerShell) — это ожидаемое поведение `pytest-dotenv`, не баг.
 
 ---
 

@@ -15,7 +15,7 @@ Shell (Windows): `& "C:\Program Files\Git\bin\bash.exe" -c "cd /c/Users/zhukov_v
 CI: GitHub Actions (`.github/workflows/backend-tests.yml`) гоняет ruff + полный pytest на каждый push/PR (~1 мин, Postgres+pgvector service-container).
 
 ## Жёсткие правила
-- Миграции в `backend/alembic/versions/` руками не править — только `just db-migrate`.
+- Миграции: исторические файлы в `backend/alembic/versions/` не редактировать. Новые ревизии создавать через `just db-revision "..."` (позиционный аргумент — `message="..."` НЕ работает, just примет его как буквальное значение вместе с `message=`; это `alembic revision` без autogenerate — создание нового файла); тело новой ревизии (`upgrade`/`downgrade`) заполнять вручную допустимо. Применять — `just db-migrate` (dev) / `just db-test-migrate` (тестовая БД).
 - `.env` / `.env.test` не трогать; секреты — через переменные окружения.
 - Перед завершением задачи — `just lint` и `just test`.
 - Новые зависимости — только по явному запросу.
