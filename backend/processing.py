@@ -9,10 +9,13 @@
 # TransientError/PermanentError из этого модуля — прямой импорт по кругу упал бы).
 from __future__ import annotations
 
+import asyncio
 import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from crud.materials import VALID_CALC_ROLES, UnknownMaterialType, get_or_create_material_class
@@ -24,6 +27,8 @@ if TYPE_CHECKING:  # только для типизации — не вызыв�
     from pdf_parser import ParseOutcome
 
 logger = logging.getLogger(__name__)
+
+_LAST_ERROR_MAXLEN = 500
 
 
 class ProcessingError(Exception):
@@ -166,3 +171,134 @@ def persist_parse_result(db: Session, doc_id: int, outcome: ParseOutcome) -> Non
         raise TransientError(f"Ошибка сохранения (фаза B): {exc}",
                              cost_usd=outcome.cost_usd, paid_calls=outcome.paid_calls) from exc
     logger.info(f"[doc={doc_id}] Фаза B: сохранено СФ {len(outcome.invoices)}, статус parsed")
+
+
+def get_processing_session_factory():
+    """FastAPI-dependency: фабрика сессий для инлайн-обработки (F1).
+
+    Возвращает SessionLocal (поздний импорт — не связываем на этапе модуля, чтобы
+    тестовый override и патч database.SessionLocal работали). В тестах переопределяется
+    через app.dependency_overrides на тест-фабрику, чтобы обработка видела тест-данные.
+    """
+    from database import SessionLocal
+    return SessionLocal
+
+
+def _is_connection_error(exc: DBAPIError) -> bool:
+    """Потеря соединения по SQLAlchemy-флагу ИЛИ SQLSTATE класса 08 (connection exception).
+
+    Только такие ошибки из commit ретраебельны (запись идемпотентна). Прочие
+    OperationalError (deadlock 40P01, lock_timeout, statement cancellation 57014, …)
+    и любой другой DBAPIError детерминированы → пробрасываются вызывающим немедленно (F8).
+    """
+    sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+    return bool(exc.connection_invalidated or (sqlstate and str(sqlstate).startswith("08")))
+
+
+def write_processing_error(session_factory, doc_id: int, message: str, *,
+                           cost_usd: Decimal, paid_calls: int, retries: int = 3) -> None:
+    """Идемпотентная условная error-запись (§2.3).
+
+    UPDATE ... WHERE status='processing' — при уже закоммитившемся swap (ambiguous
+    commit) предикат ложен после ожидания блокировки (EvalPlanQual), rowcount 0.
+    Ретраим ТОЛЬКО потерю соединения из самого commit (`connection_invalidated` ИЛИ
+    SQLSTATE класса 08 — см. `_is_connection_error`) — запись идемпотентна. Прочие ошибки,
+    ВКЛЮЧАЯ не-connection `OperationalError` (deadlock 40P01, lock_timeout, statement
+    cancellation 57014) и любой другой `DBAPIError`/Exception, детерминированы → НЕ глотаем,
+    пробрасываем, чтобы баг падал в тестах, а не оставлял документ processing молча (F8).
+    Исчерпание connection-ретраев → лог critical, документ остаётся processing (доберёт
+    startup-sweep S1-4); стоимость этой попытки теряется (at-most-once).
+    """
+    # doc_type НЕ трогаем: при parse-then-swap error-документ хранит живые старые СФ,
+    # флип doc_type invoice→unknown у документа с СФ противоречив (§2.3 SQL его не содержит).
+    sql = text(
+        "UPDATE documents SET status='error', last_error=:msg, "
+        "parse_cost_usd = parse_cost_usd + :cost, parse_count = parse_count + :calls "
+        "WHERE id=:id AND status='processing'"
+    )
+    params = {"msg": message[:_LAST_ERROR_MAXLEN], "cost": cost_usd, "calls": paid_calls, "id": doc_id}
+    for attempt in range(1, retries + 1):
+        try:
+            with session_factory() as db:
+                result = db.execute(sql, params)
+                db.commit()
+            if result.rowcount == 0:
+                # rowcount 0: swap уже лёг (parsed), ИЛИ документ удалён/уже error —
+                # различить постфактум нельзя; во всех случаях повторно писать нечего.
+                logger.warning(f"[doc={doc_id}] error-запись пропущена (rowcount 0): "
+                               f"документ не в статусе processing (swap лёг / удалён / уже error)")
+            return
+        except DBAPIError as exc:
+            # Только потеря соединения ретраебельна; прочий DBAPIError (в т.ч. deadlock/
+            # lock_timeout/cancel OperationalError, ProgrammingError) детерминирован — проброс.
+            if not _is_connection_error(exc):
+                raise
+            logger.warning(f"[doc={doc_id}] error-запись, попытка {attempt}/{retries} "
+                           f"не удалась (потеря соединения): {exc}")
+    logger.critical(f"[doc={doc_id}] error-запись НЕ выполнена: БД недоступна. "
+                    f"Документ остаётся processing до рестарта/ручного восстановления; "
+                    f"стоимость ${cost_usd} не учтена.")
+
+
+async def run_processing_attempt(session_factory, doc_id: int, *, mode: str,
+                                 pdf_bytes: bytes | None = None) -> None:
+    """Одна попытка обработки: (скачать байты) → фаза A → фаза B.
+
+    Доменные ошибки (Transient/Permanent) НЕ гасит — пробрасывает наверх с учётом
+    стоимости. Это ядро, неизменное между ступенями (обёртки завершения — разные).
+    deskew-режим будет расширен в Task 7 (детект + коррекция до фазы A).
+    """
+    from pdf_parser import parse_pdf  # локальный импорт против кругового; патчится через pdf_parser (F6)
+    from s3 import download_file_async
+
+    if pdf_bytes is None:
+        with session_factory() as db:
+            doc = db.query(Document).filter(Document.id == doc_id).first()
+            if doc is None or not doc.s3_key:
+                raise PermanentError(f"Документ id={doc_id} без s3_key")
+            s3_key = doc.s3_key
+        try:
+            pdf_bytes = await download_file_async(s3_key)
+        except Exception as exc:  # noqa: BLE001
+            raise TransientError(f"Не удалось скачать PDF из S3: {exc}") from exc
+
+    outcome = await parse_pdf(pdf_bytes, document_id=doc_id)
+    with session_factory() as db:
+        persist_parse_result(db, doc_id, outcome)
+
+
+async def process_document(doc_id: int, *, mode: str, pdf_bytes: bytes | None = None,
+                           session_factory=None, reraise: bool = False) -> None:
+    """Обёртка ступени 0/1: выполнить попытку, любую доменную ошибку → терминальный error.
+
+    session_factory=None → поздний резолв SessionLocal (F1: не связываем дефолт на этапе
+    def — это открывало сессию на реальном dev-DATABASE_URL в тестах и плохо патчилось).
+
+    Всегда пишет status='error' + last_error через условную запись. Если reraise=True
+    И ошибка несёт http_status (только ориентация deskew: 413/502) — после записи
+    пробрасывает её, чтобы эндпоинт смапил на прежний HTTP-код (AC-S0-8, поведение API
+    на S0 не меняется). Ошибки парсинга (http_status=None) не пробрасываются → 200 + error.
+    На S1 reraise=False (фоновой таске отвечать некому — контракт §2.2 не ломается).
+
+    CancelledError (обрыв клиента / отмена таски) → error + 'Обработка прервана' + re-raise
+    (детерминированный исход, AC-S0-2). Успех фиксируется внутри фазы B.
+    """
+    if session_factory is None:
+        session_factory = get_processing_session_factory()
+    try:
+        await run_processing_attempt(session_factory, doc_id, mode=mode, pdf_bytes=pdf_bytes)
+    except ProcessingError as exc:
+        logger.warning(f"[doc={doc_id}] обработка завершилась ошибкой: {exc.message}")
+        write_processing_error(session_factory, doc_id, exc.message,
+                               cost_usd=exc.cost_usd, paid_calls=exc.paid_calls)
+        if reraise and exc.http_status is not None:
+            raise
+    except asyncio.CancelledError:
+        logger.warning(f"[doc={doc_id}] обработка прервана (CancelledError)")
+        write_processing_error(session_factory, doc_id, "Обработка прервана",
+                               cost_usd=Decimal(0), paid_calls=0)
+        raise
+    except Exception as exc:  # noqa: BLE001 — подлинно непредвиденное (не ProcessingError)
+        logger.exception(f"[doc={doc_id}] непредвиденная ошибка обработки")
+        write_processing_error(session_factory, doc_id, f"Ошибка обработки: {exc}",
+                               cost_usd=Decimal(0), paid_calls=0)

@@ -231,6 +231,25 @@ def client(db_session, in_memory_s3) -> Iterator:
 
 
 @pytest.fixture
+def session_factory_test(db_session):
+    """Фабрика сессий, отдающая ту же транзакционную тест-сессию.
+
+    process_document по контракту открывает сессию сам через session_factory;
+    в тестах инжектим фабрику, возвращающую db_session, чтобы обработка видела
+    данные теста и откатывалась вместе с ним. Контекст-менеджер (__enter__/__exit__)
+    имитирован, но close/commit проксируются на общую сессию без реального закрытия.
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def factory():
+        """Контекст-менеджер, отдающий общую тест-сессию без реального закрытия."""
+        yield db_session  # не закрываем — управляет фикстура db_session
+
+    return factory
+
+
+@pytest.fixture
 def factories(db_session):
     """Регистрирует db_session в фабриках. Возвращает модуль с фабриками.
 
