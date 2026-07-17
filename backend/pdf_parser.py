@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
@@ -10,8 +11,48 @@ from sqlalchemy.orm import Session
 from config import settings
 from crud.documents import create_invoice
 from crud.materials import VALID_CALC_ROLES, UnknownMaterialType, get_or_create_material_class
+from processing import PermanentError, TransientError
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ParsedItem:
+    """Позиция СФ из ответа модели — сырой material_class/type/role (резолв в id — фаза B)."""
+
+    raw_name: str
+    item_type: str
+    material_class: str | None
+    material_type: str | None
+    calc_role: str | None
+    quantity: float
+    unit: str | None
+    unit_price: float
+    amount: float
+    vat_amount: float | None
+
+
+@dataclass
+class ParsedInvoice:
+    """Одна СФ из ответа модели с посчитанной итоговой confidence."""
+
+    number: str
+    date: date
+    supplier_name: str | None
+    supplier_inn: str | None
+    vat_rate: float
+    confidence: float
+    items: list[ParsedItem] = field(default_factory=list)
+
+
+@dataclass
+class ParseOutcome:
+    """Результат чистой фазы A: тип документа, разобранные СФ и учёт стоимости вызова."""
+
+    doc_type: str
+    invoices: list[ParsedInvoice]
+    cost_usd: Decimal
+    paid_calls: int
 
 SYSTEM_PROMPT = """Ты — парсер счетов-фактур и УПД (универсальных передаточных документов) для строительных материалов.
 
@@ -133,6 +174,168 @@ def _with_cost(result: dict, cost: Decimal | None) -> dict:
     if cost is not None:
         result["parse_cost_usd"] = cost
     return result
+
+
+async def parse_pdf(file_data: bytes, *, document_id: int) -> ParseOutcome:
+    """Чистая фаза A: вызвать OpenRouter, разобрать ответ, вернуть ParseOutcome.
+
+    Без обращения к БД. При ошибке бросает доменное исключение с накопленным
+    учётом стоимости: TransientError (транзиентные сбои: сеть/таймаут/5xx/429/408)
+    или PermanentError (ошибки контента). Материалы не резолвятся в id — это делает фаза B.
+    """
+    cost = Decimal(0)
+    paid_calls = 0
+    logger.info(f"[doc={document_id}] Фаза A: старт парсинга, {len(file_data)} байт")
+
+    api_key = settings.OPENROUTER_API_KEY
+    if not api_key:
+        raise PermanentError("API-ключ OpenRouter не настроен")
+
+    pdf_base64 = base64.b64encode(file_data).decode("utf-8")
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    max_tokens = settings.AI_MAX_TOKENS
+    payload = {
+        "model": settings.AI_MODEL,
+        "max_tokens": max_tokens,
+        "usage": {"include": True},
+        "plugins": [{"id": "file-parser", "pdf": {"engine": settings.PDF_ENGINE}}],
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "file", "file": {"filename": "document.pdf",
+                     "file_data": f"data:application/pdf;base64,{pdf_base64}"}},
+                    {"type": "text", "text": (
+                        "Определи тип документа и извлеки данные. ВАЖНО: каждая строка "
+                        "из табличной части — это отдельная позиция в items. "
+                        "Не объединяй и не суммируй строки, даже если они выглядят одинаково."
+                    )},
+                ],
+            },
+        ],
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=180) as client:
+            response = await client.post(OPENROUTER_URL, headers=headers, json=payload)
+    except httpx.TimeoutException as exc:
+        raise TransientError("Таймаут запроса к OpenRouter (180с)") from exc
+    except httpx.RequestError as exc:
+        # ConnectError / ReadError / RemoteProtocolError / DNS / TLS — транспортный сбой
+        # без ответа сервера → платного вызова не было (F12).
+        raise TransientError(f"Сетевая ошибка запроса к OpenRouter: {exc}") from exc
+
+    if response.status_code != 200:
+        msg = f"OpenRouter API ошибка: {response.status_code}"
+        # 5xx (сервер), 429 (rate limit), 408 (request timeout) — транзиентно, ретраебельно на S2.
+        if response.status_code >= 500 or response.status_code in (408, 429):
+            raise TransientError(msg)
+        raise PermanentError(msg)
+
+    # HTTP 200 ⇒ платный вызов состоялся. Фиксируем факт биллинга ДО чтения тела.
+    paid_calls = 1
+    try:
+        data = response.json()
+    except Exception as exc:  # noqa: BLE001 — битое тело от прокси остаётся платным вызовом
+        raise PermanentError("Не удалось разобрать ответ модели (тело не JSON)",
+                             cost_usd=cost, paid_calls=paid_calls) from exc
+    cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
+
+    usage = data.get("usage", {})
+    completion_tokens = usage.get("completion_tokens", 0)
+    finish_reason = (data.get("choices") or [{}])[0].get("finish_reason")
+    logger.info(f"[doc={document_id}] Фаза A: cost=${cost}, finish_reason={finish_reason}")
+
+    if finish_reason == "length":
+        raise PermanentError(
+            "Ответ модели обрезан по лимиту токенов — часть позиций счёта потеряна. "
+            "Попробуйте повторить разбор.",
+            cost_usd=cost, paid_calls=paid_calls,
+        )
+    if completion_tokens and completion_tokens >= max_tokens:
+        logger.error(f"[doc={document_id}] completion_tokens={completion_tokens} == max — ответ обрезан")
+
+    try:
+        response_text = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise PermanentError("Ответ модели без содержимого",
+                             cost_usd=cost, paid_calls=paid_calls) from exc
+
+    if "```json" in response_text:
+        response_text = response_text.split("```json")[1].split("```")[0]
+    elif "```" in response_text:
+        response_text = response_text.split("```")[1].split("```")[0]
+
+    try:
+        parsed = json.loads(response_text.strip())
+    except json.JSONDecodeError as exc:
+        raise PermanentError("Не удалось разобрать ответ модели (невалидный JSON)",
+                             cost_usd=cost, paid_calls=paid_calls) from exc
+
+    if parsed.get("doc_type") != "invoice":
+        raise PermanentError("Документ не является счётом-фактурой",
+                             cost_usd=cost, paid_calls=paid_calls)
+
+    invoices: list[ParsedInvoice] = []
+    for _inv_idx, inv_data in enumerate(parsed.get("invoices", [])):
+        confidence = _final_confidence(inv_data.get("confidence"), _calculate_completeness(inv_data))
+        items: list[ParsedItem] = []
+        for item in inv_data.get("items", []):
+            items.append(ParsedItem(
+                raw_name=item.get("raw_name") or "",
+                item_type=item.get("item_type") or "other",
+                material_class=item.get("material_class"),
+                material_type=item.get("material_type"),
+                calc_role=item.get("calc_role"),
+                quantity=float(item.get("quantity") or 0),
+                unit=item.get("unit"),
+                unit_price=float(item.get("unit_price") or 0),
+                amount=float(item.get("amount") or 0),
+                vat_amount=item.get("vat_amount"),
+            ))
+
+        inv_number = inv_data.get("number", "?")
+        try:
+            invoice_date_str = inv_data.get("date")
+            if not invoice_date_str:
+                raise ValueError("Дата СФ отсутствует в ответе модели")
+            invoice_date = date.fromisoformat(invoice_date_str)
+        except (ValueError, TypeError) as e:
+            logger.error(f"[doc={document_id}] СФ №{inv_number}: некорректная дата: {e} — пропуск СФ")
+            continue
+
+        doc_total = inv_data.get("doc_total_without_vat")
+        try:
+            doc_total = float(doc_total) if doc_total is not None else None
+        except (TypeError, ValueError):
+            doc_total = None
+        reconciled, detail = _reconcile_totals(
+            doc_total, [{"amount": it.amount} for it in items]
+        )
+        if not reconciled:
+            raise PermanentError(f"Разбор счёта №{inv_number} неполный: {detail}",
+                                 cost_usd=cost, paid_calls=paid_calls)
+
+        invoices.append(ParsedInvoice(
+            number=inv_data.get("number", ""),
+            date=invoice_date,
+            supplier_name=inv_data.get("supplier_name"),
+            supplier_inn=inv_data.get("supplier_inn"),
+            vat_rate=inv_data.get("vat_rate", 20),
+            confidence=confidence,
+            items=items,
+        ))
+
+    if not invoices:
+        # doc_type=invoice, но ни одной СФ не разобрано (пустой invoices или все даты кривые
+        # → continue выше). Не создаём документ «parsed с 0 СФ» — это тот артефакт, ради
+        # устранения которого вводилась статусная модель (Q2, класс 2).
+        raise PermanentError("Ни одной СФ не удалось разобрать из документа",
+                             cost_usd=cost, paid_calls=paid_calls)
+
+    logger.info(f"[doc={document_id}] Фаза A: разобрано СФ {len(invoices)}, cost=${cost}")
+    return ParseOutcome(doc_type="invoice", invoices=invoices, cost_usd=cost, paid_calls=paid_calls)
 
 
 async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> dict:

@@ -1,0 +1,57 @@
+"""Тесты чистой фазы A парсинга (S0-2). Без БД — только LLM + структуры."""
+from decimal import Decimal
+
+import pytest
+
+from pdf_parser import ParseOutcome, parse_pdf
+from processing import PermanentError, TransientError
+
+
+@pytest.mark.asyncio
+async def test_parse_pdf_happy_path_returns_outcome(sample_pdf_bytes, mock_openrouter):
+    """Успешный разбор возвращает ParseOutcome со стоимостью и без обращения к БД."""
+    outcome = await parse_pdf(sample_pdf_bytes, document_id=1)
+    assert isinstance(outcome, ParseOutcome)
+    assert outcome.doc_type == "invoice"
+    assert len(outcome.invoices) == 1
+    assert outcome.invoices[0].number == "СФ-101"
+    assert outcome.invoices[0].items[0].material_class is not None or outcome.invoices[0].items[0].item_type
+    assert outcome.cost_usd > 0
+    assert outcome.paid_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_parse_pdf_unparseable_raises_permanent_with_cost(sample_pdf_bytes, mock_openrouter):
+    """doc_type != invoice → PermanentError, но платный вызов учтён в ошибке."""
+    mock_openrouter.use_scenario("unparseable")
+    with pytest.raises(PermanentError) as exc:
+        await parse_pdf(sample_pdf_bytes, document_id=1)
+    assert exc.value.paid_calls == 1
+    assert exc.value.cost_usd >= 0
+
+
+@pytest.mark.asyncio
+async def test_parse_pdf_incomplete_totals_raises_permanent(sample_pdf_bytes, mock_openrouter):
+    """Провал сверки итогов → PermanentError с учётом стоимости."""
+    mock_openrouter.use_scenario("incomplete_totals")
+    with pytest.raises(PermanentError) as exc:
+        await parse_pdf(sample_pdf_bytes, document_id=1)
+    assert exc.value.paid_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_parse_pdf_5xx_raises_transient_no_cost(sample_pdf_bytes, mock_openrouter):
+    """OpenRouter 5xx → TransientError без стоимости (нет платного 200)."""
+    mock_openrouter.use_http_status(503)
+    with pytest.raises(TransientError) as exc:
+        await parse_pdf(sample_pdf_bytes, document_id=1)
+    assert exc.value.paid_calls == 0
+    assert exc.value.cost_usd == Decimal(0)
+
+
+@pytest.mark.asyncio
+async def test_parse_pdf_429_raises_transient(sample_pdf_bytes, mock_openrouter):
+    """OpenRouter 429 (rate limit) → TransientError, не Permanent (F12, ретраебельно на S2)."""
+    mock_openrouter.use_http_status(429)
+    with pytest.raises(TransientError):
+        await parse_pdf(sample_pdf_bytes, document_id=1)
