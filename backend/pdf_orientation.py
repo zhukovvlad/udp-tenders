@@ -8,14 +8,16 @@ import io
 import json
 import logging
 import re
+from decimal import Decimal
 
+import anyio
 import httpx
 import pikepdf
 import pypdfium2 as pdfium
-from fastapi import HTTPException
 
 from config import settings
 from pdf_parser import OPENROUTER_URL
+from processing import PermanentError, TransientError
 
 logger = logging.getLogger(__name__)
 
@@ -111,11 +113,18 @@ def render_pages_for_detect(pdf_bytes: bytes, long_side: int = 768) -> list[byte
     return images
 
 
-async def detect_rotations(images: list[bytes]) -> list[int]:
-    """Один vision-запрос: per-page поворот 0/90/180/270. Любой сбой парсинга → нули."""
+async def detect_rotations(images: list[bytes]) -> tuple[list[int], Decimal]:
+    """Один vision-запрос: per-page поворот 0/90/180/270 и стоимость вызова.
+
+    Транспортный сбой/таймаут/не-2xx → TransientError (detect не оплачен, cost не читается);
+    слишком много страниц → PermanentError. Непарсящееся СОДЕРЖИМОЕ при 200 → нули
+    (безопасная деградация), но cost из usage возвращается (вызов был платным).
+    """
     n = len(images)
     if n > MAX_DESKEW_PAGES:
-        raise HTTPException(status_code=413, detail=f"Слишком много страниц для коррекции (> {MAX_DESKEW_PAGES})")
+        # http_status=413 — прежний код эндпоинта; на S0 доходит до клиента (AC-S0-8).
+        raise PermanentError(f"Слишком много страниц для коррекции (> {MAX_DESKEW_PAGES})",
+                             http_status=413)
     content = [{"type": "text", "text": _DETECT_PROMPT}]
     for img in images:
         b64 = base64.b64encode(img).decode()
@@ -123,6 +132,7 @@ async def detect_rotations(images: list[bytes]) -> list[int]:
     payload = {
         "model": settings.AI_MODEL,
         "max_tokens": 200,
+        "usage": {"include": True},  # S0-9: detect — платный вызов, стоимость учитывается
         "messages": [{"role": "user", "content": content}],
     }
     headers = {"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}", "Content-Type": "application/json"}
@@ -133,28 +143,44 @@ async def detect_rotations(images: list[bytes]) -> list[int]:
         resp.raise_for_status()
     except httpx.HTTPError as e:
         # транспортный сбой / таймаут / не-2xx → НЕ деградируем в нули (иначе переразберём
-        # оригинал под видом «исправлено»), а сигналим 502; эндпоинт не тронет S3 и не переразберёт
+        # оригинал под видом «исправлено»), а сигналим 502; вызывающий не тронет S3 и не переразберёт
         logger.warning(f"detect_rotations: vision-запрос упал: {e}")
-        raise HTTPException(status_code=502, detail="Сервис распознавания ориентации недоступен") from e
-    # успешный 200: непарсящееся СОДЕРЖИМОЕ → нули (безопасная деградация на уровне контента)
+        # http_status=502 — прежний код эндпоинта; на S0 доходит до клиента (AC-S0-8).
+        raise TransientError("Сервис распознавания ориентации недоступен", http_status=502) from e
+
+    # успешный 200: непарсящееся СОДЕРЖИМОЕ → нули (безопасная деградация на уровне контента),
+    # но cost из usage читаем в любом случае — вызов уже оплачен.
+    cost = Decimal(0)
     text = ""
     try:
-        text = resp.json()["choices"][0]["message"]["content"]
+        data = resp.json()
+        cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
+        text = data["choices"][0]["message"]["content"]
         m = re.search(r"\[[\d,\s]*\]", text)          # берём именно JSON-массив, не любые числа
         nums = json.loads(m.group(0)) if m else []
         allowed = {0, 90, 180, 270}
         rots = [v % 360 if (v % 360) in allowed else 0 for v in nums[:n]]
-    except Exception:  # noqa: BLE001 — кривое содержимое не должно ронять эндпоинт
+    except Exception:  # noqa: BLE001 — кривое содержимое не должно ронять вызывающего
         rots = []
     rots += [0] * (n - len(rots))   # добиваем до длины n
-    logger.info(f"detect_rotations: n={n}, rotations={rots}, raw={text[:300]!r}")
-    return rots
+    logger.info(f"detect_rotations: n={n}, rotations={rots}, cost=${cost}, raw={text[:300]!r}")
+    return rots, cost
 
 
-async def deskew_pdf(pdf_bytes: bytes) -> tuple[bytes, list[int]]:
-    """render-for-detect → detect → селективный raster. Все нули → исходные байты как есть."""
-    images = render_pages_for_detect(pdf_bytes)
-    rotations = await detect_rotations(images)
+async def deskew_pdf(pdf_bytes: bytes) -> tuple[bytes, list[int], Decimal]:
+    """render-for-detect → detect → селективный raster. Возвращает (bytes, rotations, detect_cost).
+
+    detect уже оплачен к моменту apply_rotations; сбой растеризации оборачиваем в
+    TransientError с detect-cost, чтобы стоимость не потерялась в generic-ветке (F3, §2.3).
+    Рендер/раст CPU-bound — уходят в поток через anyio.to_thread (S0-6, event loop свободен).
+    """
+    images = await anyio.to_thread.run_sync(render_pages_for_detect, pdf_bytes)
+    rotations, cost = await detect_rotations(images)
     if not any(r % 360 for r in rotations):
-        return pdf_bytes, rotations          # short-circuit, без перерисовки
-    return apply_rotations(pdf_bytes, rotations), rotations
+        return pdf_bytes, rotations, cost          # short-circuit, без перерисовки
+    try:
+        corrected = await anyio.to_thread.run_sync(apply_rotations, pdf_bytes, rotations)
+    except Exception as exc:  # noqa: BLE001 — detect оплачен, cost не теряем
+        raise TransientError(f"Не удалось применить коррекцию ориентации: {exc}",
+                             cost_usd=cost, paid_calls=1) from exc
+    return corrected, rotations, cost

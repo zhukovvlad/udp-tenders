@@ -168,6 +168,88 @@ def test_write_error_reraises_non_connection_operational_error():
     assert attempts["n"] == 1  # детерминированная ошибка — без ретраев
 
 
+@pytest.mark.asyncio
+async def test_deskew_sums_detect_and_parse_cost(
+    factories, db_session, in_memory_s3, mock_openrouter, monkeypatch, session_factory_test,
+):
+    """deskew: parse_cost = detect + parse, parse_count += 2 (AC-S0-10, S0-9)."""
+    import pdf_orientation
+
+    doc = _proc_doc(factories, db_session, in_memory_s3)
+
+    async def fake_deskew(pdf_bytes):
+        """Возвращает (bytes, rotations, detect_cost) без реального vision-вызова."""
+        return pdf_bytes, [0], Decimal("0.001")
+    monkeypatch.setattr(pdf_orientation, "deskew_pdf", fake_deskew)
+
+    await process_document(doc.id, mode="deskew", session_factory=session_factory_test)
+
+    db_session.expire_all()
+    saved = db_session.query(Document).filter(Document.id == doc.id).first()
+    assert saved.status == "parsed"
+    assert saved.parse_count == 2                       # detect + parse
+    assert saved.parse_cost_usd > Decimal("0.001")      # detect + parse cost
+
+
+@pytest.mark.asyncio
+async def test_deskew_carries_detect_cost_when_s3_write_fails(
+    factories, db_session, in_memory_s3, mock_openrouter, monkeypatch, session_factory_test,
+):
+    """detect оплачен, но перезапись S3 после detect падает → error, detect cost учтён,
+    parse_count += 1 (только detect, фаза A не достигнута) (F3)."""
+    import pdf_orientation
+    import s3
+
+    doc = _proc_doc(factories, db_session, in_memory_s3)
+
+    async def fake_deskew(pdf_bytes):
+        """detect «нашёл» поворот → потребуется перезапись S3."""
+        return b"%PDF-corrected", [270], Decimal("0.002")
+    monkeypatch.setattr(pdf_orientation, "deskew_pdf", fake_deskew)
+
+    async def boom_upload(file_bytes, object_name):
+        """Эмулирует сбой S3-записи ПОСЛЕ оплаченного detect."""
+        raise RuntimeError("S3 write failed")
+    monkeypatch.setattr(s3, "upload_file_async", boom_upload)
+
+    await process_document(doc.id, mode="deskew", session_factory=session_factory_test)
+
+    db_session.expire_all()
+    saved = db_session.query(Document).filter(Document.id == doc.id).first()
+    assert saved.status == "error"
+    assert saved.parse_count == 1                       # оплаченный detect учтён
+    assert saved.parse_cost_usd == Decimal("0.002")     # detect cost не потерян
+
+
+@pytest.mark.asyncio
+async def test_process_document_reraises_deskew_error_with_http_status(
+    factories, db_session, in_memory_s3, monkeypatch, session_factory_test,
+):
+    """T6 deferred coverage: reraise=True + ошибка с http_status (deskew 502) → error записан
+    И исключение пробрасывается наружу process_document (AC-S0-8). До этой задачи ни одна
+    доменная ошибка не несла http_status, ветка `if reraise and exc.http_status is not None`
+    была недостижима в тестах."""
+    import pdf_orientation
+    from processing import TransientError
+
+    doc = _proc_doc(factories, db_session, in_memory_s3)
+
+    async def boom_deskew(pdf_bytes):
+        """Эмулирует транспортный сбой detect — TransientError с http_status=502, без cost."""
+        raise TransientError("Сервис распознавания ориентации недоступен", http_status=502)
+    monkeypatch.setattr(pdf_orientation, "deskew_pdf", boom_deskew)
+
+    with pytest.raises(TransientError) as exc_info:
+        await process_document(doc.id, mode="deskew", reraise=True, session_factory=session_factory_test)
+    assert exc_info.value.http_status == 502
+
+    db_session.expire_all()
+    saved = db_session.query(Document).filter(Document.id == doc.id).first()
+    assert saved.status == "error"
+    assert saved.parse_count == 0            # detect не был оплачен (сбой до чтения cost)
+    assert saved.parse_cost_usd == Decimal(0)
+
+
 def test_write_error_retries_on_connection_loss():
     """connection_invalidated=True → ретраит до retries, затем critical-лог без проброса (F8)."""
     from contextlib import contextmanager

@@ -1,4 +1,5 @@
 import io
+from decimal import Decimal
 
 import httpx
 import pikepdf
@@ -8,6 +9,7 @@ import respx
 from PIL import Image
 
 import pdf_orientation as po
+from processing import PermanentError, TransientError
 
 # Захватываем настоящий AsyncClient.send на импорте модуля (до autouse-гарда
 # block_real_openrouter из conftest, который рубит любые вызовы к openrouter.ai на
@@ -137,84 +139,121 @@ def test_apply_rotations_two_rotated_pages():
         assert _top_strip_is_dark(b.getvalue())  # обе выпрямлены
 
 
-def _openrouter_reply(text: str) -> httpx.Response:
-    return httpx.Response(200, json={"choices": [{"message": {"content": text}}]})
+def _openrouter_reply(text: str, cost: str | None = None) -> httpx.Response:
+    """Ответ OpenRouter с опциональным usage.cost (S0-9: detect — платный вызов)."""
+    body = {"choices": [{"message": {"content": text}}]}
+    if cost is not None:
+        body["usage"] = {"cost": cost}
+    return httpx.Response(200, json=body)
 
 
 @pytest.mark.asyncio
 @respx.mock
 async def test_detect_rotations_parses_list(monkeypatch, _allow_respx):
+    """Разбор корректного JSON-массива поворотов + чтение cost из usage (S0-9)."""
     monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", "test-key")
     respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
-        return_value=_openrouter_reply("Вот повороты: [0, 90, 270]")
+        return_value=_openrouter_reply("Вот повороты: [0, 90, 270]", cost="0.0012")
     )
-    out = await po.detect_rotations([b"img0", b"img1", b"img2"])
-    assert out == [0, 90, 270]
+    rots, cost = await po.detect_rotations([b"img0", b"img1", b"img2"])
+    assert rots == [0, 90, 270]
+    assert cost == Decimal("0.0012")
 
 
 @pytest.mark.asyncio
 @respx.mock
 async def test_detect_rotations_garbage_to_zeros(monkeypatch, _allow_respx):
+    """Непарсящееся содержимое → нули, но cost из usage всё равно возвращается (вызов оплачен)."""
     monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", "test-key")
     respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
-        return_value=_openrouter_reply("не смог")
+        return_value=_openrouter_reply("не смог", cost="0.0005")
     )
-    out = await po.detect_rotations([b"img0", b"img1"])
-    assert out == [0, 0]  # длина = числу страниц, всё в 0
+    rots, cost = await po.detect_rotations([b"img0", b"img1"])
+    assert rots == [0, 0]  # длина = числу страниц, всё в 0
+    assert cost == Decimal("0.0005")
 
 
 @pytest.mark.asyncio
 async def test_detect_rotations_too_many_pages():
-    from fastapi import HTTPException
-    with pytest.raises(HTTPException) as ei:
+    """Слишком много страниц → PermanentError с http_status=413 (было HTTPException до Task 7)."""
+    with pytest.raises(PermanentError) as ei:
         await po.detect_rotations([b"x"] * (po.MAX_DESKEW_PAGES + 1))
-    assert ei.value.status_code == 413
+    assert ei.value.http_status == 413
 
 
 @pytest.mark.asyncio
 @respx.mock
 async def test_detect_rotations_upstream_500_raises_502(monkeypatch, _allow_respx):
+    """Транспортный сбой/не-2xx → TransientError с http_status=502 (detect не оплачен)."""
     monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", "test-key")
     respx.post("https://openrouter.ai/api/v1/chat/completions").mock(return_value=httpx.Response(500))
-    from fastapi import HTTPException
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(TransientError) as ei:
         await po.detect_rotations([b"x"])
-    assert ei.value.status_code == 502
+    assert ei.value.http_status == 502
+    assert ei.value.cost_usd == Decimal(0)  # сбой до чтения usage — cost не читается
 
 
 @pytest.mark.asyncio
 @respx.mock
 async def test_detect_rotations_prose_around_array(monkeypatch, _allow_respx):
+    """Число-подобная проза вокруг JSON-массива не путает парсер."""
     monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", "test-key")
     respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
         return_value=_openrouter_reply("Страница 1 и 2: ответ [90, 0]")
     )
-    assert await po.detect_rotations([b"a", b"b"]) == [90, 0]  # «1»,«2» из прозы не попали
+    rots, _cost = await po.detect_rotations([b"a", b"b"])
+    assert rots == [90, 0]  # «1»,«2» из прозы не попали
 
 
 @pytest.mark.asyncio
 async def test_deskew_pdf_all_zeros_returns_original(monkeypatch):
-    """Все нули → исходные байты без перерисовки (идентичность)."""
+    """Все нули → исходные байты без перерисовки (идентичность), cost прокидывается наружу."""
     original = _sideways_scan_pdf()
 
     async def fake_detect(images):
-        return [0] * len(images)
+        """Возвращает (rotations, cost) — новый контракт detect_rotations (Task 7)."""
+        return [0] * len(images), Decimal("0.001")
     monkeypatch.setattr(po, "detect_rotations", fake_detect)
 
-    out_bytes, rots = await po.deskew_pdf(original)
+    out_bytes, rots, cost = await po.deskew_pdf(original)
     assert rots == [0]
     assert out_bytes == original  # тот же объект байтов, без перерисовки
+    assert cost == Decimal("0.001")
 
 
 @pytest.mark.asyncio
 async def test_deskew_pdf_applies_rotation(monkeypatch):
+    """Ненулевой поворот → apply_rotations вызван, cost detect прокинут наружу."""
     original = _sideways_scan_pdf()
 
     async def fake_detect(images):
-        return [90] * len(images)
+        """Возвращает (rotations, cost) — новый контракт detect_rotations (Task 7)."""
+        return [90] * len(images), Decimal("0.002")
     monkeypatch.setattr(po, "detect_rotations", fake_detect)
 
-    out_bytes, rots = await po.deskew_pdf(original)
+    out_bytes, rots, cost = await po.deskew_pdf(original)
     assert rots == [90]
     assert out_bytes != original
+    assert cost == Decimal("0.002")
     assert _top_strip_is_dark(_render_first_page_png(out_bytes))  # выпрямлено
+
+
+@pytest.mark.asyncio
+async def test_deskew_pdf_apply_failure_carries_detect_cost(monkeypatch):
+    """Сбой apply_rotations ПОСЛЕ оплаченного detect → TransientError несёт detect cost (F3)."""
+    original = _sideways_scan_pdf()
+
+    async def fake_detect(images):
+        """detect «нашёл» поворот, но растеризация ниже упадёт."""
+        return [90] * len(images), Decimal("0.003")
+    monkeypatch.setattr(po, "detect_rotations", fake_detect)
+
+    def boom_apply(pdf_bytes, rotations):
+        """Эмулирует сбой растеризации (например, битый PDF)."""
+        raise RuntimeError("raster boom")
+    monkeypatch.setattr(po, "apply_rotations", boom_apply)
+
+    with pytest.raises(TransientError) as ei:
+        await po.deskew_pdf(original)
+    assert ei.value.cost_usd == Decimal("0.003")
+    assert ei.value.paid_calls == 1

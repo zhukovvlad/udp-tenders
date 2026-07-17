@@ -240,16 +240,88 @@ def write_processing_error(session_factory, doc_id: int, message: str, *,
                     f"стоимость ${cost_usd} не учтена.")
 
 
+def _is_not_found(exc: Exception) -> bool:
+    """S3 «нет объекта» vs транзиентный сбой (порт из routers/invoices старой версии).
+
+    Различение нужно в `_run_deskew`: «нет бэкапа» — ожидаемый случай (fallback на
+    исходный s3_key), а транзиентный сбой S3 обязан стать TransientError, иначе можно
+    было бы затереть настоящий оригинал под видом «бэкапа нет».
+    """
+    from botocore.exceptions import ClientError
+    if isinstance(exc, FileNotFoundError):            # in-memory-фикстура тестов
+        return True
+    if isinstance(exc, ClientError):                  # MinIO/S3 в проде
+        return exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404", "NoSuchBucket")
+    return False
+
+
+async def _run_deskew(s3_key: str) -> tuple[bytes, Decimal, int]:
+    """Коррекция ориентации от оригинала. Возвращает (pdf_для_парсинга, detect_cost, detect_calls).
+
+    Источник — всегда {s3_key}.orig (идемпотентность повторных deskew). Различаем «нет
+    бэкапа» (fallback на s3_key) и транзиентный сбой S3 (→ TransientError 502, чтобы не
+    затереть настоящий оригинал). При ненулевых поворотах: одноразовый бэкап оригинала +
+    перезапись s3_key исправленными байтами. file_hash не пересчитываем (Q6).
+
+    ПОСЛЕ оплаченного detect любой S3-сбой оборачивается в TransientError с detect-cost —
+    стоимость не теряется в generic-ветке process_document (F3, §2.3).
+    """
+    import pdf_orientation
+    from s3 import download_file_async, upload_file_async
+
+    orig_key = f"{s3_key}.orig"
+    try:
+        source_bytes = await download_file_async(orig_key)
+        has_backup = True
+    except Exception as e:  # noqa: BLE001 — до detect: сбой S3 не оплачен
+        if not _is_not_found(e):
+            raise TransientError("Хранилище временно недоступно", http_status=502) from e
+        source_bytes = await download_file_async(s3_key)
+        has_backup = False
+
+    # deskew_pdf бросает TransientError ДО чтения cost при транспортном сбое detect
+    # (тогда detect не оплачен); при сбое apply_rotations — уже С detect-cost (см. pdf_orientation).
+    corrected, rotations, detect_cost = await pdf_orientation.deskew_pdf(source_bytes)
+    detect_calls = 1
+
+    # Всё, что после успешного detect, оплачено — S3-сбой не должен обнулять учёт (F3).
+    try:
+        if any(r % 360 for r in rotations):
+            if not has_backup:
+                await upload_file_async(source_bytes, orig_key)   # одноразовый бэкап оригинала
+            await upload_file_async(corrected, s3_key)            # перезапись основным ключом
+            return corrected, detect_cost, detect_calls
+
+        # Нули: коррекция не нужна ЭТИМ прогоном. Но если .orig уже существует (has_backup),
+        # значит прошлый deskew исправил s3_key — а detect сейчас флейкнул в нули. Парсить
+        # повёрнутый .orig нельзя (перезатрёт хороший набор СФ парсом кривого файла) — берём
+        # текущий s3_key (исправленную версию). Без бэкапа .orig == s3_key, source и есть текущий.
+        if has_backup:
+            current = await download_file_async(s3_key)
+            return current, detect_cost, detect_calls
+        return source_bytes, detect_cost, detect_calls
+    except ProcessingError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — S3-сбой ПОСЛЕ оплаченного detect
+        raise TransientError(f"Ошибка S3 после коррекции ориентации: {exc}",
+                             cost_usd=detect_cost, paid_calls=detect_calls) from exc
+
+
 async def run_processing_attempt(session_factory, doc_id: int, *, mode: str,
                                  pdf_bytes: bytes | None = None) -> None:
-    """Одна попытка обработки: (скачать байты) → фаза A → фаза B.
+    """Одна попытка обработки: (скачать / deskew) → фаза A → фаза B.
 
     Доменные ошибки (Transient/Permanent) НЕ гасит — пробрасывает наверх с учётом
     стоимости. Это ядро, неизменное между ступенями (обёртки завершения — разные).
-    deskew-режим будет расширен в Task 7 (детект + коррекция до фазы A).
+    mode="deskew": коррекция ориентации от оригинала (`_run_deskew`) ДО фазы A; её
+    оплаченная стоимость (detect_cost/detect_calls) прибавляется к исходу фазы A —
+    как к успеху, так и к ошибке парсинга (составная попытка, §2.5, AC-S0-10).
     """
     from pdf_parser import parse_pdf  # локальный импорт против кругового; патчится через pdf_parser (F6)
     from s3 import download_file_async
+
+    detect_cost = Decimal(0)
+    detect_calls = 0
 
     if pdf_bytes is None:
         with session_factory() as db:
@@ -257,12 +329,24 @@ async def run_processing_attempt(session_factory, doc_id: int, *, mode: str,
             if doc is None or not doc.s3_key:
                 raise PermanentError(f"Документ id={doc_id} без s3_key")
             s3_key = doc.s3_key
-        try:
-            pdf_bytes = await download_file_async(s3_key)
-        except Exception as exc:  # noqa: BLE001
-            raise TransientError(f"Не удалось скачать PDF из S3: {exc}") from exc
+        if mode == "deskew":
+            pdf_bytes, detect_cost, detect_calls = await _run_deskew(s3_key)
+        else:
+            try:
+                pdf_bytes = await download_file_async(s3_key)
+            except Exception as exc:  # noqa: BLE001
+                raise TransientError(f"Не удалось скачать PDF из S3: {exc}") from exc
 
-    outcome = await parse_pdf(pdf_bytes, document_id=doc_id)
+    try:
+        outcome = await parse_pdf(pdf_bytes, document_id=doc_id)
+    except ProcessingError as exc:
+        # Составная попытка (§2.5): прибавляем оплаченный detect к ошибке парсинга.
+        exc.cost_usd = exc.cost_usd + detect_cost
+        exc.paid_calls = exc.paid_calls + detect_calls
+        raise
+
+    outcome.cost_usd = outcome.cost_usd + detect_cost
+    outcome.paid_calls = outcome.paid_calls + detect_calls
     with session_factory() as db:
         persist_parse_result(db, doc_id, outcome)
 
