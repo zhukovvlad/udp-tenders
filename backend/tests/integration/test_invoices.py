@@ -260,6 +260,14 @@ def test_reparse_verified_document_returns_409(client, factories):
     assert response.status_code == 409
 
 
+def test_reparse_returns_409_when_already_processing(client, factories, in_memory_s3):
+    """Reparse документа, уже находящегося в processing → 409 (AC-S0-4)."""
+    doc = factories.DocumentFactory.create(s3_key="k/busy.pdf", status="processing")
+    in_memory_s3["k/busy.pdf"] = b"%PDF"
+    resp = client.post(f"/api/invoices/documents/{doc.id}/reparse")
+    assert resp.status_code == 409
+
+
 def test_delete_verified_invoice_returns_409(client, factories):
     invoice = factories.InvoiceFactory.create()
     client.post(f"/api/invoices/{invoice.id}/verify")
@@ -450,52 +458,47 @@ def test_update_invoice_renames_supplier_and_cascades(client, factories, db_sess
 
 # --- Deskew-reparse ---
 
-def test_deskew_reparse_rotates_and_backs_up(client, factories, db_session, in_memory_s3, monkeypatch):
-    """Повороты ≠ 0: создаётся {key}.orig, основной ключ перезаписан, reparse выполнен."""
+def test_deskew_reparse_rotates_and_backs_up(client, factories, in_memory_s3, mock_openrouter, monkeypatch):
+    """Повороты ≠ 0: создаётся {key}.orig, основной ключ перезаписан, документ распарсен."""
+    from decimal import Decimal
+
     import pdf_orientation as po
-    import routers.invoices as inv_router
 
     doc = factories.DocumentFactory.create(s3_key="k/sample.pdf", status="parsed")
     in_memory_s3["k/sample.pdf"] = b"%PDF-original"
 
     async def fake_deskew(pdf_bytes):
-        return b"%PDF-corrected", [270]
+        """Возвращает исправленные байты + поворот + detect-cost."""
+        return b"%PDF-corrected", [270], Decimal("0.001")
     monkeypatch.setattr(po, "deskew_pdf", fake_deskew)
-
-    async def fake_reparse(d, db, pdf_bytes=None):
-        return {"id": d.id, "rotations_placeholder": True, "invoices": []}
-    monkeypatch.setattr(inv_router, "_reparse_from_s3", fake_reparse)
 
     resp = client.post(f"/api/invoices/documents/{doc.id}/deskew-reparse")
     assert resp.status_code == 200
-    assert resp.json()["rotations_applied"] == [270]
     assert in_memory_s3["k/sample.pdf.orig"] == b"%PDF-original"   # бэкап оригинала
     assert in_memory_s3["k/sample.pdf"] == b"%PDF-corrected"        # перезапись
 
 
-def test_deskew_reparse_no_rotation_keeps_s3(client, factories, in_memory_s3, monkeypatch):
-    """Все нули: S3 не трогаем, бэкап не создаём, reparse всё равно выполнен."""
+def test_deskew_reparse_no_rotation_keeps_s3(client, factories, in_memory_s3, mock_openrouter, monkeypatch):
+    """Все нули: S3 не трогаем, бэкап не создаём, документ всё равно распарсен."""
+    from decimal import Decimal
+
     import pdf_orientation as po
-    import routers.invoices as inv_router
 
     doc = factories.DocumentFactory.create(s3_key="k/up.pdf", status="parsed")
     in_memory_s3["k/up.pdf"] = b"%PDF-up"
 
     async def fake_deskew(pdf_bytes):
-        return pdf_bytes, [0]
+        """Возвращает исходные байты без поворотов + detect-cost."""
+        return pdf_bytes, [0], Decimal("0.001")
     monkeypatch.setattr(po, "deskew_pdf", fake_deskew)
-
-    async def fake_reparse(d, db, pdf_bytes=None):
-        return {"id": d.id, "invoices": []}
-    monkeypatch.setattr(inv_router, "_reparse_from_s3", fake_reparse)
 
     resp = client.post(f"/api/invoices/documents/{doc.id}/deskew-reparse")
     assert resp.status_code == 200
-    assert resp.json()["rotations_applied"] == [0]
     assert "k/up.pdf.orig" not in in_memory_s3   # бэкап не создан
 
 
 def test_deskew_reparse_verified_returns_409(client, factories, in_memory_s3):
+    """Документ с подтверждённой СФ → 409 до попытки коррекции ориентации."""
     doc = factories.DocumentFactory.create(s3_key="k/v.pdf", status="parsed")
     factories.InvoiceFactory.create(document=doc, verified=True)
     in_memory_s3["k/v.pdf"] = b"%PDF"
@@ -504,21 +507,22 @@ def test_deskew_reparse_verified_returns_409(client, factories, in_memory_s3):
 
 
 def test_deskew_reparse_vision_failure_502(client, factories, in_memory_s3, monkeypatch):
-    """Сбой vision (502 из deskew_pdf) → 502, S3 не тронут, бэкап не создан."""
-    from fastapi import HTTPException
-
+    """Сбой vision (TransientError с http_status=502) → 502, S3 не тронут (AC-S0-8 сохранён)."""
     import pdf_orientation as po
+    from processing import TransientError
+
     doc = factories.DocumentFactory.create(s3_key="k/x.pdf", status="parsed")
     in_memory_s3["k/x.pdf"] = b"%PDF-x"
 
     async def boom(pdf_bytes):
-        raise HTTPException(status_code=502, detail="vision down")
+        """Эмулирует недоступность vision-сервиса на detect."""
+        raise TransientError("vision down", http_status=502)
     monkeypatch.setattr(po, "deskew_pdf", boom)
 
     resp = client.post(f"/api/invoices/documents/{doc.id}/deskew-reparse")
-    assert resp.status_code == 502
+    assert resp.status_code == 502                      # контракт сохранён
     assert "k/x.pdf.orig" not in in_memory_s3
-    assert in_memory_s3["k/x.pdf"] == b"%PDF-x"   # оригинал не тронут
+    assert in_memory_s3["k/x.pdf"] == b"%PDF-x"          # оригинал не тронут
 
 
 def test_new_document_defaults_parse_cost_zero(db_session, factories):

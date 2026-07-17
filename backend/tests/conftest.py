@@ -107,13 +107,14 @@ def in_memory_s3(monkeypatch: pytest.MonkeyPatch) -> dict[str, bytes]:
     monkeypatch.setattr(s3, "download_file", fake_download)
     monkeypatch.setattr(s3, "delete_file", fake_delete)
     monkeypatch.setattr(s3, "ensure_bucket", fake_ensure_bucket)
-    # Routers импортируют функции напрямую, нужно патчить и там
+    # Routers импортируют функции напрямую, нужно патчить и там. upload_pdf вызывает
+    # upload_file_async (S0-6) — та же функция, что и в модуле s3 (bind на импорте),
+    # анлочит через уже пропатченный s3.upload_file (thread-обёртка резолвит имя лениво) —
+    # отдельный патч не нужен. ensure_bucket роутер больше не импортирует (bucket — lifespan).
     from routers import invoices as invoices_router
 
-    monkeypatch.setattr(invoices_router, "upload_file", fake_upload)
     monkeypatch.setattr(invoices_router, "download_file", fake_download)
     monkeypatch.setattr(invoices_router, "delete_file", fake_delete)
-    monkeypatch.setattr(invoices_router, "ensure_bucket", fake_ensure_bucket)
 
     return storage
 
@@ -187,11 +188,14 @@ def db_session(db_engine) -> Iterator[Session]:
 
 
 @pytest.fixture
-def client(db_session, in_memory_s3) -> Iterator:
+def client(db_session, in_memory_s3, session_factory_test) -> Iterator:
     """FastAPI TestClient с переопределёнными зависимостями для интеграционных тестов.
 
     - get_db заменяется на транзакционную сессию с rollback после теста.
     - get_current_user заменяется на мок суперюзера (auth-флоу тестируется отдельно).
+    - get_processing_session_factory заменяется на тест-фабрику (session_factory_test) —
+      иначе эндпоинты, доходящие до process_document, открыли бы сессию на реальном
+      dev-DATABASE_URL вместо тестовой транзакции (F1).
     - CSRF-токен: клиент отправляет test-значение и в куки, и в заголовок,
       чтобы csrf_middleware пропускал все запросы.
     """
@@ -202,6 +206,7 @@ def client(db_session, in_memory_s3) -> Iterator:
     from auth import get_current_user
     from database import get_db
     from main import app
+    from processing import get_processing_session_factory
 
     def override_get_db():
         try:
@@ -224,6 +229,7 @@ def client(db_session, in_memory_s3) -> Iterator:
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_current_user] = override_get_current_user
+    app.dependency_overrides[get_processing_session_factory] = lambda: session_factory_test
     with TestClient(app, headers={"X-CSRF-Token": _csrf_token}) as c:
         c.cookies.set("csrf_token", _csrf_token)
         yield c
