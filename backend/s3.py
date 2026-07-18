@@ -1,5 +1,6 @@
 import os
 
+import anyio
 import boto3
 from botocore.config import Config
 
@@ -46,3 +47,18 @@ def delete_file(object_name: str):
     """Удалить файл из S3."""
     client = get_s3_client()
     client.delete_object(Bucket=S3_BUCKET, Key=object_name)
+
+
+async def upload_file_async(file_bytes: bytes, object_name: str) -> str:
+    """Async-обёртка upload_file: sync-boto3 уходит в поток, event loop свободен (S0-6)."""
+    return await anyio.to_thread.run_sync(upload_file, file_bytes, object_name)
+
+
+async def download_file_async(object_name: str) -> bytes:
+    """Async-обёртка download_file через поток."""
+    return await anyio.to_thread.run_sync(download_file, object_name)
+
+
+async def delete_file_async(object_name: str) -> None:
+    """Async-обёртка delete_file через поток."""
+    await anyio.to_thread.run_sync(delete_file, object_name)

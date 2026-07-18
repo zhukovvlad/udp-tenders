@@ -29,16 +29,44 @@ def unauth_client() -> TestClient:
 
 
 def _collect_routes() -> list[tuple[str, str]]:
-    """Собрать все ручки из app.routes как (method, path)."""
-    result = []
-    for route in app.routes:
-        if not hasattr(route, "methods"):
-            continue
-        for method in route.methods:
-            if method in ("HEAD", "OPTIONS"):
-                continue
-            result.append((method, route.path))
-    return result
+    """Рекурсивно собрать все ручки из дерева роутов как (method, full_path).
+
+    FastAPI 0.139 включённые роутеры (`include_router`) больше НЕ разворачивает в
+    плоский `app.routes` — каждый становится непрозрачным `_IncludedRouter`, а его
+    ручки лежат в `original_router.routes` с префиксом из `include_context`. Плоский
+    обход (`for route in app.routes`) поэтому видел бы лишь ~5 верхнеуровневых ручек.
+    Спускаемся внутрь: `_IncludedRouter` → его `original_router.routes` (+ префикс),
+    `Mount`/под-приложение → его `.routes`, лист с `.methods` → (method, prefix+path).
+    Обратно совместимо со старым плоским представлением (там нет `original_router`).
+    """
+    def walk(routes, prefix: str = "") -> list[tuple[str, str]]:
+        """Обойти список роутов, разворачивая вложенные роутеры с накоплением префикса."""
+        collected: list[tuple[str, str]] = []
+        for route in routes:
+            included = getattr(route, "original_router", None)  # FastAPI ≥0.139 _IncludedRouter
+            if included is not None:
+                ctx = getattr(route, "include_context", None)
+                sub_prefix = getattr(ctx, "prefix", "") or ""
+                collected.extend(walk(included.routes, prefix + sub_prefix))
+            elif hasattr(route, "methods") and getattr(route, "path", None) is not None:
+                for method in route.methods:
+                    if method in ("HEAD", "OPTIONS"):
+                        continue
+                    collected.append((method, prefix + route.path))
+            elif hasattr(route, "routes"):  # Mount / под-приложение
+                collected.extend(walk(route.routes, prefix + getattr(route, "path", "")))
+        return collected
+
+    return walk(app.routes)
+
+
+def test_route_enumeration_not_silently_broken() -> None:
+    """Сторож самого сборщика: если интроспекция роутов сломается (напр. смена
+    внутренностей FastAPI), число ручек рухнет — падаем ЯВНО, а не теряем покрытие тихо."""
+    assert len(_collect_routes()) >= 60, (
+        "Сборщик ручек вернул подозрительно мало роутов — вероятно, сломалась "
+        "интроспекция app.routes после обновления FastAPI (см. _collect_routes)."
+    )
 
 
 @pytest.mark.parametrize("method,path", _collect_routes())

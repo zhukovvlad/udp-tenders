@@ -72,7 +72,10 @@ export function ErrorDocsTab({ docs }: ErrorDocsTabProps) {
             {errorDocs.map((doc) => {
               const isReparsing = reparse.isPending && reparse.variables === doc.id;
               const tone = doc.status === "error" ? "danger" : "neutral";
-              const statusLabel = doc.status === "error" ? "Ошибка парсинга" : "Проблемы в СФ";
+              const statusLabel =
+                doc.status === "error"
+                  ? doc.last_error || "Ошибка парсинга"
+                  : "Проблемы в СФ";
               const confidencePct =
                 doc.ai_confidence != null
                   ? `${Math.round(doc.ai_confidence * 100)}%`

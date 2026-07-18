@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from crud.suppliers import get_or_create_supplier
@@ -42,6 +43,22 @@ def delete_document(db: Session, doc_id: int):
         db.delete(doc)
         db.commit()
     return doc
+
+
+def try_acquire_processing(db: Session, doc_id: int, run_id: str | None = None) -> bool:
+    """Атомарно перевести документ в processing, если он ещё не там (guard S0-5).
+
+    Коммитит немедленно — иначе переход не виден другим сессиям (409 не сработает,
+    а фоновая таска на S1 не увидит processing). Возвращает True, если захватили.
+    """
+    result = db.execute(
+        text("UPDATE documents SET status='processing', processing_started_at=now(), "
+             "processing_run_id=:rid, last_error=NULL "
+             "WHERE id=:id AND status != 'processing'"),
+        {"id": doc_id, "rid": run_id},
+    )
+    db.commit()
+    return result.rowcount == 1
 
 
 # --- Invoices ---

@@ -1,7 +1,6 @@
 """Unit-тесты helper-функций pdf_parser."""
 from unittest.mock import MagicMock, patch
 
-import pdf_parser as _pdf_parser_mod
 from crud.materials import UnknownMaterialType
 from pdf_parser import _calculate_completeness, _final_confidence, _reconcile_totals
 
@@ -109,72 +108,51 @@ class TestReconcileTotals:
         assert ok is True
 
 
-def test_with_cost_adds_key_when_cost_known():
-    """cost известен → ключ parse_cost_usd появляется в результате."""
-    from decimal import Decimal
-
-    from pdf_parser import _with_cost
-
-    result = _with_cost({"error": "boom"}, Decimal("0.0021"))
-    assert result["parse_cost_usd"] == Decimal("0.0021")
-
-
-def test_with_cost_skips_key_when_cost_none():
-    """cost is None (вызов не состоялся) → ключа нет."""
-    from pdf_parser import _with_cost
-
-    result = _with_cost({"error": "timeout"}, None)
-    assert "parse_cost_usd" not in result
-
-
 class TestUnknownMaterialTypeFallback:
-    """Регрессионный тест: парсер должен откатываться к 'other'
-    при неизвестном material_type от LLM, а не падать."""
+    """Регрессионный тест: фаза B (`processing._resolve_material_class_id`) должна
+    откатываться к 'other' при неизвестном material_type от LLM, а не падать.
+
+    Мигрировано из parse_invoice_pdf (удалён в S0-5, Task 8) — та же самая try/except
+    UnknownMaterialType-логика теперь живёт в processing._resolve_material_class_id
+    (фаза B, персистенция), а не в pdf_parser (фаза A больше не резолвит материалы в id).
+    """
 
     def test_fallback_to_other_on_unknown_material_type(self):
-        """Проверяет, что try/except UnknownMaterialType в pdf_parser
+        """Проверяет, что try/except UnknownMaterialType в processing._resolve_material_class_id
         перехватывает исключение и повторно вызывает get_or_create_material_class
         с material_type='other'.
 
         Мокируем get_or_create_material_class так, что первый вызов (с 'wood')
         бросает UnknownMaterialType, а второй (с 'other') возвращает фейковый объект.
-        Без try/except в парсере UnknownMaterialType всплыл бы в широкий except Exception
-        и абортировал весь документ.
+        Без try/except в processing.py UnknownMaterialType всплыл бы наружу
+        и абортировал бы всю попытку обработки.
         """
+        import processing
+
         fake_mc = MagicMock()
         fake_mc.id = 42
 
         call_count = 0
 
-        def mock_get_or_create(db, name, material_type, calc_role="base"):
+        def mock_get_or_create(db, name, material_type, calc_role="base", *, commit=True):
+            """Первый вызов (material_type='wood') бросает UnknownMaterialType, второй
+            (material_type='other', после fallback) возвращает fake_mc."""
             nonlocal call_count
             call_count += 1
             if material_type == "wood":
                 raise UnknownMaterialType("wood")
             return fake_mc
 
-        with patch("pdf_parser.get_or_create_material_class", side_effect=mock_get_or_create):
-            # Симулируем ровно тот путь, что выполняет парсер
-            db = MagicMock()
-            item = {"material_class": "Древесина ЛДСп", "material_type": "wood", "raw_role": "base"}
-            raw_role = "base"
+        item = MagicMock()
+        item.item_type = "material"
+        item.material_class = "Древесина ЛДСп"
+        item.material_type = "wood"
+        item.calc_role = "base"
 
-            try:
-                mc = _pdf_parser_mod.get_or_create_material_class(
-                    db,
-                    name=item["material_class"],
-                    material_type=item.get("material_type", "other"),
-                    calc_role=raw_role,
-                )
-            except UnknownMaterialType:
-                mc = _pdf_parser_mod.get_or_create_material_class(
-                    db,
-                    name=item["material_class"],
-                    material_type="other",
-                    calc_role=raw_role,
-                )
+        with patch("processing.get_or_create_material_class", side_effect=mock_get_or_create):
+            mc_id = processing._resolve_material_class_id(MagicMock(), item, document_id=1)
 
-        assert mc is fake_mc, "Fallback должен возвращать результат вызова с material_type='other'"
+        assert mc_id == 42, "Fallback должен возвращать id объекта, созданного с material_type='other'"
         assert call_count == 2, "Должно быть ровно 2 вызова: первый упал, второй с 'other'"
 
     def test_unknown_material_type_exception_is_raised_for_unknown_code(self):

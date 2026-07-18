@@ -1,4 +1,5 @@
 """Integration tests for routers/invoices.py — upload, reparse, update, delete."""
+import pytest
 
 
 def test_upload_rejects_non_pdf(client, factories):
@@ -99,6 +100,13 @@ def test_upload_incomplete_totals_saves_no_invoices(
 def test_get_document_404(client):
     response = client.get("/api/invoices/documents/9999")
     assert response.status_code == 404
+
+
+def test_serialized_document_exposes_last_error(client, factories):
+    """API отдаёт last_error для документов в статусе error (S0-7)."""
+    doc = factories.DocumentFactory.create(status="error", last_error="vision down")
+    d = client.get(f"/api/invoices/documents/{doc.id}").json()
+    assert d["last_error"] == "vision down"
 
 
 def test_list_documents_filtered_by_project(client, factories):
@@ -260,6 +268,14 @@ def test_reparse_verified_document_returns_409(client, factories):
     assert response.status_code == 409
 
 
+def test_reparse_returns_409_when_already_processing(client, factories, in_memory_s3):
+    """Reparse документа, уже находящегося в processing → 409 (AC-S0-4)."""
+    doc = factories.DocumentFactory.create(s3_key="k/busy.pdf", status="processing")
+    in_memory_s3["k/busy.pdf"] = b"%PDF"
+    resp = client.post(f"/api/invoices/documents/{doc.id}/reparse")
+    assert resp.status_code == 409
+
+
 def test_delete_verified_invoice_returns_409(client, factories):
     invoice = factories.InvoiceFactory.create()
     client.post(f"/api/invoices/{invoice.id}/verify")
@@ -275,6 +291,56 @@ def test_delete_document_with_verified_invoice_returns_409(client, factories):
 
     response = client.delete(f"/api/invoices/documents/{doc.id}")
     assert response.status_code == 409
+
+
+# --- Блокировка мутаций СФ во время обработки документа (S0-8) ---
+
+@pytest.mark.parametrize("method,path_tmpl,body", [
+    ("put", "/api/invoices/{invoice_id}", {"number": "X", "date": "2026-05-01", "vat_rate": 20, "items": []}),
+    ("post", "/api/invoices/{invoice_id}/verify", None),
+    ("post", "/api/invoices/{invoice_id}/unverify", None),
+    ("delete", "/api/invoices/{invoice_id}", None),
+])
+def test_invoice_mutations_return_409_while_processing(client, factories, method, path_tmpl, body):
+    """Любая мутация СФ документа в processing → 409 (S0-8)."""
+    doc = factories.DocumentFactory.create(status="processing")
+    inv = factories.InvoiceFactory.create(document=doc)
+    url = path_tmpl.format(invoice_id=inv.id)
+    resp = getattr(client, method)(url, json=body) if body is not None else getattr(client, method)(url)
+    assert resp.status_code == 409
+
+
+def test_bulk_delete_returns_409_when_any_document_processing(client, factories, db_session):
+    """bulk-delete, если хоть один документ набора в processing → 409, НИЧЕГО не удалено (S0-8)."""
+    from models import Invoice
+
+    doc_busy = factories.DocumentFactory.create(status="processing")
+    doc_free = factories.DocumentFactory.create(status="parsed")
+    inv_busy = factories.InvoiceFactory.create(document=doc_busy)
+    inv_free = factories.InvoiceFactory.create(document=doc_free)
+    resp = client.request("DELETE", "/api/invoices/bulk", json={"ids": [inv_free.id, inv_busy.id]})
+    assert resp.status_code == 409
+    # атомарность bulk (часть контракта): 409 ⇒ не удалили НИ ОДНОЙ СФ, включая свободную.
+    db_session.expire_all()
+    remaining = {i.id for i in db_session.query(Invoice).all()}
+    assert inv_free.id in remaining and inv_busy.id in remaining
+
+
+def test_bulk_delete_locks_documents_in_id_order(client, factories):
+    """bulk-delete с несколькими документами (разный порядок id) не дедлокает и работает (S0-8, анти-дедлок)."""
+    docs = [factories.DocumentFactory.create(status="parsed") for _ in range(3)]
+    invs = [factories.InvoiceFactory.create(document=d) for d in docs]
+    # Порядок id во входе обратный — блокировка всё равно по возрастанию id.
+    resp = client.request("DELETE", "/api/invoices/bulk", json={"ids": [i.id for i in reversed(invs)]})
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] == 3
+
+
+def test_delete_document_returns_409_while_processing(client, factories):
+    """delete документа в processing → 409 (S0-8)."""
+    doc = factories.DocumentFactory.create(status="processing")
+    resp = client.delete(f"/api/invoices/documents/{doc.id}")
+    assert resp.status_code == 409
 
 
 # --- Интеграция с поставщиками ---
@@ -450,52 +516,47 @@ def test_update_invoice_renames_supplier_and_cascades(client, factories, db_sess
 
 # --- Deskew-reparse ---
 
-def test_deskew_reparse_rotates_and_backs_up(client, factories, db_session, in_memory_s3, monkeypatch):
-    """Повороты ≠ 0: создаётся {key}.orig, основной ключ перезаписан, reparse выполнен."""
+def test_deskew_reparse_rotates_and_backs_up(client, factories, in_memory_s3, mock_openrouter, monkeypatch):
+    """Повороты ≠ 0: создаётся {key}.orig, основной ключ перезаписан, документ распарсен."""
+    from decimal import Decimal
+
     import pdf_orientation as po
-    import routers.invoices as inv_router
 
     doc = factories.DocumentFactory.create(s3_key="k/sample.pdf", status="parsed")
     in_memory_s3["k/sample.pdf"] = b"%PDF-original"
 
     async def fake_deskew(pdf_bytes):
-        return b"%PDF-corrected", [270]
+        """Возвращает исправленные байты + поворот + detect-cost."""
+        return b"%PDF-corrected", [270], Decimal("0.001")
     monkeypatch.setattr(po, "deskew_pdf", fake_deskew)
-
-    async def fake_reparse(d, db, pdf_bytes=None):
-        return {"id": d.id, "rotations_placeholder": True, "invoices": []}
-    monkeypatch.setattr(inv_router, "_reparse_from_s3", fake_reparse)
 
     resp = client.post(f"/api/invoices/documents/{doc.id}/deskew-reparse")
     assert resp.status_code == 200
-    assert resp.json()["rotations_applied"] == [270]
     assert in_memory_s3["k/sample.pdf.orig"] == b"%PDF-original"   # бэкап оригинала
     assert in_memory_s3["k/sample.pdf"] == b"%PDF-corrected"        # перезапись
 
 
-def test_deskew_reparse_no_rotation_keeps_s3(client, factories, in_memory_s3, monkeypatch):
-    """Все нули: S3 не трогаем, бэкап не создаём, reparse всё равно выполнен."""
+def test_deskew_reparse_no_rotation_keeps_s3(client, factories, in_memory_s3, mock_openrouter, monkeypatch):
+    """Все нули: S3 не трогаем, бэкап не создаём, документ всё равно распарсен."""
+    from decimal import Decimal
+
     import pdf_orientation as po
-    import routers.invoices as inv_router
 
     doc = factories.DocumentFactory.create(s3_key="k/up.pdf", status="parsed")
     in_memory_s3["k/up.pdf"] = b"%PDF-up"
 
     async def fake_deskew(pdf_bytes):
-        return pdf_bytes, [0]
+        """Возвращает исходные байты без поворотов + detect-cost."""
+        return pdf_bytes, [0], Decimal("0.001")
     monkeypatch.setattr(po, "deskew_pdf", fake_deskew)
-
-    async def fake_reparse(d, db, pdf_bytes=None):
-        return {"id": d.id, "invoices": []}
-    monkeypatch.setattr(inv_router, "_reparse_from_s3", fake_reparse)
 
     resp = client.post(f"/api/invoices/documents/{doc.id}/deskew-reparse")
     assert resp.status_code == 200
-    assert resp.json()["rotations_applied"] == [0]
     assert "k/up.pdf.orig" not in in_memory_s3   # бэкап не создан
 
 
 def test_deskew_reparse_verified_returns_409(client, factories, in_memory_s3):
+    """Документ с подтверждённой СФ → 409 до попытки коррекции ориентации."""
     doc = factories.DocumentFactory.create(s3_key="k/v.pdf", status="parsed")
     factories.InvoiceFactory.create(document=doc, verified=True)
     in_memory_s3["k/v.pdf"] = b"%PDF"
@@ -504,21 +565,22 @@ def test_deskew_reparse_verified_returns_409(client, factories, in_memory_s3):
 
 
 def test_deskew_reparse_vision_failure_502(client, factories, in_memory_s3, monkeypatch):
-    """Сбой vision (502 из deskew_pdf) → 502, S3 не тронут, бэкап не создан."""
-    from fastapi import HTTPException
-
+    """Сбой vision (TransientError с http_status=502) → 502, S3 не тронут (AC-S0-8 сохранён)."""
     import pdf_orientation as po
+    from processing import TransientError
+
     doc = factories.DocumentFactory.create(s3_key="k/x.pdf", status="parsed")
     in_memory_s3["k/x.pdf"] = b"%PDF-x"
 
     async def boom(pdf_bytes):
-        raise HTTPException(status_code=502, detail="vision down")
+        """Эмулирует недоступность vision-сервиса на detect."""
+        raise TransientError("vision down", http_status=502)
     monkeypatch.setattr(po, "deskew_pdf", boom)
 
     resp = client.post(f"/api/invoices/documents/{doc.id}/deskew-reparse")
-    assert resp.status_code == 502
+    assert resp.status_code == 502                      # контракт сохранён
     assert "k/x.pdf.orig" not in in_memory_s3
-    assert in_memory_s3["k/x.pdf"] == b"%PDF-x"   # оригинал не тронут
+    assert in_memory_s3["k/x.pdf"] == b"%PDF-x"          # оригинал не тронут
 
 
 def test_new_document_defaults_parse_cost_zero(db_session, factories):
@@ -532,6 +594,18 @@ def test_new_document_defaults_parse_cost_zero(db_session, factories):
 
     assert doc.parse_cost_usd == Decimal("0")
     assert doc.parse_count == 0
+
+
+def test_new_document_defaults_to_pending(db_session, factories):
+    """create_document создаёт документ в статусе pending, не parsed (S0-1, AC-S0-5)."""
+    from crud.documents import create_document
+
+    project = factories.ProjectFactory.create()
+    doc = create_document(db_session, project.id, "x.pdf", "2026/07/x.pdf")
+
+    assert doc.status == "pending"
+    assert doc.processing_started_at is None
+    assert doc.last_error is None
 
 
 def test_upload_records_parse_cost(client, mock_openrouter, factories, sample_pdf_bytes):

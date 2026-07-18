@@ -39,8 +39,13 @@ def get_material_class(db: Session, class_id: int):
 
 
 def get_or_create_material_class(
-    db: Session, name: str, material_type: str, calc_role: str = "base"
+    db: Session, name: str, material_type: str, calc_role: str = "base", *, commit: bool = True
 ) -> MaterialClass:
+    """Найти или создать класс материала.
+
+    commit=True (по умолчанию) — самостоятельная транзакция (ручные CRUD-пути).
+    commit=False — только flush, чтобы остаться в транзакции вызывающего (фаза B).
+    """
     if calc_role not in VALID_CALC_ROLES:
         raise ValueError(f"Unknown calc_role {calc_role!r}; allowed: {sorted(VALID_CALC_ROLES)}")
     material_type_id = _material_type_id_by_code(db, material_type)
@@ -50,8 +55,11 @@ def get_or_create_material_class(
     if not mc:
         mc = MaterialClass(name=name, material_type_id=material_type_id, calc_role=calc_role)
         db.add(mc)
-        db.commit()
-        db.refresh(mc)
+        if commit:
+            db.commit()
+            db.refresh(mc)
+        else:
+            db.flush()
     elif mc.calc_role != calc_role:
         # Preserved intentionally: the DB record represents a human-reviewed classification;
         # auto-update would allow LLM hallucinations to corrupt it.

@@ -1,17 +1,55 @@
 import base64
 import json
 import logging
+from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
 import httpx
-from sqlalchemy.orm import Session
 
 from config import settings
-from crud.documents import create_invoice
-from crud.materials import VALID_CALC_ROLES, UnknownMaterialType, get_or_create_material_class
+from processing import PermanentError, ProcessingError, TransientError
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ParsedItem:
+    """Позиция СФ из ответа модели — сырой material_class/type/role (резолв в id — фаза B)."""
+
+    raw_name: str
+    item_type: str
+    material_class: str | None
+    material_type: str | None
+    calc_role: str | None
+    quantity: float
+    unit: str | None
+    unit_price: float
+    amount: float
+    vat_amount: float | None
+
+
+@dataclass
+class ParsedInvoice:
+    """Одна СФ из ответа модели с посчитанной итоговой confidence."""
+
+    number: str
+    date: date
+    supplier_name: str | None
+    supplier_inn: str | None
+    vat_rate: float
+    confidence: float
+    items: list[ParsedItem] = field(default_factory=list)
+
+
+@dataclass
+class ParseOutcome:
+    """Результат чистой фазы A: тип документа, разобранные СФ и учёт стоимости вызова."""
+
+    doc_type: str
+    invoices: list[ParsedInvoice]
+    cost_usd: Decimal
+    paid_calls: int
 
 SYSTEM_PROMPT = """Ты — парсер счетов-фактур и УПД (универсальных передаточных документов) для строительных материалов.
 
@@ -123,126 +161,104 @@ OPENROUTER_BASE_URL = settings.OPENROUTER_BASE_URL or "https://openrouter.ai/api
 OPENROUTER_URL = f"{OPENROUTER_BASE_URL.rstrip('/')}/chat/completions"
 
 
-def _with_cost(result: dict, cost: Decimal | None) -> dict:
-    """Кладёт стоимость вызова в результат, только если вызов OpenRouter состоялся.
+async def parse_pdf(file_data: bytes, *, document_id: int) -> ParseOutcome:
+    """Чистая фаза A: вызвать OpenRouter, разобрать ответ, вернуть ParseOutcome.
 
-    Структурный инвариант «был HTTP 200 → в ответе есть parse_cost_usd» без
-    перечисления веток: каждый return после response.json() оборачивается этим
-    хелпером, а до платного ответа cost остаётся None и ключ не добавляется.
+    Без обращения к БД. При ошибке бросает доменное исключение с накопленным
+    учётом стоимости: TransientError (транзиентные сбои: сеть/таймаут/5xx/429/408)
+    или PermanentError (ошибки контента). Материалы не резолвятся в id — это делает фаза B.
     """
-    if cost is not None:
-        result["parse_cost_usd"] = cost
-    return result
+    cost = Decimal(0)
+    paid_calls = 0
+    logger.info(f"[doc={document_id}] Фаза A: старт парсинга, {len(file_data)} байт")
 
+    api_key = settings.OPENROUTER_API_KEY
+    if not api_key:
+        raise PermanentError("API-ключ OpenRouter не настроен")
 
-async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> dict:
-    """Parse PDF via OpenRouter API. Returns structured data and creates DB entities."""
-    cost: Decimal | None = None  # стоимость вызова; заполняется после HTTP 200
-    logger.info(f"[doc={document_id}] Старт парсинга, размер PDF: {len(file_data)} байт ({len(file_data)/1024:.1f} КБ)")
+    pdf_base64 = base64.b64encode(file_data).decode("utf-8")
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    max_tokens = settings.AI_MAX_TOKENS
+    payload = {
+        "model": settings.AI_MODEL,
+        "max_tokens": max_tokens,
+        "usage": {"include": True},
+        "plugins": [{"id": "file-parser", "pdf": {"engine": settings.PDF_ENGINE}}],
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "file", "file": {"filename": "document.pdf",
+                     "file_data": f"data:application/pdf;base64,{pdf_base64}"}},
+                    {"type": "text", "text": (
+                        "Определи тип документа и извлеки данные. ВАЖНО: каждая строка "
+                        "из табличной части — это отдельная позиция в items. "
+                        "Не объединяй и не суммируй строки, даже если они выглядят одинаково."
+                    )},
+                ],
+            },
+        ],
+    }
 
     try:
-        api_key = settings.OPENROUTER_API_KEY
-        if not api_key:
-            logger.error(f"[doc={document_id}] API-ключ OpenRouter не настроен")
-            return {"error": "API-ключ OpenRouter не настроен"}
-
-        model = settings.AI_MODEL
-        logger.info(f"[doc={document_id}] Модель: {model}")
-
-        pdf_base64 = base64.b64encode(file_data).decode("utf-8")
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-
-        # Engine для парсинга PDF: "native" — модель видит PDF как изображения (для multimodal моделей),
-        # "mistral-ocr" — OCR через Mistral ($2/1000 страниц, лучше для сканов и табличных бланков),
-        # "pdf-text" — извлечение чистого текста (бесплатно, ломается на табличных формах СФ).
-        pdf_engine = settings.PDF_ENGINE
-
-        max_tokens = settings.AI_MAX_TOKENS
-        payload = {
-            "model": model,
-            "max_tokens": max_tokens,
-            "usage": {"include": True},  # OpenRouter вернёт реальный usage.cost ($)
-            "plugins": [
-                {
-                    "id": "file-parser",
-                    "pdf": {"engine": pdf_engine},
-                }
-            ],
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "file",
-                            "file": {
-                                "filename": "document.pdf",
-                                "file_data": f"data:application/pdf;base64,{pdf_base64}",
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": (
-                                "Определи тип документа и извлеки данные. "
-                                "ВАЖНО: каждая строка из табличной части — это отдельная позиция в items. "
-                                "Не объединяй и не суммируй строки, даже если они выглядят одинаково."
-                            ),
-                        },
-                    ],
-                },
-            ],
-        }
-        logger.info(f"[doc={document_id}] PDF engine: {pdf_engine}")
-
-        logger.info(f"[doc={document_id}] Отправка запроса в OpenRouter...")
         async with httpx.AsyncClient(timeout=180) as client:
             response = await client.post(OPENROUTER_URL, headers=headers, json=payload)
+    except httpx.TimeoutException as exc:
+        raise TransientError("Таймаут запроса к OpenRouter (180с)") from exc
+    except httpx.RequestError as exc:
+        # ConnectError / ReadError / RemoteProtocolError / DNS / TLS — транспортный сбой
+        # без ответа сервера → платного вызова не было (F12). Сообщение пользователю —
+        # стабильный текст без сырого exc (FIX 6); подробности — только в логе.
+        logger.warning(f"[doc={document_id}] Фаза A: сетевая ошибка запроса к OpenRouter: {exc!r}")
+        raise TransientError("Сетевая ошибка запроса к сервису распознавания") from exc
 
-        if response.status_code != 200:
-            logger.error(f"[doc={document_id}] OpenRouter вернул {response.status_code}: {response.text[:500]}")
-            return {"error": f"OpenRouter API ошибка: {response.status_code} — {response.text}"}
+    if response.status_code != 200:
+        msg = f"OpenRouter API ошибка: {response.status_code}"
+        # 5xx (сервер), 429 (rate limit), 408 (request timeout) — транзиентно, ретраебельно на S2.
+        if response.status_code >= 500 or response.status_code in (408, 429):
+            raise TransientError(msg)
+        raise PermanentError(msg)
 
-        # HTTP 200 ⇒ платный вызов состоялся. Фиксируем факт биллинга ДО чтения тела:
-        # если тело не распарсится (битый/непустой не-JSON от прокси), вызов всё равно
-        # должен учитываться (parse_count++), а usage.cost уточнит стоимость ниже.
-        cost = Decimal(0)
+    # HTTP 200 ⇒ платный вызов состоялся. Фиксируем факт биллинга ДО чтения тела — ВЕСЬ
+    # код ниже (envelope JSON, usage/cost, finish_reason, choices/content, JSON-парсинг
+    # контента, doc_type, цикл по СФ) обёрнут ОДНИМ guard'ом (FIX 3): недоверенное
+    # тело/контент LLM после платного 200 не должно улететь неклассифицированным
+    # исключением и обнулить cost/paid_calls в process_document (инвариант §2.3).
+    paid_calls = 1
+    cost = Decimal(0)
+    try:
         data = response.json()
-        cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
-        logger.info(f"[doc={document_id}] Стоимость вызова OpenRouter: ${cost}")
+        raw_cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
+        # Decimal молча принимает "NaN"/"Infinity"/отрицательные значения — такие бы
+        # испортили накопленный parse_cost_usd. Клэмпим в 0 с логом (FIX B).
+        if raw_cost.is_finite() and raw_cost >= 0:
+            cost = raw_cost
+        else:
+            logger.warning(f"[doc={document_id}] Фаза A: usage.cost вне допустимых значений "
+                           f"({raw_cost!r}) — клэмп в 0")
+            cost = Decimal(0)
+
         usage = data.get("usage", {})
         completion_tokens = usage.get("completion_tokens", 0)
         finish_reason = (data.get("choices") or [{}])[0].get("finish_reason")
-        logger.info(
-            f"[doc={document_id}] OpenRouter ответ получен. "
-            f"Токены: prompt={usage.get('prompt_tokens', '?')}, "
-            f"completion={completion_tokens}, "
-            f"total={usage.get('total_tokens', '?')}, "
-            f"finish_reason={finish_reason}"
-        )
+        logger.info(f"[doc={document_id}] Фаза A: cost=${cost}, finish_reason={finish_reason}")
 
-        # finish_reason="length" → модель упёрлась в лимит токенов, ответ обрезан.
         if finish_reason == "length":
-            logger.error(
-                f"[doc={document_id}] Ответ ОБРЕЗАН по лимиту токенов (finish_reason=length). "
-                f"Часть позиций потеряна. Увеличьте AI_MAX_TOKENS."
+            raise PermanentError(
+                "Ответ модели обрезан по лимиту токенов — часть позиций счёта потеряна. "
+                "Попробуйте повторить разбор.",
+                cost_usd=cost, paid_calls=paid_calls,
             )
-            return _with_cost({"error": "Ответ модели обрезан по лимиту токенов — часть позиций счёта потеряна. Попробуйте повторить разбор."}, cost)
-
-        # Резервный guard: completion_tokens достиг лимита (модель не вернула finish_reason)
         if completion_tokens and completion_tokens >= max_tokens:
-            logger.error(
-                f"[doc={document_id}] Ответ модели ОБРЕЗАН: completion_tokens={completion_tokens} == max_tokens={max_tokens}. "
-                f"JSON будет невалидным. Увеличьте AI_MAX_TOKENS в .env."
-            )
+            logger.error(f"[doc={document_id}] completion_tokens={completion_tokens} == max — ответ обрезан")
 
-        response_text = data["choices"][0]["message"]["content"]
-        logger.debug(f"[doc={document_id}] Сырой ответ модели:\n{response_text}")
+        try:
+            response_text = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise PermanentError("Ответ модели без содержимого",
+                                 cost_usd=cost, paid_calls=paid_calls) from exc
 
-        # Strip markdown wrapper
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0]
         elif "```" in response_text:
@@ -250,141 +266,93 @@ async def parse_invoice_pdf(file_data: bytes, db: Session, document_id: int) -> 
 
         try:
             parsed = json.loads(response_text.strip())
-        except json.JSONDecodeError as e:
-            logger.error(f"[doc={document_id}] Невалидный JSON от модели: {e}\nТекст: {response_text[:1000]}")
-            return _with_cost({"error": "Не удалось разобрать ответ модели (невалидный JSON)"}, cost)
+        except json.JSONDecodeError as exc:
+            raise PermanentError("Не удалось разобрать ответ модели (невалидный JSON)",
+                                 cost_usd=cost, paid_calls=paid_calls) from exc
 
-        doc_type = parsed.get("doc_type")
-        logger.info(f"[doc={document_id}] doc_type={doc_type}, invoices в ответе: {len(parsed.get('invoices', []))}")
+        if parsed.get("doc_type") != "invoice":
+            raise PermanentError("Документ не является счётом-фактурой",
+                                 cost_usd=cost, paid_calls=paid_calls)
 
-        if doc_type != "invoice":
-            logger.warning(f"[doc={document_id}] Документ классифицирован как '{doc_type}', не СФ")
-            return _with_cost({"doc_type": "unknown", "error": "Документ не является счётом-фактурой"}, cost)
+        invoices: list[ParsedInvoice] = []
+        for _inv_idx, inv_data in enumerate(parsed.get("invoices", [])):
+            confidence = _final_confidence(inv_data.get("confidence"), _calculate_completeness(inv_data))
+            items: list[ParsedItem] = []
+            for item in inv_data.get("items", []):
+                items.append(ParsedItem(
+                    raw_name=item.get("raw_name") or "",
+                    item_type=item.get("item_type") or "other",
+                    material_class=item.get("material_class"),
+                    material_type=item.get("material_type"),
+                    calc_role=item.get("calc_role"),
+                    quantity=float(item.get("quantity") or 0),
+                    unit=item.get("unit"),
+                    unit_price=float(item.get("unit_price") or 0),
+                    amount=float(item.get("amount") or 0),
+                    vat_amount=item.get("vat_amount"),
+                ))
 
-        # Process each invoice
-        invoices_created = []
-        for inv_idx, inv_data in enumerate(parsed.get("invoices", [])):
-            model_conf = inv_data.get("confidence")
-            completeness = _calculate_completeness(inv_data)
-            confidence = _final_confidence(model_conf, completeness)
             inv_number = inv_data.get("number", "?")
-            items_count = len(inv_data.get("items", []))
-            reason = inv_data.get("confidence_reason", "")
-            logger.info(
-                f"[doc={document_id}] СФ #{inv_idx + 1}: №{inv_number}, "
-                f"дата={inv_data.get('date')}, поставщик={inv_data.get('supplier_name')}, "
-                f"позиций={items_count}, model_conf={model_conf}, completeness={completeness}, "
-                f"final={confidence}, reason='{reason}'"
-            )
-
-            items = []
-            for item_idx, item in enumerate(inv_data.get("items", [])):
-                material_class_id = None
-                if item.get("item_type") == "material" and not item.get("material_class"):
-                    logger.warning(
-                        "[doc=%d] СФ №%s поз.%d '%s': item_type=material, но material_class пустой — "
-                        "позиция сохранится без класса материала",
-                        document_id, inv_number, item_idx + 1,
-                        item.get("raw_name", "")[:40],
-                    )
-                if item.get("item_type") == "material" and item.get("material_class"):
-                    raw_role = str(item.get("calc_role") or "base").strip().lower()
-                    if raw_role not in VALID_CALC_ROLES:
-                        logger.warning(
-                            "[doc=%d] СФ №%s поз.%d '%s': неизвестный calc_role=%r от модели, "
-                            "используем 'base'",
-                            document_id, inv_number, item_idx + 1,
-                            item.get("raw_name", "")[:40], raw_role,
-                        )
-                        raw_role = "base"
-                    try:
-                        mc = get_or_create_material_class(
-                            db,
-                            name=item["material_class"],
-                            material_type=item.get("material_type", "other"),
-                            calc_role=raw_role,
-                        )
-                    except UnknownMaterialType as exc:
-                        logger.warning(
-                            "[doc=%d] СФ №%s поз.%d '%s': неизвестный material_type=%r — "
-                            "используем 'other'",
-                            document_id, inv_number, item_idx + 1,
-                            item.get("raw_name", "")[:40], str(exc),
-                        )
-                        mc = get_or_create_material_class(
-                            db,
-                            name=item["material_class"],
-                            material_type="other",
-                            calc_role=raw_role,
-                        )
-                    material_class_id = mc.id
-
-                qty = float(item.get("quantity") or 0)
-                price = float(item.get("unit_price") or 0)
-                amount = float(item.get("amount") or 0)
-
-                # Предупреждаем если значения подозрительные
-                if qty <= 0 or amount <= 0:
-                    logger.warning(
-                        f"[doc={document_id}] СФ№{inv_number} поз.{item_idx + 1} '{item.get('raw_name', '')[:50]}': "
-                        f"qty={qty}, price={price}, amount={amount} — нулевые значения"
-                    )
-
-                items.append({
-                    "raw_name": item.get("raw_name") or "",
-                    "item_type": item.get("item_type") or "other",
-                    "material_class_id": material_class_id,
-                    "quantity": qty,
-                    "unit": item.get("unit"),
-                    "unit_price": price,
-                    "amount": amount,
-                    "vat_amount": item.get("vat_amount"),
-                })
-
             try:
                 invoice_date_str = inv_data.get("date")
                 if not invoice_date_str:
                     raise ValueError("Дата СФ отсутствует в ответе модели")
                 invoice_date = date.fromisoformat(invoice_date_str)
             except (ValueError, TypeError) as e:
-                logger.error(f"[doc={document_id}] СФ №{inv_number}: некорректная дата '{inv_data.get('date')}': {e}")
-                continue
+                logger.error(f"[doc={document_id}] СФ №{inv_number}: некорректная дата: {e}")
+                # Всё-или-ничего (parse-then-swap, §2.3): молчаливый `continue` здесь раньше
+                # ронял ЭТУ СФ из набора, но если другая СФ в том же документе валидна,
+                # phase A вернула бы НЕПОЛНЫЙ набор, а phase B заменила бы им старые данные —
+                # тихая потеря СФ при многодокументном PDF. Одна плохая дата → весь reparse
+                # проваливается, старый набор СФ остаётся нетронутым.
+                raise PermanentError(
+                    f"Разбор счёта №{inv_number} неполный: некорректная дата ({e})",
+                    cost_usd=cost, paid_calls=paid_calls,
+                ) from e
 
             doc_total = inv_data.get("doc_total_without_vat")
             try:
                 doc_total = float(doc_total) if doc_total is not None else None
             except (TypeError, ValueError):
                 doc_total = None
-            reconciled, reconcile_detail = _reconcile_totals(doc_total, items)
+            reconciled, detail = _reconcile_totals(
+                doc_total, [{"amount": it.amount} for it in items]
+            )
             if not reconciled:
-                logger.error(
-                    f"[doc={document_id}] СФ №{inv_number}: разбор НЕПОЛНЫЙ — {reconcile_detail}"
-                )
-                return _with_cost({"error": f"Разбор счёта №{inv_number} неполный: {reconcile_detail}"}, cost)
+                raise PermanentError(f"Разбор счёта №{inv_number} неполный: {detail}",
+                                     cost_usd=cost, paid_calls=paid_calls)
 
-            invoice = create_invoice(
-                db,
-                document_id=document_id,
+            invoices.append(ParsedInvoice(
                 number=inv_data.get("number", ""),
-                invoice_date=invoice_date,
-                supplier_name=inv_data.get("supplier_name", ""),
+                date=invoice_date,
+                supplier_name=inv_data.get("supplier_name"),
                 supplier_inn=inv_data.get("supplier_inn"),
                 vat_rate=inv_data.get("vat_rate", 20),
                 confidence=confidence,
                 items=items,
-            )
-            invoices_created.append(invoice.id)
-            logger.info(f"[doc={document_id}] СФ №{inv_number} сохранена в БД (id={invoice.id})")
+            ))
 
-        logger.info(f"[doc={document_id}] Парсинг завершён, создано СФ: {len(invoices_created)}")
-        return _with_cost({"doc_type": "invoice", "invoices_created": invoices_created}, cost)
+        if not invoices:
+            # doc_type=invoice, но ни одной СФ не разобрано (пустой массив invoices —
+            # любая некорректная дата теперь роняет весь разбор через PermanentError
+            # выше, а не continue). Не создаём документ «parsed с 0 СФ» — это тот
+            # артефакт, ради устранения которого вводилась статусная модель (Q2, класс 2).
+            raise PermanentError("Ни одной СФ не удалось разобрать из документа",
+                                 cost_usd=cost, paid_calls=paid_calls)
+    except ProcessingError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — недоверенное тело/контент LLM после платного 200:
+        # неклассифицированная форма (например top-level JSON-массив вместо объекта →
+        # AttributeError на .get, либо ValueError/TypeError на кривых числах, либо
+        # битое тело ответа не-JSON) не должна улететь наверх неучтённой — платный
+        # вызов уже состоялся (инвариант §2.3). Сообщение пользователю — стабильный
+        # текст без сырого exc (FIX 6); подробности — только в логе.
+        logger.warning(f"[doc={document_id}] Фаза A: не удалось разобрать ответ модели: {exc!r}")
+        raise PermanentError("Не удалось разобрать ответ модели",
+                             cost_usd=cost, paid_calls=paid_calls) from exc
 
-    except httpx.TimeoutException:
-        logger.exception(f"[doc={document_id}] Таймаут запроса к OpenRouter")
-        return {"error": "Таймаут запроса к OpenRouter (180с)"}
-    except Exception as e:
-        logger.exception(f"[doc={document_id}] Неожиданная ошибка парсинга")
-        return _with_cost({"error": f"Ошибка парсинга: {str(e)}"}, cost)
+    logger.info(f"[doc={document_id}] Фаза A: разобрано СФ {len(invoices)}, cost=${cost}")
+    return ParseOutcome(doc_type="invoice", invoices=invoices, cost_usd=cost, paid_calls=paid_calls)
 
 
 def _reconcile_totals(
