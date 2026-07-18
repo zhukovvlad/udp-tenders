@@ -99,6 +99,7 @@ git commit -m "feat(processing): guard мутаций расширен на pend
 
 **Files:**
 - Modify: `backend/main.py` (функция `_sweep_stuck_documents` + вызов в lifespan, строки ~27-38)
+- Modify: `backend/tests/conftest.py` (`client`-фикстура, строки 190-236 — подмена sweep на тест-фабрику)
 - Modify: `justfile` (комментарий-инвариант у `dev-backend`)
 - Modify: `docs/agent/pdf-parsing.md` (раздел про deployment-инвариант)
 - Test: `backend/tests/integration/test_startup_sweep.py` (create)
@@ -226,6 +227,34 @@ def _sweep_stuck_documents(session_factory=None) -> int:
 
 (Контраст с `ensure_bucket`, который остаётся fail-open: без S3 ломается только upload-путь, без БД — всё приложение.)
 
+- [ ] **Step 3b: Подменить sweep в `client`-фикстуре (КРИТИЧНО — без этого падает весь integration-набор)**
+
+`client`-фикстура (conftest.py:233) входит в `with TestClient(app)` — lifespan (и sweep) выполняется на КАЖДОМ тесте с этой фикстурой. Sweep по умолчанию резолвит реальный `database.SessionLocal` — dependency override `get_db` на него НЕ действует: локально он бы ударил по dev-БД, в CI (`DATABASE_URL` → немигрированная БД без таблицы `documents`) startup упал бы и уронил почти весь набор.
+
+В `backend/tests/conftest.py`, фикстура `client`: добавить параметр `monkeypatch` и ДО создания TestClient:
+
+```python
+@pytest.fixture
+def client(db_session, in_memory_s3, session_factory_test, monkeypatch) -> Iterator:
+    """... (существующий докстринг; дополнить строкой:)
+    - startup-sweep (lifespan) перенаправляется на session_factory_test —
+      реальный SessionLocal не трогается (dependency override на него не действует).
+    """
+    ...
+    import main
+
+    real_sweep = main._sweep_stuck_documents
+
+    def _sweep_via_test_factory(session_factory=None):
+        """Sweep в lifespan через тестовую фабрику — dev/CI БД не затрагивается."""
+        return real_sweep(session_factory=session_factory_test)
+
+    monkeypatch.setattr(main, "_sweep_stuck_documents", _sweep_via_test_factory)
+    # ... существующие dependency_overrides и `with TestClient(app) ...` без изменений
+```
+
+Специальные lifespan-тесты (Step 1) свою подмену задают сами (spy/boom) — с фикстурой не конфликтуют (они не используют `client`).
+
 - [ ] **Step 4: Запустить — PASS**
 
 Run: `& "C:\Program Files\Git\bin\bash.exe" -c "cd /c/Users/zhukov_v/Projects/UDP && just test-int-k 'sweep' 2>&1"`
@@ -251,8 +280,8 @@ Expected: PASS (2 теста).
 - [ ] **Step 6: Lint + commit**
 
 ```bash
-git add backend/main.py backend/tests/integration/test_startup_sweep.py justfile docs/agent/pdf-parsing.md
-git commit -m "feat(processing): startup-sweep pending|processing → error + deployment-инвариант (S1-4)"
+git add backend/main.py backend/tests/conftest.py backend/tests/integration/test_startup_sweep.py justfile docs/agent/pdf-parsing.md
+git commit -m "feat(processing): startup-sweep pending|processing → error (fail-fast) + deployment-инвариант (S1-4)"
 ```
 
 ---
@@ -533,6 +562,7 @@ git commit -m "feat(processing): дедуп upload по file_hash — fast-path 
 **Files:**
 - Modify: `backend/routers/invoices.py` (`upload_pdf:244`, `reparse_document:190`, `deskew_reparse_document:214`)
 - Test: `backend/tests/integration/test_invoices.py` (адаптация существующих + структурный enqueue-тест)
+- Test: `backend/tests/integration/test_upload_race_e2e.py` (create — Step 4b)
 
 **Interfaces:**
 - Consumes: `process_document` (S0), guard, дедуп из Task 3.
@@ -715,15 +745,19 @@ from sqlalchemy.orm import sessionmaker
 
 @pytest.fixture
 def race_client(db_engine, in_memory_s3, monkeypatch):
-    """TestClient с реальными пер-запросными сессиями и спаем enqueue.
+    """TestClient с реальными пер-запросными сессиями и спаем enqueue — зеркало
+    основной client-фикстуры (conftest.py:190-236: auth-мок, CSRF double-submit,
+    session-factory), но с РЕАЛЬНЫМИ сессиями вместо транзакционной.
 
     Возвращает (client, enqueued) — enqueued копит вызовы add_task под локом.
-    Auth/session-factory переопределяются как в основной client-фикстуре —
-    сверить с conftest и скопировать нужные override'ы (get_current_user).
     """
+    from unittest.mock import MagicMock
+
+    import main
+    from auth import get_current_user
     from database import get_db
     from main import app
-    from routers.invoices import get_current_user  # сверить фактический модуль auth-dependency
+    from processing import get_processing_session_factory
 
     Factory = sessionmaker(bind=db_engine)
 
@@ -735,6 +769,22 @@ def race_client(db_engine, in_memory_s3, monkeypatch):
         finally:
             db.close()
 
+    def override_get_current_user():
+        """Мок суперюзера — как в основной client-фикстуре."""
+        user = MagicMock()
+        user.id = 1
+        user.is_superuser = True
+        user.org_id = None
+        user.org_role = None
+        user.is_active = True
+        return user
+
+    def _sweep_noop(session_factory=None):
+        """Sweep в lifespan гасится: он бил бы по реальному SessionLocal (чужая БД),
+        а pending-документы этого теста должны жить (sweep не предмет теста)."""
+        return 0
+    monkeypatch.setattr(main, "_sweep_stuck_documents", _sweep_noop)
+
     enqueued: list[dict] = []
     lock = threading.Lock()
 
@@ -745,9 +795,15 @@ def race_client(db_engine, in_memory_s3, monkeypatch):
     monkeypatch.setattr(BackgroundTasks, "add_task", spy_add_task)
 
     app.dependency_overrides[get_db] = real_get_db
-    # get_current_user / get_processing_session_factory — скопировать override из client-фикстуры.
+    app.dependency_overrides[get_current_user] = override_get_current_user
+    # sessionmaker поддерживает контекст-менеджер (SQLAlchemy 1.4+) — валидная фабрика
+    # для process_document; спай add_task всё равно не даст таске исполниться.
+    app.dependency_overrides[get_processing_session_factory] = lambda: Factory
+
+    _csrf_token = "test-csrf-token"  # CSRF double-submit — как в основной фикстуре
     try:
-        with TestClient(app) as c:
+        with TestClient(app, headers={"X-CSRF-Token": _csrf_token}) as c:
+            c.cookies.set("csrf_token", _csrf_token)
             yield c, enqueued
     finally:
         app.dependency_overrides.clear()
@@ -814,7 +870,7 @@ def test_two_parallel_uploads_same_file(race_client, db_engine, in_memory_s3, sa
         check.close()
 ```
 
-> Реализатору: (1) скопировать в `race_client` фактические auth/DI-override'ы из client-фикстуры conftest (get_current_user и get_processing_session_factory — имена/модули сверить по факту); (2) TestClient потокобезопасен для параллельных запросов (портал anyio per-request) — если наткнёшься на обратное, разнеси запросы на два TestClient над одним app; (3) `in_memory_s3` — обычный dict, GIL достаточен; ассерт по числу ключей учитывает только этот тест — если фикстура шарится, считать разницу до/после.
+> Реализатору: (1) фикстура выше — зеркало conftest.client по состоянию на написание плана; перед запуском сверить, что overrides/CSRF в conftest не изменились (Task 2 добавил туда подмену sweep — здесь она своя, noop); (2) TestClient потокобезопасен для параллельных запросов (портал anyio per-request) — если наткнёшься на обратное, разнеси запросы на два TestClient над одним app; (3) `in_memory_s3` — обычный dict, GIL достаточен; ассерт по числу ключей учитывает только этот тест — если фикстура шарится, считать разницу до/после.
 
 - [ ] **Step 5: Запустить всё — PASS**
 
@@ -824,7 +880,7 @@ Expected: PASS весь набор, включая e2e-гонку (детерм�
 - [ ] **Step 6: Lint + commit**
 
 ```bash
-git add backend/routers/invoices.py backend/tests/integration/test_invoices.py
+git add backend/routers/invoices.py backend/tests/integration/test_invoices.py backend/tests/integration/test_upload_race_e2e.py
 git commit -m "feat(processing): 202 + BackgroundTasks на upload/reparse/deskew, duplicate:false в контракте (S1-1)"
 ```
 
