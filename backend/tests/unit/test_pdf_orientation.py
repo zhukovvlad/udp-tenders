@@ -162,6 +162,20 @@ async def test_detect_rotations_parses_list(monkeypatch, _allow_respx):
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_detect_rotations_nan_cost_clamped_to_zero(monkeypatch, _allow_respx):
+    """FIX B: `usage.cost = "NaN"` парсится Decimal-ом без ошибки, но неклэмпленный
+    NaN испортил бы накопленный parse_cost_usd — клэмп в 0."""
+    monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", "test-key")
+    respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        return_value=_openrouter_reply("Вот повороты: [0, 90]", cost="NaN")
+    )
+    rots, cost = await po.detect_rotations([b"img0", b"img1"])
+    assert rots == [0, 90]
+    assert cost == Decimal(0)
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_detect_rotations_garbage_to_zeros(monkeypatch, _allow_respx):
     """Непарсящееся содержимое → нули, но cost из usage всё равно возвращается (вызов оплачен)."""
     monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", "test-key")
@@ -224,6 +238,41 @@ async def test_detect_rotations_upstream_500_raises_502(monkeypatch, _allow_resp
         await po.detect_rotations([b"x"])
     assert ei.value.http_status == 502
     assert ei.value.cost_usd == Decimal(0)  # сбой до чтения usage — cost не читается
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_detect_rotations_upstream_503_raises_transient(monkeypatch, _allow_respx):
+    """FIX F: 503 (>=500) остаётся транзиентной (ретраебельно на S2), http_status=502 наружу."""
+    monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", "test-key")
+    respx.post("https://openrouter.ai/api/v1/chat/completions").mock(return_value=httpx.Response(503))
+    with pytest.raises(TransientError) as ei:
+        await po.detect_rotations([b"x"])
+    assert ei.value.http_status == 502
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_detect_rotations_upstream_400_raises_permanent(monkeypatch, _allow_respx):
+    """FIX F: не-retriable 4xx (не 408/429) — upstream отклонил запрос по содержимому,
+    ретраить бессмысленно → PermanentError, а не TransientError (S2 retry policy).
+    http_status=502 наружу не меняется (S0 контракт эндпоинта)."""
+    monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", "test-key")
+    respx.post("https://openrouter.ai/api/v1/chat/completions").mock(return_value=httpx.Response(400))
+    with pytest.raises(PermanentError) as ei:
+        await po.detect_rotations([b"x"])
+    assert ei.value.http_status == 502
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_detect_rotations_upstream_429_still_transient(monkeypatch, _allow_respx):
+    """FIX F: 429 (rate limit) остаётся транзиентной, несмотря на то что это 4xx."""
+    monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", "test-key")
+    respx.post("https://openrouter.ai/api/v1/chat/completions").mock(return_value=httpx.Response(429))
+    with pytest.raises(TransientError) as ei:
+        await po.detect_rotations([b"x"])
+    assert ei.value.http_status == 502
 
 
 @pytest.mark.asyncio

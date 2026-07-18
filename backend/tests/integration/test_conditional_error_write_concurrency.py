@@ -26,14 +26,17 @@ def test_conditional_write_waits_then_skips_when_swap_lands(db_engine):
     # --- setup: документ в processing (уникальный id вне фабрик, явный cleanup) ---
     setup = Factory()
     try:
-        setup.execute(text("INSERT INTO projects (id, name) VALUES (999001, 'ac-s0-13') "
-                           "ON CONFLICT (id) DO NOTHING"))
+        # Уникальный project_id вместо хардкода (FIX D) — убирает state-dependence и hazard
+        # при параллельном запуске (например, под pytest-xdist на общей тестовой БД).
+        project_id = setup.execute(text(
+            "INSERT INTO projects (name) VALUES ('ac-s0-13') RETURNING id"
+        )).scalar_one()
         doc_id = setup.execute(text(
             "INSERT INTO documents (project_id, filename, s3_key, status, doc_type, "
             "parse_count, parse_cost_usd) "
-            "VALUES (999001, 'ac13.pdf', 'k/ac13.pdf', 'processing', 'invoice', 1, 0.005) "
+            "VALUES (:project_id, 'ac13.pdf', 'k/ac13.pdf', 'processing', 'invoice', 1, 0.005) "
             "RETURNING id"
-        )).scalar_one()
+        ), {"project_id": project_id}).scalar_one()
         setup.commit()
     finally:
         setup.close()
@@ -126,7 +129,7 @@ def test_conditional_write_waits_then_skips_when_swap_lands(db_engine):
         cleanup = Factory()
         try:
             cleanup.execute(text("DELETE FROM documents WHERE id=:id"), {"id": doc_id})
-            cleanup.execute(text("DELETE FROM projects WHERE id=999001"))
+            cleanup.execute(text("DELETE FROM projects WHERE id=:id"), {"id": project_id})
             cleanup.commit()
         finally:
             cleanup.close()
@@ -146,14 +149,17 @@ def test_conditional_write_waits_then_succeeds_when_lock_holder_rolls_back(db_en
     # фабрик, явный cleanup) ---
     setup = Factory()
     try:
-        setup.execute(text("INSERT INTO projects (id, name) VALUES (999001, 'ac-s0-13') "
-                           "ON CONFLICT (id) DO NOTHING"))
+        # Уникальный project_id вместо хардкода (FIX D) — убирает state-dependence и hazard
+        # при параллельном запуске (например, под pytest-xdist на общей тестовой БД).
+        project_id = setup.execute(text(
+            "INSERT INTO projects (name) VALUES ('ac-s0-13') RETURNING id"
+        )).scalar_one()
         doc_id = setup.execute(text(
             "INSERT INTO documents (project_id, filename, s3_key, status, doc_type, "
             "parse_count, parse_cost_usd) "
-            "VALUES (999001, 'ac13b.pdf', 'k/ac13b.pdf', 'processing', 'invoice', 0, 0) "
+            "VALUES (:project_id, 'ac13b.pdf', 'k/ac13b.pdf', 'processing', 'invoice', 0, 0) "
             "RETURNING id"
-        )).scalar_one()
+        ), {"project_id": project_id}).scalar_one()
         setup.commit()
     finally:
         setup.close()
@@ -246,7 +252,7 @@ def test_conditional_write_waits_then_succeeds_when_lock_holder_rolls_back(db_en
         cleanup = Factory()
         try:
             cleanup.execute(text("DELETE FROM documents WHERE id=:id"), {"id": doc_id})
-            cleanup.execute(text("DELETE FROM projects WHERE id=999001"))
+            cleanup.execute(text("DELETE FROM projects WHERE id=:id"), {"id": project_id})
             cleanup.commit()
         finally:
             cleanup.close()

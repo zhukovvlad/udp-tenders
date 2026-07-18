@@ -133,3 +133,16 @@ async def test_parse_pdf_non_numeric_usage_cost_raises_permanent_with_cost(
     with pytest.raises(PermanentError) as exc:
         await parse_pdf(sample_pdf_bytes, document_id=1)
     assert exc.value.paid_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_parse_pdf_nan_usage_cost_clamped_to_zero(sample_pdf_bytes, mock_openrouter):
+    """FIX B: `usage.cost = "NaN"` парсится Decimal-ом без ошибки (в отличие от нечисловой
+    строки), но неклэмпленный NaN испортил бы накопленный parse_cost_usd. Разбор в остальном
+    успешен, cost_usd клэмпится в 0."""
+    mock_openrouter.use_scenario("happy_path_nan_cost")
+    outcome = await parse_pdf(sample_pdf_bytes, document_id=1)
+    assert outcome.doc_type == "invoice"
+    assert len(outcome.invoices) == 1
+    assert outcome.cost_usd == Decimal(0)
+    assert outcome.paid_calls == 1

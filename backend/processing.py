@@ -178,7 +178,11 @@ def persist_parse_result(db: Session, doc_id: int, outcome: ParseOutcome) -> Non
         raise
     except Exception as exc:  # noqa: BLE001 — детерминированный сбой ИЛИ ambiguous commit
         db.rollback()
-        raise TransientError(f"Ошибка сохранения (фаза B): {exc}",
+        # Сырой exc (для SQLAlchemy-исключений — текст SQL + параметры) НЕ должен попасть
+        # в last_error, отдаваемый через API — сообщение пользователю стабильное и общее,
+        # подробности только в логе (санитизация по тому же приёму, что и FIX 6).
+        logger.warning(f"[doc={doc_id}] фаза B: ошибка сохранения: {exc!r}")
+        raise TransientError("Ошибка сохранения результата разбора",
                              cost_usd=outcome.cost_usd, paid_calls=outcome.paid_calls) from exc
     logger.info(f"[doc={doc_id}] Фаза B: сохранено СФ {len(outcome.invoices)}, статус parsed")
 

@@ -89,6 +89,9 @@ def test_persist_phase_b_error_rolls_back_and_carries_cost(db_session, factories
         persist_parse_result(db_session, doc.id, _outcome(cost="0.003"))
     assert exc.value.cost_usd == Decimal("0.003")   # стоимость фазы A сохранена в ошибке
     assert exc.value.paid_calls == 1
+    # Санитизация (FIX A): сырой exc не должен просочиться в user-facing сообщение.
+    assert "db exploded" not in exc.value.message
+    assert "SQL" not in exc.value.message
 
     db_session.expire_all()
     # rollback внутри persist откатил удаление старой СФ — данные не потеряны (AC-S0-1/11).

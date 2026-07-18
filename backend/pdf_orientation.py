@@ -150,9 +150,18 @@ async def detect_rotations(images: list[bytes]) -> tuple[list[int], Decimal]:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(OPENROUTER_URL, headers=headers, json=payload)
         resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        # не-2xx → НЕ деградируем в нули (иначе переразберём оригинал под видом «исправлено»).
+        # 408/429/5xx — транзиентно (ретраебельно на S2); прочие 4xx — отказ upstream по
+        # содержимому запроса, ретраить бессмысленно → PermanentError (FIX F). http_status=502
+        # для обоих веток — прежний код эндпоинта, на S0 доходит до клиента (AC-S0-8).
+        logger.warning(f"detect_rotations: vision-запрос упал: {e}")
+        code = e.response.status_code
+        if code in (408, 429) or code >= 500:
+            raise TransientError("Сервис распознавания ориентации недоступен", http_status=502) from e
+        raise PermanentError("Сервис распознавания ориентации отклонил запрос", http_status=502) from e
     except httpx.HTTPError as e:
-        # транспортный сбой / таймаут / не-2xx → НЕ деградируем в нули (иначе переразберём
-        # оригинал под видом «исправлено»), а сигналим 502; вызывающий не тронет S3 и не переразберёт
+        # транспортный сбой / таймаут (без ответа сервера) → НЕ деградируем в нули, сигналим 502
         logger.warning(f"detect_rotations: vision-запрос упал: {e}")
         # http_status=502 — прежний код эндпоинта; на S0 доходит до клиента (AC-S0-8).
         raise TransientError("Сервис распознавания ориентации недоступен", http_status=502) from e
@@ -163,7 +172,15 @@ async def detect_rotations(images: list[bytes]) -> tuple[list[int], Decimal]:
     text = ""
     try:
         data = resp.json()
-        cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
+        raw_cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
+        # Decimal молча принимает "NaN"/"Infinity"/отрицательные значения — такие бы
+        # испортили накопленный parse_cost_usd. Клэмпим в 0 с логом (FIX B).
+        if raw_cost.is_finite() and raw_cost >= 0:
+            cost = raw_cost
+        else:
+            logger.warning(f"detect_rotations: usage.cost вне допустимых значений "
+                           f"({raw_cost!r}) — клэмп в 0")
+            cost = Decimal(0)
         text = data["choices"][0]["message"]["content"]
         m = re.search(r"\[[\d,\s]*\]", text)          # берём именно JSON-массив, не любые числа
         nums = json.loads(m.group(0)) if m else []

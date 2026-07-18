@@ -120,6 +120,9 @@ async def test_process_document_phase_b_failure_writes_error_with_cost(
     saved = db_session.query(Document).filter(Document.id == doc.id).first()
     assert saved.status == "error"
     assert saved.last_error
+    # Санитизация (FIX A): raw exc (SQL/params) не должен попасть в last_error через API.
+    assert "db exploded" not in saved.last_error
+    assert "SQL" not in saved.last_error
     assert saved.parse_count == 1                       # detect не было; фаза A оплачена ровно раз
     assert saved.parse_cost_usd > Decimal(0)            # стоимость фазы A начислена
     numbers = [i.number for i in db_session.query(Invoice).filter(Invoice.document_id == doc.id)]

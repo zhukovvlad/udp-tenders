@@ -229,7 +229,15 @@ async def parse_pdf(file_data: bytes, *, document_id: int) -> ParseOutcome:
     cost = Decimal(0)
     try:
         data = response.json()
-        cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
+        raw_cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
+        # Decimal молча принимает "NaN"/"Infinity"/отрицательные значения — такие бы
+        # испортили накопленный parse_cost_usd. Клэмпим в 0 с логом (FIX B).
+        if raw_cost.is_finite() and raw_cost >= 0:
+            cost = raw_cost
+        else:
+            logger.warning(f"[doc={document_id}] Фаза A: usage.cost вне допустимых значений "
+                           f"({raw_cost!r}) — клэмп в 0")
+            cost = Decimal(0)
 
         usage = data.get("usage", {})
         completion_tokens = usage.get("completion_tokens", 0)

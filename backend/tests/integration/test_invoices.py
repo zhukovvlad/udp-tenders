@@ -104,9 +104,9 @@ def test_get_document_404(client):
 
 def test_serialized_document_exposes_last_error(client, factories):
     """API отдаёт last_error для документов в статусе error (S0-7)."""
-    doc = factories.DocumentFactory.create(status="error")
+    doc = factories.DocumentFactory.create(status="error", last_error="vision down")
     d = client.get(f"/api/invoices/documents/{doc.id}").json()
-    assert "last_error" in d
+    assert d["last_error"] == "vision down"
 
 
 def test_list_documents_filtered_by_project(client, factories):

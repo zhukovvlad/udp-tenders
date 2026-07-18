@@ -54,14 +54,17 @@ def test_phase_b_real_two_connection_verified_race(db_engine):
     # --- setup: документ в processing с одной уже существующей (не verified) СФ ---
     setup = Factory()
     try:
-        setup.execute(text("INSERT INTO projects (id, name) VALUES (999002, 'ac-s0-9-fix7') "
-                           "ON CONFLICT (id) DO NOTHING"))
+        # Уникальный project_id вместо хардкода (FIX D) — убирает state-dependence и hazard
+        # при параллельном запуске (например, под pytest-xdist на общей тестовой БД).
+        project_id = setup.execute(text(
+            "INSERT INTO projects (name) VALUES ('ac-s0-9-fix7') RETURNING id"
+        )).scalar_one()
         doc_id = setup.execute(text(
             "INSERT INTO documents (project_id, filename, s3_key, status, doc_type, "
             "parse_count, parse_cost_usd) "
-            "VALUES (999002, 'fix7.pdf', 'k/fix7.pdf', 'processing', 'invoice', 1, 0.001) "
+            "VALUES (:project_id, 'fix7.pdf', 'k/fix7.pdf', 'processing', 'invoice', 1, 0.001) "
             "RETURNING id"
-        )).scalar_one()
+        ), {"project_id": project_id}).scalar_one()
         setup.execute(text(
             "INSERT INTO invoices (document_id, number, date, vat_rate, verified) "
             "VALUES (:doc_id, 'СФ-OLD', '2026-01-01', 20, false)"
@@ -160,7 +163,7 @@ def test_phase_b_real_two_connection_verified_race(db_engine):
         try:
             cleanup.execute(text("DELETE FROM invoices WHERE document_id=:id"), {"id": doc_id})
             cleanup.execute(text("DELETE FROM documents WHERE id=:id"), {"id": doc_id})
-            cleanup.execute(text("DELETE FROM projects WHERE id=999002"))
+            cleanup.execute(text("DELETE FROM projects WHERE id=:id"), {"id": project_id})
             cleanup.commit()
         finally:
             cleanup.close()
