@@ -391,7 +391,13 @@ def test_race_winner_found_returns_duplicate(client, factories, db_session, in_m
 
 
 def test_race_winner_none_reraises(client, factories, in_memory_s3, sample_pdf_bytes, monkeypatch):
-    """IntegrityError БЕЗ победителя (например, FK) → сирота удалена, ошибка переброшена (5xx)."""
+    """IntegrityError БЕЗ победителя (например, FK) → сирота удалена, исходная ошибка переброшена.
+
+    Фикстура client создаёт TestClient с raise_server_exceptions=True (дефолт) —
+    перевыброшенное эндпоинтом исключение долетает до теста КАК ЕСТЬ, что проверяет
+    «не замаскирован под дубликат» даже строже, чем ассерт кода 5xx. Общую фикстуру
+    НЕ менять (глобальный raise_server_exceptions=False изменил бы весь набор).
+    """
     import routers.invoices as inv_router
 
     project = factories.ProjectFactory.create()
@@ -402,12 +408,12 @@ def test_race_winner_none_reraises(client, factories, in_memory_s3, sample_pdf_b
     monkeypatch.setattr(inv_router, "create_document", boom_create)
 
     s3_before = set(in_memory_s3)
-    r = client.post("/api/invoices/upload", data={"project_id": project.id}, files=_files(sample_pdf_bytes))
-    assert r.status_code >= 500  # не замаскирован под дубликат
-    assert set(in_memory_s3) == s3_before  # сирота убрана
+    with pytest.raises(IntegrityError):
+        client.post("/api/invoices/upload", data={"project_id": project.id}, files=_files(sample_pdf_bytes))
+    assert set(in_memory_s3) == s3_before  # сирота убрана ДО проброса
 ```
 
-> Реализатору: (1) файл лежит в `tests/integration/` по факту (нужны client/factories) — если положить в unit не выйдет из-за фикстур, размести в `tests/integration/test_upload_race_branches.py`, суть тестов не меняется. (2) `create_document` должен вызываться в роутере ПО ИМЕНИ МОДУЛЯ (`create_document(...)` из импорта `from crud.documents import create_document`) — monkeypatch `inv_router.create_document` перехватит его; сверить с фактическим импортом. (3) `raise_server_exceptions=False` может понадобиться для 5xx-ассерта — сверить с конфигом client-фикстуры.
+> Реализатору: (1) файл лежит в `tests/integration/` по факту (нужны client/factories) — если положить в unit не выйдет из-за фикстур, размести в `tests/integration/test_upload_race_branches.py`, суть тестов не меняется. (2) `create_document` должен вызываться в роутере ПО ИМЕНИ МОДУЛЯ (`create_document(...)` из импорта `from crud.documents import create_document`) — monkeypatch `inv_router.create_document` перехватит его; сверить с фактическим импортом.
 
 - [ ] **Step 6: Конкурентный тест — две реальные сессии**
 
@@ -902,6 +908,11 @@ export function createTerminalTransitionListener(queryClient: QueryClient) {
       if (prev !== undefined && NON_TERMINAL_STATUSES.has(prev) && TERMINAL_STATUSES.has(doc.status)) {
         // Терминальный переход: свежие данные нужны спискам, карточке и dashboard.
         // Операционного тоста НЕТ — детектор не знает, какая операция шла (спека §5).
+        // ["dashboard"] префиксом целиком, а не по-проектно — ОСОЗНАННОЕ упрощение
+        // относительно спеки §5 п.5: projectId лежит в трёх семействах dashboard-ключей
+        // на разных позициях, точечная инвалидация потребовала бы predicate по трём
+        // формам; цена префикса — лишний refetch дашборда другого проекта, если тот
+        // вдруг смонтирован. Существующие мутации инвалидируют так же.
         queryClient.invalidateQueries({ queryKey: ["documents"] });
         queryClient.invalidateQueries({ queryKey: ["document", doc.id] });
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
