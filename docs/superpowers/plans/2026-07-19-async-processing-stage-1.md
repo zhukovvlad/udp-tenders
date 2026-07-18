@@ -158,6 +158,22 @@ def test_lifespan_invokes_sweep(monkeypatch):
     with TestClient(main.app):
         pass
     assert calls["n"] == 1
+
+
+def test_lifespan_aborts_startup_when_sweep_fails(monkeypatch):
+    """Fail-fast: ошибка sweep (БД недоступна) прерывает startup, приложение не поднимается."""
+    from fastapi.testclient import TestClient
+
+    import main
+
+    def boom(session_factory=None):
+        """Эмулирует недоступность БД на старте."""
+        raise RuntimeError("db down")
+    monkeypatch.setattr(main, "_sweep_stuck_documents", boom)
+
+    with pytest.raises(RuntimeError, match="db down"):
+        with TestClient(main.app):
+            pass
 ```
 
 - [ ] **Step 2: Запустить — убедиться, что падают**
@@ -197,15 +213,18 @@ def _sweep_stuck_documents(session_factory=None) -> int:
     return result.rowcount
 ```
 
-В `lifespan`, после блока `ensure_bucket`, до `yield`:
+В `lifespan`, после блока `ensure_bucket`, до `yield` — **fail-fast, БЕЗ try/except**:
 
 ```python
-    try:
-        _sweep_stuck_documents()
-    except Exception:
-        # БД недоступна на старте — приложение поднимаем (может ожить), sweep доберёт следующий рестарт.
-        logger.exception("Startup-sweep не выполнен")
+    # Fail-fast (ревью плана, P1): sweep обязан выполниться до приёма трафика.
+    # Проглотить ошибку нельзя — если БД оживёт позже, зомби-processing останутся
+    # навсегда и polling не завершится. БД недоступна → приложение не стартует
+    # (оно всё равно неработоспособно), рестарт повторит sweep.
+    swept = _sweep_stuck_documents()
+    logger.info(f"Startup-sweep выполнен: {swept} документ(ов)")
 ```
+
+(Контраст с `ensure_bucket`, который остаётся fail-open: без S3 ломается только upload-путь, без БД — всё приложение.)
 
 - [ ] **Step 4: Запустить — PASS**
 
@@ -224,6 +243,10 @@ Expected: PASS (2 теста).
 ```
 
 В `docs/agent/pdf-parsing.md` добавить в раздел про асинхронную обработку абзац: «Deployment-инвариант S1: `workers=1, replicas=1`, no-overlap deployment (stop-then-start). Startup-sweep в lifespan переводит все `pending|processing` в `error` на старте. Потребность в `workers>1`/rolling — триггер Ступени 2 (advisory-lock)».
+
+Плюс РЕАЛЬНАЯ проверка (не только документация): убедиться grep'ом, что `justfile` не содержит `--workers` ни в одном uvicorn-рецепте (`grep -n "workers" justfile` → пусто или только комментарий-инвариант). Прод-деплой-конфига пока не существует (прод не развёрнут) — конфигурировать нечего; при первом развёртывании конфиг создаётся сразу stop-then-start, о чём говорит doc-абзац выше.
+
+> **Advisory lock — осознанно отложен на S2 (решение уровня спеки, не плана):** зафиксировано в спеке S1 §3 и подтверждено на её ревью («верная YAGNI-калибровка»). Технически на Neon advisory lock требует долгоживущего соединения на весь lifetime процесса — ровно та неизвестность (scale-to-zero, обрыв соединений, ср. pool_recycle=300), ради которой существует обязательный спайк S2-0; молча потерянный lock дал бы ЛОЖНУЮ уверенность в single-instance. Не реализовывать в S1.
 
 - [ ] **Step 6: Lint + commit**
 
@@ -519,23 +542,27 @@ git commit -m "feat(processing): дедуп upload по file_hash — fast-path 
 
 - [ ] **Step 1: Написать падающий структурный enqueue-тест (AC-S1-1)**
 
+Главный контракт S1 — обработка ОТДЕЛЕНА от HTTP-запроса. Шпионить нужно за `BackgroundTasks.add_task` (НЕ за `process_document`: тот спай прошёл бы и при ошибочном инлайн-`await process_document(...)`). Спай не исполняет таску → дополнительно доказываем, что ответ вернулся ДО обработки (документ в БД остался processing).
+
 В `test_invoices.py`:
 
 ```python
-def test_upload_returns_202_processing_and_enqueues(client, factories, in_memory_s3,
-                                                    sample_pdf_bytes, monkeypatch):
-    """Upload → 202, status=processing, invoices=[], duplicate=false; постановка в фон
-    подтверждается структурно — спай вместо реального process_document (AC-S1-1)."""
+def test_upload_enqueues_via_background_tasks(client, factories, in_memory_s3,
+                                              sample_pdf_bytes, monkeypatch):
+    """Upload → 202/processing/invoices=[]/duplicate=false; process_document поставлен
+    именно в BackgroundTasks и НЕ исполнен к моменту ответа (AC-S1-1)."""
     import io
+
+    from fastapi import BackgroundTasks
 
     import processing
 
     calls: list[dict] = []
 
-    async def spy(doc_id, *, mode, pdf_bytes=None, session_factory=None, reraise=False):
-        """Фиксирует enqueue вместо реальной обработки — документ остаётся processing."""
-        calls.append({"doc_id": doc_id, "mode": mode, "has_bytes": pdf_bytes is not None})
-    monkeypatch.setattr(processing, "process_document", spy)
+    def spy_add_task(self, func, *args, **kwargs):
+        """Фиксирует постановку в фон, НЕ исполняя таску (документ останется processing)."""
+        calls.append({"func": func, "args": args, "kwargs": kwargs})
+    monkeypatch.setattr(BackgroundTasks, "add_task", spy_add_task)
 
     project = factories.ProjectFactory.create()
     files = {"file": ("a.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
@@ -546,29 +573,42 @@ def test_upload_returns_202_processing_and_enqueues(client, factories, in_memory
     assert d["status"] == "processing"
     assert d["invoices"] == []
     assert d["duplicate"] is False
-    assert calls == [{"doc_id": d["id"], "mode": "parse", "has_bytes": True}]
+    # Поставлена ИМЕННО фоновая таска с правильной функцией и аргументами:
+    assert len(calls) == 1
+    assert calls[0]["func"] is processing.process_document
+    assert calls[0]["args"][0] == d["id"]
+    assert calls[0]["kwargs"]["mode"] == "parse"
+    assert calls[0]["kwargs"]["pdf_bytes"] is not None
+    # Таска не исполнялась → документ в БД остался processing (ответ не ждал обработку):
+    g = client.get(f"/api/invoices/documents/{d['id']}")
+    assert g.json()["status"] == "processing"
 
 
-def test_reparse_returns_202_and_enqueues(client, factories, in_memory_s3, monkeypatch):
-    """Reparse → 202 + processing; таска поставлена (AC-S1-1 для reparse)."""
+def test_reparse_enqueues_via_background_tasks(client, factories, in_memory_s3, monkeypatch):
+    """Reparse → 202 + processing; таска в BackgroundTasks, не исполнена (AC-S1-1)."""
+    from fastapi import BackgroundTasks
+
     import processing
 
-    calls: list[int] = []
+    calls: list[dict] = []
 
-    async def spy(doc_id, *, mode, pdf_bytes=None, session_factory=None, reraise=False):
-        """Спай enqueue."""
-        calls.append(doc_id)
-    monkeypatch.setattr(processing, "process_document", spy)
+    def spy_add_task(self, func, *args, **kwargs):
+        """Спай постановки в фон без исполнения."""
+        calls.append({"func": func, "args": args, "kwargs": kwargs})
+    monkeypatch.setattr(BackgroundTasks, "add_task", spy_add_task)
 
     doc = factories.DocumentFactory.create(s3_key="k/r.pdf", status="parsed")
     in_memory_s3["k/r.pdf"] = b"%PDF"
     r = client.post(f"/api/invoices/documents/{doc.id}/reparse")
     assert r.status_code == 202
     assert r.json()["status"] == "processing"
-    assert calls == [doc.id]
+    assert len(calls) == 1
+    assert calls[0]["func"] is processing.process_document
+    assert calls[0]["args"][0] == doc.id
+    assert calls[0]["kwargs"]["mode"] == "parse"
 ```
 
-> Спай работает потому, что роутер импортирует `process_document` ЛОКАЛЬНО (`from processing import process_document` внутри функции) — резолв в момент запроса; сверить, что Task 4 сохраняет локальный импорт.
+> (1) Идентичность `calls[0]["func"] is processing.process_document` работает: роутер импортирует `process_document` локально (`from processing import ...`) — это тот же атрибут модуля. (2) Патчится МЕТОД КЛАССА `BackgroundTasks.add_task` — действует на инстанс, который FastAPI инжектит в эндпоинт. (3) e2e-путь (таска реально исполняется через TestClient) покрывают адаптированные тесты Step 4 — они дополняют структурные, не заменяются ими.
 
 - [ ] **Step 2: Запустить — убедиться, что падают**
 
@@ -647,10 +687,139 @@ async def reparse_document(
 - 404/400/409-тесты эндпоинтов — без изменений (синхронная часть).
 - Проверка S1-2: `grep -rn "rotations_applied" backend/ frontend/src/` → пусто (поле исчезло ещё в S0-свапе; если где-то всплыло — удалить).
 
+- [ ] **Step 4b: Конкурентный e2e-тест гонки upload (полный инвариант эндпоинта)**
+
+SQL-тест Task 3 Step 6 проверяет СУБД-гарантию; этот — КОМПОЗИЦИЮ веток эндпоинта под реальной гонкой: два параллельных upload одного файла → ровно один документ, один enqueue, один живой S3-объект, проигравший получает `200 duplicate:true`. Требует реальных сессий (транзакционная `db_session` не потокобезопасна) — отдельный модуль со своим TestClient и переопределением `get_db`.
+
+Create `backend/tests/integration/test_upload_race_e2e.py`:
+
+```python
+"""E2E-гонка upload: два параллельных запроса одного файла (Q6, ревью плана P2).
+
+НЕ использует общую client-фикстуру: её get_db-override отдаёт одну
+транзакционную сессию на все запросы — два потока сломали бы её. Здесь
+каждый запрос получает СВОЮ реальную сессию (sessionmaker(bind=db_engine)),
+данные реально коммитятся, cleanup явный. Барьер внутри обёртки
+create_document выравнивает оба запроса ПОСЛЕ fast-path (оба увидели
+«дубликата нет») и ПЕРЕД INSERT — гонка детерминированна.
+"""
+import io
+import threading
+
+import pytest
+from fastapi import BackgroundTasks
+from fastapi.testclient import TestClient
+from sqlalchemy import text
+from sqlalchemy.orm import sessionmaker
+
+
+@pytest.fixture
+def race_client(db_engine, in_memory_s3, monkeypatch):
+    """TestClient с реальными пер-запросными сессиями и спаем enqueue.
+
+    Возвращает (client, enqueued) — enqueued копит вызовы add_task под локом.
+    Auth/session-factory переопределяются как в основной client-фикстуре —
+    сверить с conftest и скопировать нужные override'ы (get_current_user).
+    """
+    from database import get_db
+    from main import app
+    from routers.invoices import get_current_user  # сверить фактический модуль auth-dependency
+
+    Factory = sessionmaker(bind=db_engine)
+
+    def real_get_db():
+        """Каждому запросу — собственная реальная сессия (потокобезопасность гонки)."""
+        db = Factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    enqueued: list[dict] = []
+    lock = threading.Lock()
+
+    def spy_add_task(self, func, *args, **kwargs):
+        """Потокобезопасно фиксирует enqueue, не исполняя таску."""
+        with lock:
+            enqueued.append({"func": func, "args": args})
+    monkeypatch.setattr(BackgroundTasks, "add_task", spy_add_task)
+
+    app.dependency_overrides[get_db] = real_get_db
+    # get_current_user / get_processing_session_factory — скопировать override из client-фикстуры.
+    try:
+        with TestClient(app) as c:
+            yield c, enqueued
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_two_parallel_uploads_same_file(race_client, db_engine, in_memory_s3, sample_pdf_bytes, monkeypatch):
+    """Гонка: 1 документ, 1 enqueue, 1 живой S3-объект, у проигравшего 200 duplicate:true."""
+    client, enqueued = race_client
+    Factory = sessionmaker(bind=db_engine)
+
+    setup = Factory()
+    try:
+        project_id = setup.execute(text(
+            "INSERT INTO projects (name) VALUES ('q6-race-e2e') RETURNING id")).scalar_one()
+        setup.commit()
+    finally:
+        setup.close()
+
+    import routers.invoices as inv_router
+    real_create = inv_router.create_document
+    barrier = threading.Barrier(2, timeout=10)
+
+    def synced_create(db, project_id, filename, s3_key, file_hash=None):
+        """Выравнивает оба запроса после fast-path и перед INSERT — гонка гарантирована."""
+        barrier.wait()
+        return real_create(db, project_id, filename, s3_key, file_hash=file_hash)
+    monkeypatch.setattr(inv_router, "create_document", synced_create)
+
+    results: dict[str, dict] = {}
+
+    def do_upload(tag: str) -> None:
+        """Один участник гонки: POST /upload и фиксация исхода."""
+        files = {"file": (f"{tag}.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+        r = client.post("/api/invoices/upload", data={"project_id": project_id}, files=files)
+        results[tag] = {"code": r.status_code, "body": r.json()}
+
+    threads = [threading.Thread(target=do_upload, args=(t,)) for t in ("t1", "t2")]
+    try:
+        for t in threads:
+            t.start()
+    finally:
+        for t in threads:
+            t.join(timeout=30)
+
+    check = Factory()
+    try:
+        codes = sorted(res["code"] for res in results.values())
+        assert codes == [200, 202]                                   # победитель 202, проигравший 200
+        loser = next(res for res in results.values() if res["code"] == 200)
+        winner = next(res for res in results.values() if res["code"] == 202)
+        assert loser["body"]["duplicate"] is True
+        assert winner["body"]["duplicate"] is False
+        assert loser["body"]["id"] == winner["body"]["id"]           # один и тот же документ
+        count = check.execute(text(
+            "SELECT count(*) FROM documents WHERE project_id=:p"), {"p": project_id}).scalar_one()
+        assert count == 1                                            # ровно один документ
+        assert len(enqueued) == 1                                    # ровно один enqueue
+        s3_keys = [k for k in in_memory_s3 if not k.endswith(".orig")]
+        assert len(s3_keys) == 1                                     # сирота проигравшего удалена
+    finally:
+        check.execute(text("DELETE FROM documents WHERE project_id=:p"), {"p": project_id})
+        check.execute(text("DELETE FROM projects WHERE id=:p"), {"p": project_id})
+        check.commit()
+        check.close()
+```
+
+> Реализатору: (1) скопировать в `race_client` фактические auth/DI-override'ы из client-фикстуры conftest (get_current_user и get_processing_session_factory — имена/модули сверить по факту); (2) TestClient потокобезопасен для параллельных запросов (портал anyio per-request) — если наткнёшься на обратное, разнеси запросы на два TestClient над одним app; (3) `in_memory_s3` — обычный dict, GIL достаточен; ассерт по числу ключей учитывает только этот тест — если фикстура шарится, считать разницу до/после.
+
 - [ ] **Step 5: Запустить всё — PASS**
 
 Run: `& "C:\Program Files\Git\bin\bash.exe" -c "cd /c/Users/zhukov_v/Projects/UDP && just test-backend-integration 2>&1"`
-Expected: PASS весь набор.
+Expected: PASS весь набор, включая e2e-гонку (детерминированную по барьеру).
 
 - [ ] **Step 6: Lint + commit**
 
@@ -890,6 +1059,14 @@ type DocLike = { id?: number | string; status?: string };
  * на приложение. Обрабатывает только updated-события квери documents (list) /
  * document (detail); data нормализуется к массиву; Map обновляется ДО
  * invalidateQueries; первое наблюдение документа переходом не считается.
+ *
+ * Семантика — AT-LEAST-ONCE (спека §5 п.5): запоздалый out-of-order ответ
+ * (in-flight detail-запрос со старым processing, донесённый после перехода)
+ * откатывает Map, и следующий свежий ответ даёт ПОВТОРНУЮ инвалидацию.
+ * Это осознанно допустимо: инвалидация идемпотентна, цена — лишний refetch
+ * в редкой гонке. Блокировать откат нельзя — легитимный даунгрейд
+ * (новый reparse: parsed → processing) обязан записываться, иначе следующий
+ * терминальный переход не сработает; отличить их на этом уровне нечем.
  */
 export function createTerminalTransitionListener(queryClient: QueryClient) {
   const lastStatus = new Map<number | string, string>();
@@ -1151,13 +1328,16 @@ git commit -m "feat(frontend): UploadJobRow — серверный этап job'
 ### Task 9: Фронт — дизейбл мутаций и бейдж «Обрабатывается» (S1-6)
 
 **Files:**
+- Modify: `frontend/src/services/processingRefetchInterval.ts` (хелпер `isDocBusy`)
 - Modify: `frontend/src/pages/Review.tsx` (кнопки reparse/deskew, verify/edit/delete СФ, delete документа)
-- Modify: `frontend/src/components/projects/ErrorDocsTab.tsx` (кнопки reparse/deskew)
 - Modify: `frontend/src/pages/ProjectPage.tsx` (бейдж статуса в списке документов)
-- Test: `frontend/src/components/projects/ErrorDocsTab.test.tsx` (дополнить), `frontend/src/pages/Review.test.tsx` (если существует — дополнить; нет — покрыть через ErrorDocsTab + ручную проверку, зафиксировать в отчёте)
+- Test: `frontend/src/pages/Review.test.tsx` (существует — дополнить)
 
 **Interfaces:**
 - Consumes: `NON_TERMINAL_STATUSES` (Task 6) — единственный источник истины для «busy».
+- Produces: `isDocBusy(status)` в processingRefetchInterval.ts.
+
+> **ErrorDocsTab НЕ трогаем** (уточнение ревью плана): его строки терминальны по построению — фильтр `error || has_issues`, где `has_issues` вычисляется только для `parsed`, а busy-документ не попадает в выборку. После клика reparse документ уходит в processing и исчезает из вкладки на ближайшем refetch; окно до refetch закрывает существующий mutation-state (`isPending`) кнопки. Тест busy-состояния в ErrorDocsTab не увидел бы строку вовсе — основное покрытие идёт в `Review.test.tsx`.
 
 - [ ] **Step 1: Хелпер и падающий тест**
 
@@ -1170,7 +1350,7 @@ export function isDocBusy(status: string | undefined): boolean {
 }
 ```
 
-В `ErrorDocsTab.test.tsx` добавить тест: документ со `status: "processing"` → кнопки reparse/deskew имеют `disabled` (сверить реальные data-testid/тексты кнопок в компоненте; ассертить через `toBeDisabled()`).
+В `frontend/src/pages/Review.test.tsx` (существует — паттерны рендера/MSW взять из него же) добавить тест: документ со `status: "processing"` в detail-ответе → кнопки reparse/deskew/verify/delete задизейблены (`toBeDisabled()`; точные селекторы кнопок — по фактическим текстам/testid в Review.tsx).
 
 - [ ] **Step 2: Запустить — FAIL**
 
@@ -1178,16 +1358,21 @@ Run: `just test-frontend` → новый тест FAIL (кнопки актив�
 
 - [ ] **Step 3: Применить дизейбл + бейдж**
 
-- `ErrorDocsTab.tsx` и `Review.tsx`: у кнопок reparse/deskew, verify/unverify, редактирования и удаления СФ, удаления документа добавить `disabled={isDocBusy(doc.status)}` (точные места — grep по `useReparseDocument|useDeskewReparseDocument|useVerifyInvoice|useDeleteInvoice|useDeleteDocument` в этих файлах; сверять с фактом, логику обработчиков не менять).
+- `Review.tsx`: у кнопок reparse/deskew, verify/unverify, редактирования и удаления СФ, удаления документа **ДОБАВИТЬ busy-условие К СУЩЕСТВУЮЩЕМУ, не заменяя его**:
+
+  ```tsx
+  disabled={existingCondition || isDocBusy(doc.status)}
+  ```
+
+  где `existingCondition` — то, что уже стоит в атрибуте (mutation `isPending`, verified-условия и т.п.). Если у кнопки `disabled` не было — просто `disabled={isDocBusy(doc.status)}`. Точные места — grep по `useReparseDocument|useDeskewReparseDocument|useVerifyInvoice|useDeleteInvoice|useDeleteDocument|disabled` в Review.tsx; существующую логику обработчиков и условий НЕ менять.
 - `ProjectPage.tsx`: в рендере строки документа (таблица документов) добавить `{isDocBusy(doc.status) && <StatusPill tone="info" label="Обрабатывается" dot />}` — рядом с существующим статус-рендером (сверить структуру ячейки по факту).
-- ErrorDocsTab фильтрует терминальный `error` — его СПИСОЧНУЮ логику не менять (спека §6).
 
 - [ ] **Step 4: Тесты + lint + commit**
 
 Run: `just test-frontend` → PASS; `just lint-frontend`; `just typecheck-frontend`.
 
 ```bash
-git add frontend/src/services/processingRefetchInterval.ts frontend/src/pages/ frontend/src/components/projects/
+git add frontend/src/services/processingRefetchInterval.ts frontend/src/pages/
 git commit -m "feat(frontend): дизейбл мутаций для pending|processing + бейдж «Обрабатывается» (S1-6)"
 ```
 
