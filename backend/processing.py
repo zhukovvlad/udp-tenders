@@ -265,7 +265,7 @@ def _is_not_found(exc: Exception) -> bool:
     return False
 
 
-async def _run_deskew(s3_key: str) -> tuple[bytes, Decimal, int]:
+async def _run_deskew(s3_key: str, *, accounting: dict | None = None) -> tuple[bytes, Decimal, int]:
     """Коррекция ориентации от оригинала. Возвращает (pdf_для_парсинга, detect_cost, detect_calls).
 
     Источник — всегда {s3_key}.orig (идемпотентность повторных deskew). Различаем «нет
@@ -275,6 +275,16 @@ async def _run_deskew(s3_key: str) -> tuple[bytes, Decimal, int]:
 
     ПОСЛЕ оплаченного detect любой S3-сбой оборачивается в TransientError с detect-cost —
     стоимость не теряется в generic-ветке process_document (F3, §2.3).
+
+    accounting — необязательный mutable-аккумулятор {"cost_usd", "paid_calls"} (FIX 4):
+    заполняем его СРАЗУ после `deskew_pdf` (ДО пост-detect S3-вызовов ниже — backup/
+    overwrite/current-download), потому что CancelledError, прилетевший ИЗ этих awaits,
+    не является Exception и обходит `except Exception` ниже — раньше это теряло уже
+    оплаченный detect-cost, если аккумулятор обновлялся только в вызывающем
+    `run_processing_attempt` ПОСЛЕ возврата из этой функции. Возвращаемые
+    detect_cost/detect_calls остаются источником истины для ProcessingError/success
+    путей (см. run_processing_attempt) — accounting и возврат НЕ читаются одновременно
+    одним и тем же путём, поэтому стоимость не задваивается.
     """
     import pdf_orientation
     from s3 import download_file_async, upload_file_async
@@ -300,6 +310,11 @@ async def _run_deskew(s3_key: str) -> tuple[bytes, Decimal, int]:
     # (тогда detect не оплачен); при сбое apply_rotations — уже С detect-cost (см. pdf_orientation).
     corrected, rotations, detect_cost = await pdf_orientation.deskew_pdf(source_bytes)
     detect_calls = 1
+    if accounting is not None:
+        # ДО пост-detect S3-awaits ниже (FIX 4) — CancelledError из них не Exception,
+        # обходит except ниже, и без этой ранней записи detect-cost терялся бы.
+        accounting["cost_usd"] += detect_cost
+        accounting["paid_calls"] += detect_calls
 
     # Всё, что после успешного detect, оплачено — S3-сбой не должен обнулять учёт (F3).
     try:
@@ -322,7 +337,11 @@ async def _run_deskew(s3_key: str) -> tuple[bytes, Decimal, int]:
         # пробрасываем как есть.
         raise
     except Exception as exc:  # noqa: BLE001 — S3-сбой ПОСЛЕ оплаченного detect
-        raise TransientError(f"Ошибка S3 после коррекции ориентации: {exc}",
+        # http_status=502 (FIX 5) — держит тот же HTTP-контракт, что и пред-detect S3-сбои
+        # (иначе process_document(reraise=True) не пробросит её и deskew-эндпоинт молча
+        # вернёт 200 вместо 502). Сообщение — стабильный текст без сырого exc (FIX 6).
+        logger.warning(f"[s3_key={s3_key}] _run_deskew: ошибка S3 после коррекции ориентации: {exc!r}")
+        raise TransientError("Ошибка хранилища при коррекции ориентации", http_status=502,
                              cost_usd=detect_cost, paid_calls=detect_calls) from exc
 
 
@@ -339,11 +358,12 @@ async def run_processing_attempt(session_factory, doc_id: int, *, mode: str,
 
     accounting — необязательный mutable-аккумулятор {"cost_usd", "paid_calls"},
     который process_document передаёт, чтобы НЕ-ProcessingError пути (CancelledError,
-    generic Exception) тоже видели оплаченный detect (FIX 3, P1). Записываем в него
-    оплаченный detect СРАЗУ после `_run_deskew`, а не в конце — если сам parse_pdf/
-    persist_parse_result упадёт CancelledError/generic-исключением ДО возврата из этой
-    функции, детект всё равно уже учтён. Для ProcessingError-пути аккумулятор НЕ
-    используется вообще — cost уже слит в exc.cost_usd ниже, чтобы не задвоить.
+    generic Exception) тоже видели оплаченный detect (FIX 4). Просто прокидываем его
+    в `_run_deskew`, которая пишет в него оплаченный detect-cost СРАЗУ после
+    `deskew_pdf`, ДО собственных пост-detect S3-awaits — если CancelledError/generic
+    исключение прилетит там или позже (parse_pdf/persist_parse_result), детект уже
+    учтён. Для ProcessingError-пути аккумулятор НЕ используется вообще — cost уже
+    слит в exc.cost_usd ниже, чтобы не задвоить.
     """
     from pdf_parser import parse_pdf  # локальный импорт против кругового; патчится через pdf_parser (F6)
     from s3 import download_file_async
@@ -358,15 +378,17 @@ async def run_processing_attempt(session_factory, doc_id: int, *, mode: str,
                 raise PermanentError(f"Документ id={doc_id} без s3_key")
             s3_key = doc.s3_key
         if mode == "deskew":
-            pdf_bytes, detect_cost, detect_calls = await _run_deskew(s3_key)
-            if accounting is not None:
-                accounting["cost_usd"] += detect_cost
-                accounting["paid_calls"] += detect_calls
+            # accounting обновляется ВНУТРИ _run_deskew сразу после оплаченного detect,
+            # ДО пост-detect S3-awaits (FIX 4) — здесь его больше не трогаем, иначе
+            # стоимость задвоилась бы.
+            pdf_bytes, detect_cost, detect_calls = await _run_deskew(s3_key, accounting=accounting)
         else:
             try:
                 pdf_bytes = await download_file_async(s3_key)
             except Exception as exc:  # noqa: BLE001
-                raise TransientError(f"Не удалось скачать PDF из S3: {exc}") from exc
+                # Сообщение — стабильный текст без сырого exc (FIX 6); подробности в логе.
+                logger.warning(f"[doc={doc_id}] не удалось скачать PDF из S3: {exc!r}")
+                raise TransientError("Не удалось получить PDF из хранилища") from exc
 
     try:
         outcome = await parse_pdf(pdf_bytes, document_id=doc_id)
@@ -401,9 +423,10 @@ async def process_document(doc_id: int, *, mode: str, pdf_bytes: bytes | None = 
     (детерминированный исход, AC-S0-2). Успех фиксируется внутри фазы B.
 
     accounting — mutable-аккумулятор {"cost_usd", "paid_calls"}, передаётся в
-    run_processing_attempt; тот заполняет его оплаченным detect-стоимостью СРАЗУ
-    после `_run_deskew` (mode="deskew"), ДО фазы A/B. Если после этого прилетит
-    CancelledError или неклассифицированное исключение (FIX 3, P1: обрыв
+    run_processing_attempt → `_run_deskew` (mode="deskew"), которая заполняет его
+    оплаченным detect-стоимостью СРАЗУ после `deskew_pdf`, ДО собственных
+    пост-detect S3-awaits и уж тем более до фазы A/B (FIX 4). Если после этого
+    прилетит CancelledError или неклассифицированное исключение (P1: обрыв
     страницы/клиента посреди составной попытки deskew+parse) — эти два except
     читают cost из accounting, а не пишут 0/0, иначе оплаченный detect терялся бы.
     Ветка ProcessingError аккумулятор НЕ читает — там cost уже в exc.cost_usd
@@ -428,6 +451,8 @@ async def process_document(doc_id: int, *, mode: str, pdf_bytes: bytes | None = 
                                cost_usd=accounting["cost_usd"], paid_calls=accounting["paid_calls"])
         raise
     except Exception as exc:  # noqa: BLE001 — подлинно непредвиденное (не ProcessingError)
-        logger.exception(f"[doc={doc_id}] непредвиденная ошибка обработки")
-        write_processing_error(session_factory, doc_id, f"Ошибка обработки: {exc}",
+        # logger.exception уже логирует traceback с exc — сообщение пользователю
+        # стабильный текст без сырого exc (FIX 6).
+        logger.exception(f"[doc={doc_id}] непредвиденная ошибка обработки: {exc!r}")
+        write_processing_error(session_factory, doc_id, "Внутренняя ошибка обработки",
                                cost_usd=accounting["cost_usd"], paid_calls=accounting["paid_calls"])

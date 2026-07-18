@@ -100,8 +100,17 @@ _DETECT_PROMPT = (
 
 
 def render_pages_for_detect(pdf_bytes: bytes, long_side: int = 768) -> list[bytes]:
-    """Уменьшенные JPEG-страницы для vision-детекта (ориентации хватает низкого разрешения)."""
+    """Уменьшенные JPEG-страницы для vision-детекта (ориентации хватает низкого разрешения).
+
+    Лимит MAX_DESKEW_PAGES проверяем ЗДЕСЬ, ДО цикла рендера — иначе гигантский PDF
+    исчерпывает CPU/память на растеризации всех страниц ещё до того, как
+    detect_rotations успевает отклонить его 413-м (FIX 2). Проверка в detect_rotations
+    остаётся как defense-in-depth (безвредный дублирующий guard).
+    """
     pdf = pdfium.PdfDocument(pdf_bytes)
+    if len(pdf) > MAX_DESKEW_PAGES:
+        raise PermanentError(f"Слишком много страниц для коррекции (> {MAX_DESKEW_PAGES})",
+                             http_status=413)
     images: list[bytes] = []
     for page in pdf:
         w, h = page.get_size()

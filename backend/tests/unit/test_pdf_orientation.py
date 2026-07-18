@@ -173,6 +173,39 @@ async def test_detect_rotations_garbage_to_zeros(monkeypatch, _allow_respx):
     assert cost == Decimal("0.0005")
 
 
+def test_render_pages_for_detect_rejects_too_many_pages_before_rendering(monkeypatch):
+    """FIX 2: лимит MAX_DESKEW_PAGES проверяется СРАЗУ после открытия PdfDocument, ДО
+    цикла рендера — иначе гигантский PDF исчерпывает CPU/память на растеризации ВСЕХ
+    страниц ещё до того, как лимит успевает отклонить его 413-м. Подменяем
+    `pdfium.PdfDocument`, чтобы вернуть фейковый документ с `len() > MAX_DESKEW_PAGES`,
+    но итерация по нему (т.е. рендер хоть одной страницы) считается провалом теста —
+    `__iter__` бросает, если до него вообще дошло исполнение."""
+
+    class _FakePage:
+        """Страница, чей рендер не должен вызываться (заглушка, здесь не используется)."""
+
+        def render(self, *a, **k):
+            """Не должен быть вызван — обозначен для наглядности контракта фейка."""
+            raise AssertionError("render() вызван — страница была растеризована до page-limit guard")
+
+    class _FakeTooBigDoc:
+        """Фейковый pdfium.PdfDocument: длина превышает лимит, итерация запрещена."""
+
+        def __len__(self):
+            """Возвращает число страниц больше MAX_DESKEW_PAGES."""
+            return po.MAX_DESKEW_PAGES + 1
+
+        def __iter__(self):
+            """Не должна вызываться — рендер обязан быть отклонён ДО цикла по страницам."""
+            raise AssertionError("PdfDocument был проитерирован — рендер начался до page-limit guard")
+
+    monkeypatch.setattr(po.pdfium, "PdfDocument", lambda pdf_bytes: _FakeTooBigDoc())
+
+    with pytest.raises(PermanentError) as ei:
+        po.render_pages_for_detect(b"%PDF-fake")
+    assert ei.value.http_status == 413
+
+
 @pytest.mark.asyncio
 async def test_detect_rotations_too_many_pages():
     """Слишком много страниц → PermanentError с http_status=413 (было HTTPException до Task 7)."""

@@ -75,6 +75,29 @@ async def test_process_document_permanent_error_keeps_old_invoices(
 
 
 @pytest.mark.asyncio
+async def test_process_document_second_invoice_bad_date_keeps_old_invoices(
+    factories, db_session, in_memory_s3, mock_openrouter, session_factory_test,
+):
+    """FIX 1 e2e: модель вернула ДВЕ СФ, вторая с некорректной датой → PermanentError
+    роняет ВЕСЬ разбор (all-or-nothing), документ уходит в error, а СТАРЫЙ набор СФ
+    остаётся нетронутым (никакого partial swap первой валидной СФ поверх старых)."""
+    mock_openrouter.use_scenario("two_invoices_second_bad_date")
+    doc = _proc_doc(factories, db_session, in_memory_s3)
+    factories.InvoiceFactory.create(document=doc, number="СФ-OLD")
+    db_session.commit()
+
+    await process_document(doc.id, mode="parse", session_factory=session_factory_test)
+
+    db_session.expire_all()
+    saved = db_session.query(Document).filter(Document.id == doc.id).first()
+    assert saved.status == "error"
+    assert saved.last_error
+    assert saved.parse_count == 1  # платный вызов учтён
+    numbers = [i.number for i in db_session.query(Invoice).filter(Invoice.document_id == doc.id)]
+    assert numbers == ["СФ-OLD"]  # старый набор цел, СФ-101 (валидная) НЕ протекла в БД
+
+
+@pytest.mark.asyncio
 async def test_process_document_phase_b_failure_writes_error_with_cost(
     factories, db_session, in_memory_s3, mock_openrouter, monkeypatch, session_factory_test,
 ):
@@ -251,6 +274,43 @@ async def test_deskew_sums_detect_and_parse_cost(
 
 
 @pytest.mark.asyncio
+async def test_deskew_cancelled_during_post_detect_s3_upload_keeps_detect_cost(
+    factories, db_session, in_memory_s3, monkeypatch, session_factory_test,
+):
+    """FIX 4: detect оплачен (rotations=[270] → есть повороты → идут пост-detect
+    S3-awaits внутри `_run_deskew`), и CancelledError прилетает ИМЕННО из
+    `upload_file_async` — ДО того, как `_run_deskew` успевает вернуться в
+    `run_processing_attempt`. CancelledError не Exception — раньше accounting
+    обновлялся только в вызывающем ПОСЛЕ возврата из `_run_deskew`, и оплаченный
+    detect-cost терялся бы. Теперь `_run_deskew` пишет в accounting СРАЗУ после
+    `deskew_pdf`, ДО пост-detect S3-вызовов — detect-cost обязан дойти до
+    error-записи через accounting."""
+    import pdf_orientation
+    import s3
+
+    doc = _proc_doc(factories, db_session, in_memory_s3)
+
+    async def fake_deskew(pdf_bytes):
+        """Платный detect с ненулевым поворотом — требует пост-detect S3 upload."""
+        return b"%PDF-corrected", [270], Decimal("0.002")
+    monkeypatch.setattr(pdf_orientation, "deskew_pdf", fake_deskew)
+
+    async def boom_upload(file_bytes, object_name):
+        """Эмулирует отмену таски ВНУТРИ пост-detect S3-загрузки (обрыв клиента)."""
+        raise asyncio.CancelledError()
+    monkeypatch.setattr(s3, "upload_file_async", boom_upload)
+
+    with pytest.raises(asyncio.CancelledError):
+        await process_document(doc.id, mode="deskew", session_factory=session_factory_test)
+
+    db_session.expire_all()
+    saved = db_session.query(Document).filter(Document.id == doc.id).first()
+    assert saved.status == "error"
+    assert saved.parse_count == 1                       # оплаченный detect учтён
+    assert saved.parse_cost_usd == Decimal("0.002")     # detect cost не потерян при cancel
+
+
+@pytest.mark.asyncio
 async def test_deskew_carries_detect_cost_when_s3_write_fails(
     factories, db_session, in_memory_s3, mock_openrouter, monkeypatch, session_factory_test,
 ):
@@ -278,6 +338,41 @@ async def test_deskew_carries_detect_cost_when_s3_write_fails(
     assert saved.status == "error"
     assert saved.parse_count == 1                       # оплаченный detect учтён
     assert saved.parse_cost_usd == Decimal("0.002")     # detect cost не потерян
+
+
+@pytest.mark.asyncio
+async def test_deskew_post_detect_s3_failure_raises_502(
+    factories, db_session, in_memory_s3, mock_openrouter, monkeypatch, session_factory_test,
+):
+    """FIX 5: сбой S3 ПОСЛЕ оплаченного detect (перезапись s3_key исправленными байтами)
+    обязан нести http_status=502 — тот же HTTP-контракт, что и пред-detect S3-сбои
+    (иначе process_document(reraise=True) не пробросит её, и deskew-эндпоинт молча
+    вернёт 200 при доке в error вместо 502)."""
+    import pdf_orientation
+    import s3
+    from processing import TransientError
+
+    doc = _proc_doc(factories, db_session, in_memory_s3)
+
+    async def fake_deskew(pdf_bytes):
+        """detect «нашёл» поворот → потребуется перезапись S3, которая ниже упадёт."""
+        return b"%PDF-corrected", [270], Decimal("0.002")
+    monkeypatch.setattr(pdf_orientation, "deskew_pdf", fake_deskew)
+
+    async def boom_upload(file_bytes, object_name):
+        """Эмулирует сбой S3-записи ПОСЛЕ оплаченного detect."""
+        raise RuntimeError("S3 write failed")
+    monkeypatch.setattr(s3, "upload_file_async", boom_upload)
+
+    with pytest.raises(TransientError) as exc_info:
+        await process_document(doc.id, mode="deskew", reraise=True, session_factory=session_factory_test)
+    assert exc_info.value.http_status == 502
+
+    db_session.expire_all()
+    saved = db_session.query(Document).filter(Document.id == doc.id).first()
+    assert saved.status == "error"
+    assert saved.parse_count == 1                       # оплаченный detect учтён
+    assert saved.parse_cost_usd == Decimal("0.002")
 
 
 @pytest.mark.asyncio

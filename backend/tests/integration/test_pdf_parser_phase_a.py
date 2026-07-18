@@ -70,3 +70,66 @@ async def test_parse_pdf_wrong_shape_content_raises_permanent_with_cost(sample_p
         await parse_pdf(sample_pdf_bytes, document_id=1)
     assert exc.value.paid_calls == 1
     assert exc.value.cost_usd >= 0
+
+
+@pytest.mark.asyncio
+async def test_parse_pdf_second_invoice_bad_date_raises_permanent_all_or_nothing(
+    sample_pdf_bytes, mock_openrouter,
+):
+    """FIX 1: две СФ в одном документе, у первой дата валидна, у второй — нет (null).
+
+    Раньше некорректная дата второй СФ молча `continue`-ила — phase A вернула бы
+    НЕПОЛНЫЙ набор (только первая СФ), а phase B заменила бы им старые данные
+    (нарушение all-or-nothing parse-then-swap). Теперь любая СФ с плохой датой
+    роняет ВЕСЬ разбор документа — PermanentError с учтённым платным вызовом."""
+    mock_openrouter.use_scenario("two_invoices_second_bad_date")
+    with pytest.raises(PermanentError) as exc:
+        await parse_pdf(sample_pdf_bytes, document_id=1)
+    assert exc.value.paid_calls == 1
+    assert exc.value.cost_usd == Decimal("0.0025")
+    assert "СФ-102" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_parse_pdf_top_level_array_envelope_raises_permanent_with_cost(
+    sample_pdf_bytes, mock_openrouter,
+):
+    """FIX 3: HTTP 200, но ТЕЛО ОТВЕТА (envelope) — top-level JSON-массив `[]` вместо
+    объекта, а не контент модели. `response.json()` возвращает список → `data.get(...)`
+    бросил бы AttributeError. Обязан стать PermanentError с учтённым платным вызовом
+    (post-200 unified guard), а не голым исключением."""
+    mock_openrouter.use_raw_body(b"[]")
+    with pytest.raises(PermanentError) as exc:
+        await parse_pdf(sample_pdf_bytes, document_id=1)
+    assert exc.value.paid_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_parse_pdf_corrupted_usage_array_raises_permanent_with_cost(
+    sample_pdf_bytes, mock_openrouter,
+):
+    """FIX 3: HTTP 200, envelope — валидный объект, но `usage` — список вместо словаря
+    (`{"usage": []}`). `(data.get("usage") or {}).get("cost")` бросил бы AttributeError
+    на списке. Обязан стать PermanentError с учтённым платным вызовом (post-200 unified
+    guard), а не голым исключением."""
+    mock_openrouter.use_raw_body(
+        b'{"choices": [{"message": {"content": "{}"}}], "usage": []}'
+    )
+    with pytest.raises(PermanentError) as exc:
+        await parse_pdf(sample_pdf_bytes, document_id=1)
+    assert exc.value.paid_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_parse_pdf_non_numeric_usage_cost_raises_permanent_with_cost(
+    sample_pdf_bytes, mock_openrouter,
+):
+    """FIX 3: `usage.cost` — нечисловая строка. `Decimal(str(...))` бросил бы
+    `decimal.InvalidOperation`. Обязан стать PermanentError с учтённым платным вызовом
+    (post-200 unified guard), а не голым исключением."""
+    mock_openrouter.use_raw_body(
+        b'{"choices": [{"message": {"content": "{}"}}], "usage": {"cost": "not-a-number"}}'
+    )
+    with pytest.raises(PermanentError) as exc:
+        await parse_pdf(sample_pdf_bytes, document_id=1)
+    assert exc.value.paid_calls == 1

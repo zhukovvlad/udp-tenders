@@ -208,8 +208,10 @@ async def parse_pdf(file_data: bytes, *, document_id: int) -> ParseOutcome:
         raise TransientError("Таймаут запроса к OpenRouter (180с)") from exc
     except httpx.RequestError as exc:
         # ConnectError / ReadError / RemoteProtocolError / DNS / TLS — транспортный сбой
-        # без ответа сервера → платного вызова не было (F12).
-        raise TransientError(f"Сетевая ошибка запроса к OpenRouter: {exc}") from exc
+        # без ответа сервера → платного вызова не было (F12). Сообщение пользователю —
+        # стабильный текст без сырого exc (FIX 6); подробности — только в логе.
+        logger.warning(f"[doc={document_id}] Фаза A: сетевая ошибка запроса к OpenRouter: {exc!r}")
+        raise TransientError("Сетевая ошибка запроса к сервису распознавания") from exc
 
     if response.status_code != 200:
         msg = f"OpenRouter API ошибка: {response.status_code}"
@@ -218,47 +220,48 @@ async def parse_pdf(file_data: bytes, *, document_id: int) -> ParseOutcome:
             raise TransientError(msg)
         raise PermanentError(msg)
 
-    # HTTP 200 ⇒ платный вызов состоялся. Фиксируем факт биллинга ДО чтения тела.
+    # HTTP 200 ⇒ платный вызов состоялся. Фиксируем факт биллинга ДО чтения тела — ВЕСЬ
+    # код ниже (envelope JSON, usage/cost, finish_reason, choices/content, JSON-парсинг
+    # контента, doc_type, цикл по СФ) обёрнут ОДНИМ guard'ом (FIX 3): недоверенное
+    # тело/контент LLM после платного 200 не должно улететь неклассифицированным
+    # исключением и обнулить cost/paid_calls в process_document (инвариант §2.3).
     paid_calls = 1
+    cost = Decimal(0)
     try:
         data = response.json()
-    except Exception as exc:  # noqa: BLE001 — битое тело от прокси остаётся платным вызовом
-        raise PermanentError("Не удалось разобрать ответ модели (тело не JSON)",
-                             cost_usd=cost, paid_calls=paid_calls) from exc
-    cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
+        cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
 
-    usage = data.get("usage", {})
-    completion_tokens = usage.get("completion_tokens", 0)
-    finish_reason = (data.get("choices") or [{}])[0].get("finish_reason")
-    logger.info(f"[doc={document_id}] Фаза A: cost=${cost}, finish_reason={finish_reason}")
+        usage = data.get("usage", {})
+        completion_tokens = usage.get("completion_tokens", 0)
+        finish_reason = (data.get("choices") or [{}])[0].get("finish_reason")
+        logger.info(f"[doc={document_id}] Фаза A: cost=${cost}, finish_reason={finish_reason}")
 
-    if finish_reason == "length":
-        raise PermanentError(
-            "Ответ модели обрезан по лимиту токенов — часть позиций счёта потеряна. "
-            "Попробуйте повторить разбор.",
-            cost_usd=cost, paid_calls=paid_calls,
-        )
-    if completion_tokens and completion_tokens >= max_tokens:
-        logger.error(f"[doc={document_id}] completion_tokens={completion_tokens} == max — ответ обрезан")
+        if finish_reason == "length":
+            raise PermanentError(
+                "Ответ модели обрезан по лимиту токенов — часть позиций счёта потеряна. "
+                "Попробуйте повторить разбор.",
+                cost_usd=cost, paid_calls=paid_calls,
+            )
+        if completion_tokens and completion_tokens >= max_tokens:
+            logger.error(f"[doc={document_id}] completion_tokens={completion_tokens} == max — ответ обрезан")
 
-    try:
-        response_text = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise PermanentError("Ответ модели без содержимого",
-                             cost_usd=cost, paid_calls=paid_calls) from exc
+        try:
+            response_text = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise PermanentError("Ответ модели без содержимого",
+                                 cost_usd=cost, paid_calls=paid_calls) from exc
 
-    if "```json" in response_text:
-        response_text = response_text.split("```json")[1].split("```")[0]
-    elif "```" in response_text:
-        response_text = response_text.split("```")[1].split("```")[0]
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0]
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0]
 
-    try:
-        parsed = json.loads(response_text.strip())
-    except json.JSONDecodeError as exc:
-        raise PermanentError("Не удалось разобрать ответ модели (невалидный JSON)",
-                             cost_usd=cost, paid_calls=paid_calls) from exc
+        try:
+            parsed = json.loads(response_text.strip())
+        except json.JSONDecodeError as exc:
+            raise PermanentError("Не удалось разобрать ответ модели (невалидный JSON)",
+                                 cost_usd=cost, paid_calls=paid_calls) from exc
 
-    try:
         if parsed.get("doc_type") != "invoice":
             raise PermanentError("Документ не является счётом-фактурой",
                                  cost_usd=cost, paid_calls=paid_calls)
@@ -288,8 +291,16 @@ async def parse_pdf(file_data: bytes, *, document_id: int) -> ParseOutcome:
                     raise ValueError("Дата СФ отсутствует в ответе модели")
                 invoice_date = date.fromisoformat(invoice_date_str)
             except (ValueError, TypeError) as e:
-                logger.error(f"[doc={document_id}] СФ №{inv_number}: некорректная дата: {e} — пропуск СФ")
-                continue
+                logger.error(f"[doc={document_id}] СФ №{inv_number}: некорректная дата: {e}")
+                # Всё-или-ничего (parse-then-swap, §2.3): молчаливый `continue` здесь раньше
+                # ронял ЭТУ СФ из набора, но если другая СФ в том же документе валидна,
+                # phase A вернула бы НЕПОЛНЫЙ набор, а phase B заменила бы им старые данные —
+                # тихая потеря СФ при многодокументном PDF. Одна плохая дата → весь reparse
+                # проваливается, старый набор СФ остаётся нетронутым.
+                raise PermanentError(
+                    f"Разбор счёта №{inv_number} неполный: некорректная дата ({e})",
+                    cost_usd=cost, paid_calls=paid_calls,
+                ) from e
 
             doc_total = inv_data.get("doc_total_without_vat")
             try:
@@ -314,18 +325,22 @@ async def parse_pdf(file_data: bytes, *, document_id: int) -> ParseOutcome:
             ))
 
         if not invoices:
-            # doc_type=invoice, но ни одной СФ не разобрано (пустой invoices или все даты кривые
-            # → continue выше). Не создаём документ «parsed с 0 СФ» — это тот артефакт, ради
-            # устранения которого вводилась статусная модель (Q2, класс 2).
+            # doc_type=invoice, но ни одной СФ не разобрано (пустой массив invoices —
+            # любая некорректная дата теперь роняет весь разбор через PermanentError
+            # выше, а не continue). Не создаём документ «parsed с 0 СФ» — это тот
+            # артефакт, ради устранения которого вводилась статусная модель (Q2, класс 2).
             raise PermanentError("Ни одной СФ не удалось разобрать из документа",
                                  cost_usd=cost, paid_calls=paid_calls)
     except ProcessingError:
         raise
-    except Exception as exc:  # noqa: BLE001 — недоверенный контент LLM после платного 200:
+    except Exception as exc:  # noqa: BLE001 — недоверенное тело/контент LLM после платного 200:
         # неклассифицированная форма (например top-level JSON-массив вместо объекта →
-        # AttributeError на .get, либо ValueError/TypeError на кривых числах) не должна
-        # улететь наверх неучтённой — платный вызов уже состоялся (инвариант §2.3).
-        raise PermanentError(f"Ошибка разбора ответа модели: {exc}",
+        # AttributeError на .get, либо ValueError/TypeError на кривых числах, либо
+        # битое тело ответа не-JSON) не должна улететь наверх неучтённой — платный
+        # вызов уже состоялся (инвариант §2.3). Сообщение пользователю — стабильный
+        # текст без сырого exc (FIX 6); подробности — только в логе.
+        logger.warning(f"[doc={document_id}] Фаза A: не удалось разобрать ответ модели: {exc!r}")
+        raise PermanentError("Не удалось разобрать ответ модели",
                              cost_usd=cost, paid_calls=paid_calls) from exc
 
     logger.info(f"[doc={document_id}] Фаза A: разобрано СФ {len(invoices)}, cost=${cost}")
