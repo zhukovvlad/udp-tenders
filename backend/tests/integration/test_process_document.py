@@ -248,9 +248,12 @@ def test_write_error_reraises_non_connection_operational_error():
         db.execute.side_effect = _execute
         yield db
 
+    slept: list[float] = []
     with pytest.raises(OperationalError):
-        write_processing_error(factory, 1, "x", cost_usd=Decimal("0.001"), paid_calls=1)
+        write_processing_error(factory, 1, "x", cost_usd=Decimal("0.001"), paid_calls=1,
+                               sleep=slept.append)
     assert attempts["n"] == 1  # детерминированная ошибка — без ретраев
+    assert slept == []          # и без паузы — не спим на непробрасываемом сбое
 
 
 @pytest.mark.asyncio
@@ -532,5 +535,10 @@ def test_write_error_retries_on_connection_loss():
         yield db
 
     # Все попытки — потеря соединения → исчерпание ретраев → critical-лог, исключение НЕ пробрасывается.
-    write_processing_error(factory, 1, "x", cost_usd=Decimal("0.001"), paid_calls=1, retries=3)
+    slept: list[float] = []
+    write_processing_error(factory, 1, "x", cost_usd=Decimal("0.001"), paid_calls=1, retries=3,
+                           sleep=slept.append)
     assert attempts["n"] == 3
+    # Пауза между попытками (спека line 156): после 1-й и 2-й connection error — спим,
+    # после ПОСЛЕДНЕЙ (3-й) не спим. Backoff 0.1 → 0.25.
+    assert slept == [0.1, 0.25]

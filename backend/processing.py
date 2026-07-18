@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -209,8 +210,22 @@ def _is_connection_error(exc: DBAPIError) -> bool:
     return bool(exc.connection_invalidated or (sqlstate and str(sqlstate).startswith("08")))
 
 
+_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (0.1, 0.25)
+
+
+def _retry_delay(attempt: int) -> float:
+    """Пауза (сек) ПЕРЕД следующей попыткой после connection-error на попытке `attempt`.
+
+    Небольшой backoff (0.1, затем 0.25 с) даёт соединению/пулу шанс восстановиться
+    между попытками условной error-записи — спека §2.3 (line 156) требует «2–3 попытки
+    С ПАУЗОЙ». Если попыток больше, чем ступеней в графике, переиспользуем последнюю.
+    """
+    return _RETRY_BACKOFF_SECONDS[min(attempt - 1, len(_RETRY_BACKOFF_SECONDS) - 1)]
+
+
 def write_processing_error(session_factory, doc_id: int, message: str, *,
-                           cost_usd: Decimal, paid_calls: int, retries: int = 3) -> None:
+                           cost_usd: Decimal, paid_calls: int, retries: int = 3,
+                           sleep=time.sleep) -> None:
     """Идемпотентная условная error-запись (§2.3).
 
     UPDATE ... WHERE status='processing' — при уже закоммитившемся swap (ambiguous
@@ -220,6 +235,10 @@ def write_processing_error(session_factory, doc_id: int, message: str, *,
     ВКЛЮЧАЯ не-connection `OperationalError` (deadlock 40P01, lock_timeout, statement
     cancellation 57014) и любой другой `DBAPIError`/Exception, детерминированы → НЕ глотаем,
     пробрасываем, чтобы баг падал в тестах, а не оставлял документ processing молча (F8).
+    Между connection-ретраями выдерживаем паузу `_retry_delay(attempt)` (спека line 156);
+    после ПОСЛЕДНЕЙ попытки не спим. `sleep` инъектируется, чтобы unit-тест не ждал реально.
+    Пауза синхронная (функция sync; на S0 вызывается инлайн из process_document) — короткий
+    блок event loop на вырожденном пути потери БД (суммарно ≤0.35 с) принят осознанно.
     Исчерпание connection-ретраев → лог critical, документ остаётся processing (доберёт
     startup-sweep S1-4); стоимость этой попытки теряется (at-most-once).
     """
@@ -249,6 +268,8 @@ def write_processing_error(session_factory, doc_id: int, message: str, *,
                 raise
             logger.warning(f"[doc={doc_id}] error-запись, попытка {attempt}/{retries} "
                            f"не удалась (потеря соединения): {exc}")
+            if attempt < retries:      # перед следующей попыткой — пауза; после последней не спим
+                sleep(_retry_delay(attempt))
     logger.critical(f"[doc={doc_id}] error-запись НЕ выполнена: БД недоступна. "
                     f"Документ остаётся processing до рестарта/ручного восстановления; "
                     f"стоимость ${cost_usd} не учтена.")
