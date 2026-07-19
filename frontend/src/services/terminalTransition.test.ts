@@ -3,9 +3,26 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTerminalTransitionListener } from "./terminalTransition";
 
-/** Собирает updated-событие QueryCache с заданными queryKey и data. */
+/** Собирает updated-событие QueryCache с заданными queryKey и data (action.type: "success"). */
 function updatedEvent(queryKey: readonly unknown[], data: unknown) {
-  return { type: "updated", query: { queryKey, state: { data } } } as never;
+  return {
+    type: "updated",
+    query: { queryKey, state: { data } },
+    action: { type: "success" },
+  } as never;
+}
+
+/**
+ * Собирает updated-событие с произвольным action.type (например "fetch" — старт
+ * рефетча / отмена) и стейл-data. Воспроизводит цикл со стенда: событие смены
+ * fetchStatus несёт СТАРЫЕ данные квери, детектор обязан его игнорировать.
+ */
+function updatedEventWithAction(queryKey: readonly unknown[], data: unknown, actionType: string) {
+  return {
+    type: "updated",
+    query: { queryKey, state: { data } },
+    action: { type: actionType },
+  } as never;
 }
 
 describe("terminal transition detector (S1-7, спека §5)", () => {
@@ -47,6 +64,34 @@ describe("terminal transition detector (S1-7, спека §5)", () => {
     listen(updatedEvent(["dashboard", "summary", 1], [{ id: 7, status: "processing" }]));
     listen(updatedEvent(["dashboard", "summary", 1], [{ id: 7, status: "parsed" }]));
     expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it("событие смены fetchStatus (action.type: fetch) со стейл processing-data после success(parsed) — игнорируется", () => {
+    const listen = createTerminalTransitionListener(qc);
+    listen(updatedEvent(["documents", 1], [{ id: 7, project_id: 1, status: "parsed" }]));
+    invalidate.mockClear();
+    // Список запускает рефетч (или его отменяют) — событие несёт СТАРЫЕ данные
+    // (ещё "processing"), но не должно откатить Map и дать новую инвалидацию.
+    listen(
+      updatedEventWithAction(["documents", 1], [{ id: 7, project_id: 1, status: "processing" }], "fetch"),
+    );
+    expect(invalidate).not.toHaveBeenCalled();
+    // Следующий реальный success(parsed) не должен считаться "новым" переходом.
+    listen(updatedEvent(["documents", 1], [{ id: 7, project_id: 1, status: "parsed" }]));
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it("регрессия вечного цикла: success(processing) → success(parsed) [3 инвалидации] → fetch-событие со стейл processing-data → success(parsed) → новых инвалидаций нет", () => {
+    const listen = createTerminalTransitionListener(qc);
+    listen(updatedEvent(["documents", 1], [{ id: 7, project_id: 1, status: "processing" }]));
+    listen(updatedEvent(["documents", 1], [{ id: 7, project_id: 1, status: "parsed" }]));
+    expect(invalidate).toHaveBeenCalledTimes(3);
+
+    listen(
+      updatedEventWithAction(["documents", 1], [{ id: 7, project_id: 1, status: "processing" }], "fetch"),
+    );
+    listen(updatedEvent(["documents", 1], [{ id: 7, project_id: 1, status: "parsed" }]));
+    expect(invalidate).toHaveBeenCalledTimes(3);
   });
 });
 

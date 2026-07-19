@@ -19,12 +19,28 @@ type DocLike = { id?: number | string; status?: string };
  * в редкой гонке. Блокировать откат нельзя — легитимный даунгрейд
  * (новый reparse: parsed → processing) обязан записываться, иначе следующий
  * терминальный переход не сработает; отличить их на этом уровне нечем.
+ *
+ * ФИЛЬТР ПО action.type ОБЯЗАТЕЛЕН (смоук на стенде, list-квери ~8с): QueryCache
+ * диспатчит "updated" не только когда приземляются новые данные, но и при любой
+ * смене fetchStatus — старт рефетча, отмена и т.д. В этих событиях
+ * event.query.state.data — СТАРЫЕ данные (обновление ещё не произошло). Без
+ * фильтра это давало вечный цикл: list-кэш держит стейл "processing", каждый
+ * его рефетч отменяется инвалидацией (cancelRefetch) раньше приземления —
+ * событие отмены несёт стейл-data, лже-перезапись Map[docId] обратно на
+ * "processing", следующий детект перехода detail (processing to parsed) снова
+ * шлёт инвалидацию списка, снова отмена рефетча list, повтор с начала.
+ * Единственные "updated"-события, где data реально новая — action.type равен
+ * "success" (react-query v5: и обычный фетч, и setQueryData-сеяние из мутаций
+ * идут как success, ручное сеяние — с manual: true). Остальные action.type
+ * ("fetch" — старт, "invalidate", "error", "pause"/"continue" и т.п.) —
+ * игнорируются: их state.data либо стейл, либо не менялась.
  */
 export function createTerminalTransitionListener(queryClient: QueryClient) {
   const lastStatus = new Map<number | string, string>();
 
   return (event: QueryCacheNotifyEvent): void => {
     if (event.type !== "updated") return;
+    if (event.action.type !== "success") return;
     const key0 = event.query.queryKey[0];
     if (key0 !== "documents" && key0 !== "document") return;
 
