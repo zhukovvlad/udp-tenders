@@ -191,7 +191,7 @@ export default function Review() {
               type="button"
               onClick={() => { setUnitWarnings([]); reparse.mutate(docId); }}
               disabled={reparse.isPending || verify.isPending || unverify.isPending || documentLocked || isDocBusy(doc.status)}
-              title={documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
+              title={isDocBusy(doc.status) ? "Документ обрабатывается — дождитесь завершения" : documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
               className="text-fg-secondary underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
             >
               Переразобрать
@@ -200,7 +200,7 @@ export default function Review() {
               type="button"
               onClick={() => { setUnitWarnings([]); deskew.mutate(docId); }}
               disabled={deskew.isPending || reparse.isPending || verify.isPending || unverify.isPending || documentLocked || isDocBusy(doc.status)}
-              title={documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
+              title={isDocBusy(doc.status) ? "Документ обрабатывается — дождитесь завершения" : documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
               className="text-fg-secondary underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
             >
               Выпрямить и переразобрать
@@ -231,7 +231,7 @@ export default function Review() {
               variant="danger"
               size="sm"
               disabled={verify.isPending || unverify.isPending || documentLocked || isDocBusy(doc.status)}
-              title={documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
+              title={isDocBusy(doc.status) ? "Документ обрабатывается — дождитесь завершения" : documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
               onClick={() => {
                 if (window.confirm("Удалить документ?")) {
                   remove.mutate(docId, {
@@ -251,7 +251,7 @@ export default function Review() {
                   disabled={unverify.isPending || dirty || isDocBusy(doc.status)}
                   loading={unverify.isPending}
                   onClick={() => unverify.mutate(serverInv.id, { onSuccess: () => setOverrides(null) })}
-                  title={dirty ? "Сначала сохраните изменения" : undefined}
+                  title={isDocBusy(doc.status) ? "Документ обрабатывается — дождитесь завершения" : dirty ? "Сначала сохраните изменения" : undefined}
                 >
                   Снять подтверждение
                 </Button>
@@ -263,7 +263,7 @@ export default function Review() {
                   disabled={verify.isPending || dirty || isDocBusy(doc.status)}
                   loading={verify.isPending}
                   onClick={() => verify.mutate(serverInv.id, { onSuccess: () => setOverrides(null) })}
-                  title={dirty ? "Сначала сохраните изменения" : undefined}
+                  title={isDocBusy(doc.status) ? "Документ обрабатывается — дождитесь завершения" : dirty ? "Сначала сохраните изменения" : undefined}
                 >
                   Подтвердить
                 </Button>
@@ -272,6 +272,7 @@ export default function Review() {
             <Button
               variant="secondary"
               disabled={!dirty || update.isPending || isDocBusy(doc.status)}
+              title={isDocBusy(doc.status) ? "Документ обрабатывается — дождитесь завершения" : undefined}
               loading={update.isPending}
               onClick={() => {
                 setUnitWarnings([]);

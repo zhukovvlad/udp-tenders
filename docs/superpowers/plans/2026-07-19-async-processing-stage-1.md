@@ -266,7 +266,7 @@ Expected: PASS (2 теста).
 
 В `justfile`, над рецептом `dev-backend`, добавить комментарий:
 
-```
+```text
 # ИНВАРИАНТ S1 (async processing): один процесс — workers=1, replicas=1,
 # деплой строго stop-then-start (no-overlap; rolling запрещён до Ступени 2).
 # Startup-sweep на старте переводит pending/processing в error — при overlap
@@ -722,6 +722,8 @@ async def reparse_document(
 - [ ] **Step 4b: Конкурентный e2e-тест гонки upload (полный инвариант эндпоинта)**
 
 SQL-тест Task 3 Step 6 проверяет СУБД-гарантию; этот — КОМПОЗИЦИЮ веток эндпоинта под реальной гонкой: два параллельных upload одного файла → ровно один документ, один enqueue, один живой S3-объект, проигравший получает `200 duplicate:true`. Требует реальных сессий (транзакционная `db_session` не потокобезопасна) — отдельный модуль со своим TestClient и переопределением `get_db`.
+
+> **Примечание (as-built):** сработал фолбэк из примечания (2) после теста ниже — anyio-портал ОДНОГО `TestClient` сериализует параллельные запросы на общем event loop, поэтому гонки на буквальной реализации фикстуры не возникает. В `backend/tests/integration/test_upload_race_e2e.py` фикстура вместо одного `client` отдаёт фабрику `make_client()`, вызываемую дважды — два независимых `TestClient`, каждый со своим порталом/event loop, что и воспроизводит реальную гонку. Код ниже — исходный вариант плана (pre-execution); как реализовано фактически — см. тест и devlog.
 
 Create `backend/tests/integration/test_upload_race_e2e.py`:
 

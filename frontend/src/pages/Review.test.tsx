@@ -169,6 +169,11 @@ describe("ReviewPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /^Переразобрать$/i })).toBeDisabled();
     });
+    // Busy-tooltip обязан совпасть с серверным 409-detail и tooltip в InvoiceTable
+    expect(screen.getByRole("button", { name: /^Переразобрать$/i })).toHaveAttribute(
+      "title",
+      "Документ обрабатывается — дождитесь завершения"
+    );
     expect(screen.getByRole("button", { name: /Выпрямить и переразобрать/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Подтвердить/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /^Удалить$/i })).toBeDisabled();

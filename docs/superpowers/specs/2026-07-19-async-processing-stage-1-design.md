@@ -74,7 +74,7 @@ WHERE status IN ('pending', 'processing')
 
 **Механизм — один глобальный слушатель QueryCache** (в App.tsx, рядом с созданием `QueryClient`):
 
-```
+```typescript
 queryClient.getQueryCache().subscribe(event => ...)
 ```
 
