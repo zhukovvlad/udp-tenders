@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { renderWithProviders } from "@/test/utils";
@@ -322,6 +322,74 @@ describe("ReviewPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Документ не найден")).toBeInTheDocument();
     });
+  });
+
+  it("clicking Удалить opens an AlertDialog instead of deleting immediately", async () => {
+    // Смоук-финдинг: раньше был window.confirm — не паттерн проекта (образец
+    // shadcn AlertDialog — InvoiceTable). Клик по кнопке должен открыть диалог,
+    // а не сразу вызвать мутацию.
+    const onDelete = vi.fn();
+    server.use(
+      http.delete("/api/invoices/documents/:id", () => {
+        onDelete();
+        return HttpResponse.json({ message: "Удалено" });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Review />);
+
+    const deleteBtn = await screen.findByRole("button", { name: /^Удалить$/i });
+    await user.click(deleteBtn);
+
+    // Radix/Base UI рендерит диалог в портале — ищем через screen (document body).
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it("cancelling the delete dialog does not call the delete mutation", async () => {
+    const onDelete = vi.fn();
+    server.use(
+      http.delete("/api/invoices/documents/:id", () => {
+        onDelete();
+        return HttpResponse.json({ message: "Удалено" });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Review />);
+
+    const deleteBtn = await screen.findByRole("button", { name: /^Удалить$/i });
+    await user.click(deleteBtn);
+    await screen.findByRole("alertdialog");
+
+    await user.click(screen.getByRole("button", { name: /Отмена/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    });
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it("confirming the delete dialog calls DELETE /api/invoices/documents/:id and navigates away", async () => {
+    const onDelete = vi.fn();
+    server.use(
+      http.delete("/api/invoices/documents/:id", () => {
+        onDelete();
+        return HttpResponse.json({ message: "Удалено" });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Review />);
+
+    const deleteBtn = await screen.findByRole("button", { name: /^Удалить$/i });
+    await user.click(deleteBtn);
+    await screen.findByRole("alertdialog");
+
+    // Внутри диалога кнопка тоже называется «Удалить» — уточняем через диалог.
+    const dialog = screen.getByRole("alertdialog");
+    const { getByRole } = within(dialog);
+    await user.click(getByRole("button", { name: /^Удалить$/i }));
+
+    await waitFor(() => expect(onDelete).toHaveBeenCalledOnce());
   });
 
   it("shows «ИИ-разбор: $0.00» when a parse happened but cost is 0 (parse_count > 0)", async () => {

@@ -12,6 +12,16 @@ import { StatusPill } from "@/components/ui-domain/StatusPill";
 import { ConfidenceBadge } from "@/components/ui-domain/ConfidenceBadge";
 import { EmptyState } from "@/components/ui-domain/EmptyState";
 import { Skeleton } from "@/components/ui-domain/Skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 import { ReviewHeader } from "@/components/review/ReviewHeader";
 import { ReviewItemsTable } from "@/components/review/ReviewItemsTable";
@@ -78,6 +88,10 @@ export default function Review() {
   // Local edits keyed by invoice id — auto-discarded when invoice changes
   const [overrides, setOverrides] = useState<{ invId: number; data: InvoiceRow } | null>(null);
   const [unitWarnings, setUnitWarnings] = useState<InvoiceUpdateWarning[]>([]);
+  // Общий AlertDialog удаления документа — триггерится и слим-видом (документ
+  // без СФ), и основным рендером; один и тот же docId, поэтому достаточно
+  // булева флага (не window.confirm — не паттерн проекта, образец: InvoiceTable).
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const serverInv = docQ.data?.invoices[0] ?? null;
   const draft = serverInv && overrides?.invId === serverInv.id ? overrides.data : serverInv;
@@ -164,13 +178,7 @@ export default function Review() {
                   size="sm"
                   disabled={remove.isPending || isDocBusy(slimDoc.status)}
                   title={isDocBusy(slimDoc.status) ? "Документ обрабатывается — дождитесь завершения" : undefined}
-                  onClick={() => {
-                    if (window.confirm("Удалить документ?")) {
-                      remove.mutate(docId, {
-                        onSuccess: () => navigate("/"),
-                      });
-                    }
-                  }}
+                  onClick={() => setDeleteDialogOpen(true)}
                 >
                   Удалить
                 </Button>
@@ -188,6 +196,32 @@ export default function Review() {
             />
           </Surface>
         </section>
+
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Удалить документ?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Документ «{slimDoc.filename}» и все его счета-фактуры будут удалены без
+                возможности восстановления.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Отмена</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                disabled={remove.isPending}
+                onClick={() => {
+                  remove.mutate(docId, {
+                    onSuccess: () => navigate("/"),
+                  });
+                }}
+              >
+                {remove.isPending ? "Удаление…" : "Удалить"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     );
   }
@@ -344,13 +378,7 @@ export default function Review() {
               size="sm"
               disabled={verify.isPending || unverify.isPending || documentLocked || isDocBusy(doc.status)}
               title={isDocBusy(doc.status) ? "Документ обрабатывается — дождитесь завершения" : documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
-              onClick={() => {
-                if (window.confirm("Удалить документ?")) {
-                  remove.mutate(docId, {
-                    onSuccess: () => navigate("/"),
-                  });
-                }
-              }}
+              onClick={() => setDeleteDialogOpen(true)}
             >
               Удалить
             </Button>
@@ -419,6 +447,32 @@ export default function Review() {
           </div>
         </div>
       </div>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить документ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Документ «{doc.filename}» и все его счета-фактуры будут удалены без
+              возможности восстановления.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={remove.isPending}
+              onClick={() => {
+                remove.mutate(docId, {
+                  onSuccess: () => navigate("/"),
+                });
+              }}
+            >
+              {remove.isPending ? "Удаление…" : "Удалить"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
