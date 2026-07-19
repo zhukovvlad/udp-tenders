@@ -166,6 +166,7 @@ function AllDirectionsSummaryView({
   errorDocCount,
   calculations,
   invoices,
+  busyDocIds,
   onOpenErrors,
   changeDirection,
   periodStart,
@@ -182,6 +183,7 @@ function AllDirectionsSummaryView({
   errorDocCount: number;
   calculations: DashboardCalculation[];
   invoices: DashboardInvoiceRow[];
+  busyDocIds: Set<ID>;
   onOpenErrors: () => void;
   changeDirection: (code: string) => void;
   periodStart: string;
@@ -319,7 +321,7 @@ function AllDirectionsSummaryView({
             <p className="text-sm text-fg-tertiary">Нет счетов.</p>
           ) : (
             <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
-              <InvoiceTable invoices={shownInvoices} />
+              <InvoiceTable invoices={shownInvoices} busyDocIds={busyDocIds} />
             </div>
           )}
         </div>
@@ -495,6 +497,11 @@ export default function ProjectPage() {
   const errorDocCount = (docsQ.data ?? []).filter(
     (d) => d.status === "error" || d.has_issues,
   ).length;
+  // document_id документов в обработке — мутации их СФ запрещены (409 бэка, §6).
+  const busyDocIds = useMemo(
+    () => new Set((docsQ.data ?? []).filter((d) => isDocBusy(d.status)).map((d) => d.id)),
+    [docsQ.data],
+  );
 
   // ── project suppliers ──
   const projectSuppliersQ = useProjectSuppliers(projectId, scopedDirection, { enabled: queriesEnabled });
@@ -701,7 +708,7 @@ export default function ProjectPage() {
       </div>
 
       {/* Документы в фоновой обработке (S1-6): мутации по ним запрещены бэком (409),
-          бейджи — видимая обратная связь, пока идёт парсинг/переразбор/деskew.
+          бейджи — видимая обратная связь, пока идёт парсинг/переразбор/deskew.
           Отдельный оборачиваемый ряд (не PageHeader.actions — тот flex без wrap,
           общий с кнопками Export/Добавить счёт, а multi-file upload — штатный
           сценарий с несколькими одновременно busy-документами). */}
@@ -1044,6 +1051,7 @@ export default function ProjectPage() {
                   <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
                     <InvoiceTable
                       invoices={filteredInvoices}
+                      busyDocIds={busyDocIds}
                     />
                   </div>
                 </div>
@@ -1499,6 +1507,7 @@ export default function ProjectPage() {
             errorDocCount={errorDocCount}
             calculations={calculations}
             invoices={invoices}
+            busyDocIds={busyDocIds}
             onOpenErrors={() =>
               setSearchParams((p) => {
                 const n = new URLSearchParams(p);

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 
@@ -188,5 +188,47 @@ describe("InvoiceTable", () => {
     await waitFor(() => {
       expect(onDelete).toHaveBeenCalledTimes(1);
     });
+  });
+
+  // ── busyDocIds: disable mutations on busy (processing) documents (спека §6) ──
+
+  it("delete button disabled for a row whose document is busy (busyDocIds)", async () => {
+    // СФ-PENDING (id=203) belongs to document_id=12 — mark it busy.
+    renderWithProviders(<InvoiceTable invoices={invoices} busyDocIds={new Set([12])} />);
+
+    const row = screen.getByText("СФ-PENDING").closest("tr")!;
+    const deleteButton = within(row).getByRole("button", { name: "Удалить" });
+    expect(deleteButton).toBeDisabled();
+  });
+
+  it("delete buttons stay enabled when busyDocIds is omitted (default empty set)", () => {
+    renderWithProviders(<InvoiceTable invoices={invoices} />);
+
+    const row = screen.getByText("СФ-PENDING").closest("tr")!;
+    const deleteButton = within(row).getByRole("button", { name: "Удалить" });
+    expect(deleteButton).not.toBeDisabled();
+  });
+
+  it("bulk delete trigger disabled when any selected row belongs to a busy document", async () => {
+    // document_id=12 (СФ-PENDING) busy; select it together with a non-busy row.
+    const user = userEvent.setup();
+    renderWithProviders(<InvoiceTable invoices={invoices} busyDocIds={new Set([12])} />);
+
+    await user.click(screen.getByRole("checkbox", { name: /Выбрать СФ СФ-REVIEW/i }));
+    await user.click(screen.getByRole("checkbox", { name: /Выбрать СФ СФ-PENDING/i }));
+
+    const bulkButton = await screen.findByRole("button", { name: /Удалить выбранные/i });
+    expect(bulkButton).toBeDisabled();
+  });
+
+  it("bulk delete trigger stays enabled when no selected row belongs to a busy document", async () => {
+    // document_id=12 busy, but only the unrelated СФ-REVIEW row (document_id=11) is selected.
+    const user = userEvent.setup();
+    renderWithProviders(<InvoiceTable invoices={invoices} busyDocIds={new Set([12])} />);
+
+    await user.click(screen.getByRole("checkbox", { name: /Выбрать СФ СФ-REVIEW/i }));
+
+    const bulkButton = await screen.findByRole("button", { name: /Удалить выбранные/i });
+    expect(bulkButton).not.toBeDisabled();
   });
 });

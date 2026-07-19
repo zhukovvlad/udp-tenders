@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse, type JsonBodyType } from "msw";
 import { Link, Routes, Route, useParams } from "react-router-dom";
@@ -227,6 +227,36 @@ describe("ProjectPage", () => {
       expect(screen.getAllByText("Разобрать")).toHaveLength(2);
       expect(screen.queryByText("Ожидает")).not.toBeInTheDocument();
     });
+  });
+
+  it("disables delete for an invoice row whose document is busy (processing)", async () => {
+    // document_id=11 (СФ-REVIEW) обрабатывается — busyDocIds должен долететь до InvoiceTable (§6).
+    server.use(
+      http.get("/api/dashboard/invoices", () =>
+        HttpResponse.json(sampleDashboardInvoices.filter((i) => i.directions.length > 0))
+      ),
+      http.get("/api/invoices/documents", () =>
+        HttpResponse.json([
+          { id: 10, project_id: 1, filename: "a.pdf", doc_type: "invoice", status: "parsed", uploaded_at: "2026-01-01T00:00:00", invoice_count: 1, has_issues: false, ai_confidence: 0.9, parse_cost_usd: 0, parse_count: 1 },
+          { id: 11, project_id: 1, filename: "b.pdf", doc_type: "invoice", status: "processing", uploaded_at: "2026-01-01T00:00:00", invoice_count: 1, has_issues: false, ai_confidence: null, parse_cost_usd: 0, parse_count: 1 },
+          { id: 12, project_id: 1, filename: "c.pdf", doc_type: "invoice", status: "parsed", uploaded_at: "2026-01-01T00:00:00", invoice_count: 1, has_issues: false, ai_confidence: 0.5, parse_cost_usd: 0, parse_count: 1 },
+        ])
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderProject();
+
+    const tab = await screen.findByTestId("project-tab-invoices");
+    await user.click(tab);
+
+    const busyRow = (await screen.findByText("СФ-REVIEW")).closest("tr")!;
+    const busyDelete = within(busyRow).getByRole("button", { name: "Удалить" });
+    expect(busyDelete).toBeDisabled();
+
+    const freeRow = screen.getByText("СФ-PENDING").closest("tr")!;
+    const freeDelete = within(freeRow).getByRole("button", { name: "Удалить" });
+    expect(freeDelete).not.toBeDisabled();
   });
 
   // ── По месяцам tab ──────────────────────────────────────────────────────
