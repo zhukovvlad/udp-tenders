@@ -120,6 +120,17 @@
   **Решение:** заменить `window.confirm` на `AlertDialog` во всех трёх файлах по образцу
   `Review.tsx` (коммит `9a48aba`).
 
+- [ ] **`lib/api.ts`: глобальный onError показывает сырое axios-сообщение вместо серверного `detail`**
+  Обработчик ошибок мутаций (QueryCache/MutationCache в `App.tsx` → `error.message` axios) не
+  извлекает `detail` из тела FastAPI-ответа: пользователь видит англоязычное
+  «Request failed with status code 409» вместо серверного «Документ обрабатывается — дождитесь
+  завершения». После Ступени 1 async processing 409-тосты стали заметнее (guard `_reject_if_busy`
+  покрывает pending|processing; UI-дизейблы зеркалят его, но гонка «кликнул до рефетча» остаётся
+  легальным путём к 409). Выявлено финальным ревью S1 (`docs/devlog/2026-07-19-async-processing-stage-1.md`).
+  **Решение:** interceptor в `lib/api.ts` (или хелпер `getApiErrorMessage(error)`), который берёт
+  `error.response?.data?.detail` с фолбэком на `error.message`, и использование его в глобальном
+  onError и точечных обработчиках.
+
 - [ ] **Review.tsx: нет оптимистичного обновления при сохранении**
   После успешного `update.mutate` сервер возвращает обновлённый документ через `docQ` (invalidate),
   но до перезагрузки страница ненадолго показывает устаревшие данные.
