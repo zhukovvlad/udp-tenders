@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui-domain/Skeleton";
 import { Surface } from "@/components/ui-domain/Surface";
 import { Button } from "@/components/ui-domain/Button";
 import { KpiCard } from "@/components/ui-domain/KpiCard";
+import { StatusPill } from "@/components/ui-domain/StatusPill";
 import { EntitySelect } from "@/components/ui-domain/EntitySelect";
 import { InvoiceKpiBar } from "@/components/invoices/InvoiceKpiBar";
 import { InvoiceTable } from "@/components/invoices/InvoiceTable";
@@ -68,6 +69,7 @@ import {
   useUnits,
 } from "@/services/queries";
 import { reportsApi } from "@/services/api/reports";
+import { isDocBusy } from "@/services/processingRefetchInterval";
 import { useDebounce } from "@/lib/useDebounce";
 import { useDefaultUnitId } from "@/lib/useDefaultUnitId";
 
@@ -122,6 +124,27 @@ function TabBarSlot() {
   return <div aria-hidden className="h-10" />;
 }
 
+// Известные значения вкладок (TabsTrigger value ниже) — используется для
+// валидации deep-link ?tab= при инициализации activeTab (Codex P2, PR #37:
+// ретрай дубликата упавшего документа ведёт на /projects/:id?tab=errors).
+const PROJECT_TAB_VALUES = [
+  "overview",
+  "invoices",
+  "prices",
+  "corridors",
+  "suppliers",
+  "monthly",
+  "errors",
+] as const;
+type ProjectTabValue = (typeof PROJECT_TAB_VALUES)[number];
+
+/** Валидирует значение ?tab= из URL; невалидное/отсутствующее → "overview". */
+function resolveInitialTab(raw: string | null): ProjectTabValue {
+  return (PROJECT_TAB_VALUES as readonly string[]).includes(raw ?? "")
+    ? (raw as ProjectTabValue)
+    : "overview";
+}
+
 // ─────────────────────────────────────────────
 // File-local sub-views
 // ─────────────────────────────────────────────
@@ -164,6 +187,7 @@ function AllDirectionsSummaryView({
   errorDocCount,
   calculations,
   invoices,
+  busyDocIds,
   onOpenErrors,
   changeDirection,
   periodStart,
@@ -180,6 +204,7 @@ function AllDirectionsSummaryView({
   errorDocCount: number;
   calculations: DashboardCalculation[];
   invoices: DashboardInvoiceRow[];
+  busyDocIds: Set<ID>;
   onOpenErrors: () => void;
   changeDirection: (code: string) => void;
   periodStart: string;
@@ -317,7 +342,7 @@ function AllDirectionsSummaryView({
             <p className="text-sm text-fg-tertiary">Нет счетов.</p>
           ) : (
             <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
-              <InvoiceTable invoices={shownInvoices} />
+              <InvoiceTable invoices={shownInvoices} busyDocIds={busyDocIds} />
             </div>
           )}
         </div>
@@ -389,9 +414,6 @@ export default function ProjectPage() {
   const debouncedPeriodStart = useDebounce(periodStart, 400);
   const debouncedPeriodEnd = useDebounce(periodEnd, 400);
 
-  // ── active tab ──
-  const [activeTab, setActiveTab] = useState("overview");
-
   // ── invoice month filter (set when navigating from «По месяцам» tab) ──
   const [invoiceMonthFilter, setInvoiceMonthFilter] = useState<{ year: number; month: number } | null>(null);
 
@@ -431,6 +453,10 @@ export default function ProjectPage() {
   // ── направление: трёхзначное состояние из URL (спека §7.2) ──
   const [searchParams, setSearchParams] = useSearchParams();
   const rawDirection = searchParams.get("direction"); // null | 'all' | code
+
+  // ── active tab: инициализируется из ?tab= один раз (ленивый инициализатор),
+  // обратная запись в URL при переключении не делается (вне объёма фикса).
+  const [activeTab, setActiveTab] = useState(() => resolveInitialTab(searchParams.get("tab")));
   const directions = summaryQ.data?.directions;       // undefined пока summary грузится
   // Ошибка summary не должна навсегда запирать страницу в skeleton: деградируем
   // в legacy-режим (классические табы без направлений) — табы тянут данные из своих
@@ -466,10 +492,33 @@ export default function ProjectPage() {
   // Сброс вкладки на «Обзор» при смене direction — back/forward идут мимо
   // onChange (§7.2). Паттерн «adjust state during render» (react.dev/learn/
   // you-might-not-need-an-effect): синхронно, без лишнего рендера с эффектом.
+  // Первоначальное разрешение direction (undefined → значение, пока грузится
+  // summary) сбросом не считается — иначе deep-link ?tab= (Codex P2, fix 1)
+  // затирался бы «Обзором» сразу после первой загрузки summary.
   const [prevDirection, setPrevDirection] = useState(direction);
   if (prevDirection !== direction) {
     setPrevDirection(direction);
-    setActiveTab("overview");
+    if (prevDirection !== undefined) {
+      setActiveTab("overview");
+    }
+  }
+
+  // Синхронизация activeTab при внутристраничной навигации на валидный ?tab=
+  // (клик по ссылке ретрая дубликата из UploadJobRow меняет query string у уже
+  // смонтированного ProjectPage — lazy-инициализатор activeTab выше срабатывает
+  // только при первом рендере и такую навигацию не ловит, Codex P2). Невалидный
+  // /исчезнувший tabParam вкладку не трогает — переключаем только на известное
+  // значение. ВАЖНО: блок идёт ПОСЛЕ сброса вкладки на direction-change выше —
+  // ссылка ретрая меняет direction (на all) и tab одновременно; оба setState
+  // применяются в одном рендер-проходе, и последний вызов побеждает, поэтому
+  // при обратном порядке сброс на «Обзор» затёр бы «Ошибки».
+  const tabParam = searchParams.get("tab");
+  const [prevTabParam, setPrevTabParam] = useState(tabParam);
+  if (prevTabParam !== tabParam) {
+    setPrevTabParam(tabParam);
+    if (tabParam !== null && (PROJECT_TAB_VALUES as readonly string[]).includes(tabParam)) {
+      setActiveTab(tabParam as ProjectTabValue);
+    }
   }
 
   // ── остальные запросы — гейт до определения режима (§7.2) ──
@@ -493,6 +542,11 @@ export default function ProjectPage() {
   const errorDocCount = (docsQ.data ?? []).filter(
     (d) => d.status === "error" || d.has_issues,
   ).length;
+  // document_id документов в обработке — мутации их СФ запрещены (409 бэка, §6).
+  const busyDocIds = useMemo(
+    () => new Set((docsQ.data ?? []).filter((d) => isDocBusy(d.status)).map((d) => d.id)),
+    [docsQ.data],
+  );
 
   // ── project suppliers ──
   const projectSuppliersQ = useProjectSuppliers(projectId, scopedDirection, { enabled: queriesEnabled });
@@ -697,6 +751,26 @@ export default function ProjectPage() {
           }
         />
       </div>
+
+      {/* Документы в фоновой обработке (S1-6): мутации по ним запрещены бэком (409),
+          бейджи — видимая обратная связь, пока идёт парсинг/переразбор/deskew.
+          Отдельный оборачиваемый ряд (не PageHeader.actions — тот flex без wrap,
+          общий с кнопками Export/Добавить счёт, а multi-file upload — штатный
+          сценарий с несколькими одновременно busy-документами). */}
+      {(docsQ.data ?? []).some((d) => isDocBusy(d.status)) && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {(docsQ.data ?? [])
+            .filter((d) => isDocBusy(d.status))
+            .map((d) => (
+              <StatusPill
+                key={d.id}
+                tone="info"
+                label={`Обрабатывается: ${d.filename}`}
+                dot
+              />
+            ))}
+        </div>
+      )}
 
       {/* Upload sheet */}
       <UploadSheet
@@ -1022,6 +1096,7 @@ export default function ProjectPage() {
                   <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
                     <InvoiceTable
                       invoices={filteredInvoices}
+                      busyDocIds={busyDocIds}
                     />
                   </div>
                 </div>
@@ -1477,6 +1552,7 @@ export default function ProjectPage() {
             errorDocCount={errorDocCount}
             calculations={calculations}
             invoices={invoices}
+            busyDocIds={busyDocIds}
             onOpenErrors={() =>
               setSearchParams((p) => {
                 const n = new URLSearchParams(p);

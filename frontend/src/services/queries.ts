@@ -16,13 +16,14 @@ import { adminApi } from "./api/admin";
 import { corridorsApi } from "./api/compensationCorridors";
 import type { CorridorUpsertPayload } from "@/types/compensationCorridor";
 import { qk } from "./queryKeys";
+import { processingRefetchInterval } from "./processingRefetchInterval";
 
 import type { ID } from "@/types/common";
 import type { ProjectCreateInput, ProjectUpdateInput } from "@/types/project";
 import type { MaterialClassCreateInput } from "@/types/materialClass";
 import type { MaterialType, Unit } from "@/types/unit";
 import type { ReferencePriceCreateInput, ReferencePriceUpdateInput } from "@/types/referencePrice";
-import type { InvoiceUpdateInput } from "@/types/invoice";
+import type { DocumentDetail, InvoiceUpdateInput } from "@/types/invoice";
 import type { AppSettings } from "./api/settings";
 import type {
   AdminUserCreateInput,
@@ -176,6 +177,7 @@ export function useDocument(docId: ID | null | undefined) {
     queryKey: qk.documents.detail(docId ?? -1),
     queryFn: () => invoicesApi.getDocument(docId as ID),
     enabled: docId !== null && docId !== undefined,
+    refetchInterval: processingRefetchInterval,
   });
 }
 
@@ -184,10 +186,16 @@ export function useReparseDocument() {
   return useMutation({
     mutationFn: (docId: ID) => invoicesApi.reparseDocument(docId),
     onSuccess: (data) => {
+      // Сеем 202-ответ (status="processing") в кэш ДО инвалидаций — иначе,
+      // если фоновая обработка завершится до первого рефетча, детектор
+      // терминального перехода (terminalTransition.ts) впервые увидит уже
+      // parsed/error без предшествующего processing в Map → перехода не
+      // будет зафиксировано → dashboard не инвалидируется (Codex P2, fix 1).
+      qc.setQueryData(qk.documents.detail(data.id), data);
       qc.invalidateQueries({ queryKey: qk.documents.detail(data.id) });
       qc.invalidateQueries({ queryKey: qk.documents.list(data.project_id) });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      toast.success("Документ переразобран");
+      toast.success("Обработка запущена");
     },
   });
 }
@@ -197,10 +205,12 @@ export function useDeskewReparseDocument() {
   return useMutation({
     mutationFn: (docId: ID) => invoicesApi.deskewReparseDocument(docId),
     onSuccess: (data) => {
+      // См. комментарий в useReparseDocument — тот же приём сеяния 202 в кэш.
+      qc.setQueryData(qk.documents.detail(data.id), data);
       qc.invalidateQueries({ queryKey: qk.documents.detail(data.id) });
       qc.invalidateQueries({ queryKey: qk.documents.list(data.project_id) });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      toast.success("Документ выпрямлен и переразобран");
+      toast.success("Обработка запущена");
     },
   });
 }
@@ -346,7 +356,13 @@ export function useUploadInvoice() {
       file: File;
       onProgress?: (pct: number) => void;
     }) => uploadApi.uploadInvoice(projectId, file, onProgress),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // См. комментарий в useReparseDocument — сеем ответ (202 processing или
+      // 200 duplicate) в кэш detail до инвалидаций. `duplicate` — служебное
+      // поле ответа загрузки, в DocumentDetail не входит; data структурно
+      // совместима (excess property check не действует на не-литералы).
+      const doc: DocumentDetail = data;
+      qc.setQueryData(qk.documents.detail(doc.id), doc);
       qc.invalidateQueries({ queryKey: ["documents"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
     },
@@ -374,6 +390,7 @@ export function useDocuments(projectId?: number) {
   return useQuery({
     queryKey: qk.documents.list(projectId),
     queryFn: () => invoicesApi.listDocuments(projectId),
+    refetchInterval: processingRefetchInterval,
   });
 }
 

@@ -61,6 +61,19 @@
   (старые корректные данные уже удалены). Правильная схема: разобрать → провалидировать → затем
   удалить старое и записать новое (parse-then-swap).
 
+- [ ] **`GET /api/invoices/documents` — ~8 с стабильно на ~20 документах (N+1)**
+  `routers/invoices.py:154-174` (`list_documents`) на каждый документ обходит его СФ/позиции:
+  `len(doc.invoices)`, `_doc_has_issues(doc)` и `_avg_confidence(doc)` — без eager-loading это
+  N дополнительных SQL-запросов на N документов. После Ступени 1 async processing (см.
+  `docs/devlog/2026-07-19-async-processing-stage-1.md`) этот эндпоинт ещё и поллится с фронта
+  каждые 2500 мс, пока в списке есть нетерминальный документ (`processingRefetchInterval`) —
+  медлительность стала заметнее и усилила связанный баг детектора терминальных переходов
+  (см. тот же devlog, фикс `d154115`: вечный цикл инвалидаций был спровоцирован именно
+  ~8-секундной list-квери).
+  **Решение:** агрегирующий SQL (`GROUP BY document_id` для count/confidence/issues) или
+  `selectinload(Document.invoices).selectinload(Invoice.items)` + вычисление метрик в Python
+  без дополнительных запросов на документ.
+
 - [ ] **Дрейф ORM/БД: индексы созданы raw SQL, но не объявлены в моделях**
   `alembic revision --autogenerate` устойчиво предлагает лишние диффы, не связанные с текущими
   изменениями: `drop_index('ix_invoice_items_invoice_id_item_type')`, `drop_index('ix_invoices_supplier_id')`,
@@ -98,6 +111,25 @@
   **Решение:** перенести логику `ui-domain/Button` (иконки, loading, проектные токены) в `ui/button.tsx`,
   добавить вариант `primary` / `danger`, обновить CSS-переменные — и удалить `ui-domain/Button.tsx`.
   Все ~11 import-точек переключить на `@/components/ui/button`.
+
+- [ ] **`window.confirm` остаётся в `MaterialClasses.tsx`, `Materials.tsx`, `ReferencePrices.tsx`**
+  Проектный паттерн подтверждающих диалогов — shadcn `AlertDialog` (см. пункт про `ui-domain/Button`
+  выше и коммит `9a48aba`, которым `Review.tsx` был переведён на `AlertDialog` в рамках Ступени 1
+  async processing — `docs/devlog/2026-07-19-async-processing-stage-1.md`). Эти три страницы всё
+  ещё используют нативный `window.confirm` для подтверждения удаления.
+  **Решение:** заменить `window.confirm` на `AlertDialog` во всех трёх файлах по образцу
+  `Review.tsx` (коммит `9a48aba`).
+
+- [ ] **`lib/api.ts`: глобальный onError показывает сырое axios-сообщение вместо серверного `detail`**
+  Обработчик ошибок мутаций (QueryCache/MutationCache в `App.tsx` → `error.message` axios) не
+  извлекает `detail` из тела FastAPI-ответа: пользователь видит англоязычное
+  «Request failed with status code 409» вместо серверного «Документ обрабатывается — дождитесь
+  завершения». После Ступени 1 async processing 409-тосты стали заметнее (guard `_reject_if_busy`
+  покрывает pending|processing; UI-дизейблы зеркалят его, но гонка «кликнул до рефетча» остаётся
+  легальным путём к 409). Выявлено финальным ревью S1 (`docs/devlog/2026-07-19-async-processing-stage-1.md`).
+  **Решение:** interceptor в `lib/api.ts` (или хелпер `getApiErrorMessage(error)`), который берёт
+  `error.response?.data?.detail` с фолбэком на `error.message`, и использование его в глобальном
+  onError и точечных обработчиках.
 
 - [ ] **Review.tsx: нет оптимистичного обновления при сохранении**
   После успешного `update.mutate` сервер возвращает обновлённый документ через `docQ` (invalidate),

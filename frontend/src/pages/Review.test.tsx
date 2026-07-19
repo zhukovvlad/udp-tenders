@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { renderWithProviders } from "@/test/utils";
@@ -155,6 +155,56 @@ describe("ReviewPage", () => {
     });
   });
 
+  it("mutation buttons are disabled when document is busy (status: processing)", async () => {
+    // Документ в обработке (реparse/deskew в фоне) — бэкенд отвечает 409 на любую
+    // мутацию (S1 контракт). UI обязан совпасть: все кнопки мутаций задизейблены.
+    server.use(
+      http.get("/api/invoices/documents/:id", () =>
+        HttpResponse.json({ ...sampleDocument, status: "processing" })
+      )
+    );
+
+    renderWithProviders(<Review />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^Переразобрать$/i })).toBeDisabled();
+    });
+    // Busy-tooltip обязан совпасть с серверным 409-detail и tooltip в InvoiceTable
+    expect(screen.getByRole("button", { name: /^Переразобрать$/i })).toHaveAttribute(
+      "title",
+      "Документ обрабатывается — дождитесь завершения"
+    );
+    expect(screen.getByRole("button", { name: /Выпрямить и переразобрать/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Подтвердить/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Удалить$/i })).toBeDisabled();
+  });
+
+  it("fields are locked when document is busy (status: processing) — Codex P2, fix 3", async () => {
+    // Раньше locked = inv.verified — во время фоновой обработки поля шапки/позиций
+    // принимали ввод, который исчезнет после parse-then-swap; задизейблена была
+    // только кнопка «Сохранить». Теперь locked учитывает isDocBusy(doc.status).
+    server.use(
+      http.get("/api/invoices/documents/:id", () =>
+        HttpResponse.json({ ...sampleDocument, status: "processing" })
+      )
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<Review />);
+
+    const headerTab = await screen.findByRole("button", { name: /Шапка/i });
+    await user.click(headerTab);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("СФ-101")).toBeDisabled();
+    });
+
+    const itemsTab = screen.getByRole("button", { name: /Позиции/i });
+    await user.click(itemsTab);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue(/Бетон В25/)).toBeDisabled();
+    });
+  });
+
   it("shows confidence issue on Проблемы tab when threshold is above ai_confidence", async () => {
     // sampleDocument.invoices[0].ai_confidence = 0.92; setting threshold to 0.95 triggers the issue
     server.use(
@@ -172,6 +222,174 @@ describe("ReviewPage", () => {
     await waitFor(() => {
       expect(screen.getByText(/Низкая уверенность/i)).toBeInTheDocument();
     });
+  });
+
+  it("shows «Обрабатывается» pill instead of готово/требует проверки when document status is processing", async () => {
+    // Смоук-финдинг: во время reparse/deskew данные СФ на странице устарели
+    // (parse-then-swap ещё не случился) — пилл hasProblems/«готово» вводит
+    // в заблуждение. Приоритет — статус документа.
+    server.use(
+      http.get("/api/invoices/documents/:id", () =>
+        HttpResponse.json({ ...sampleDocument, status: "processing" })
+      )
+    );
+
+    renderWithProviders(<Review />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Обрабатывается")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("готово")).not.toBeInTheDocument();
+    expect(screen.queryByText("требует проверки")).not.toBeInTheDocument();
+  });
+
+  it("shows «ошибка обработки» pill when document status is error", async () => {
+    // После рестарта сервера sweep переводит зависший документ в error —
+    // ранее это никак не отражалось в шапке Review, только в шите загрузки.
+    // Error-документ после неудачного reparse сохраняет старые СФ (invoices
+    // не пусты) — иначе страница отрендерит «Документ не найден».
+    server.use(
+      http.get("/api/invoices/documents/:id", () =>
+        HttpResponse.json({
+          ...sampleDocument,
+          status: "error",
+          last_error: "Не удалось распознать документ",
+        })
+      )
+    );
+
+    renderWithProviders(<Review />);
+
+    const pill = await screen.findByText("ошибка обработки");
+    expect(pill).toBeInTheDocument();
+    expect(pill.closest("span[title]")).toHaveAttribute(
+      "title",
+      "Не удалось распознать документ"
+    );
+  });
+
+  it("shows slim view (not «Документ не найден») when doc is parsed but has no invoices", async () => {
+    // Смоук-баг: пользователь удалил все СФ документа (DELETE /api/invoices/{id}).
+    // Документ-родитель остаётся (status=parsed, invoices=[]) — «документ-призрак».
+    // Ранний return `!docQ.data || !draft` рендерил «Документ не найден», делая
+    // документ недостижимым для reparse/удаления.
+    server.use(
+      http.get("/api/invoices/documents/:id", () =>
+        HttpResponse.json({ ...sampleDocument, invoices: [] })
+      )
+    );
+
+    renderWithProviders(<Review />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("doc.pdf").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("Документ не найден")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Переразобрать$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Выпрямить и переразобрать/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Удалить$/i })).toBeInTheDocument();
+  });
+
+  it("slim view shows «ошибка обработки» pill with last_error tooltip when doc has no invoices", async () => {
+    server.use(
+      http.get("/api/invoices/documents/:id", () =>
+        HttpResponse.json({
+          ...sampleDocument,
+          invoices: [],
+          status: "error",
+          last_error: "Не удалось распознать документ",
+        })
+      )
+    );
+
+    renderWithProviders(<Review />);
+
+    const pill = await screen.findByText("ошибка обработки");
+    expect(pill).toBeInTheDocument();
+    expect(pill.closest("span[title]")).toHaveAttribute(
+      "title",
+      "Не удалось распознать документ"
+    );
+  });
+
+  it("still shows «Документ не найден» when the document truly does not exist (404)", async () => {
+    server.use(
+      http.get("/api/invoices/documents/:id", () => HttpResponse.json({ detail: "Not found" }, { status: 404 }))
+    );
+
+    renderWithProviders(<Review />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Документ не найден")).toBeInTheDocument();
+    });
+  });
+
+  it("clicking Удалить opens an AlertDialog instead of deleting immediately", async () => {
+    // Смоук-финдинг: раньше был window.confirm — не паттерн проекта (образец
+    // shadcn AlertDialog — InvoiceTable). Клик по кнопке должен открыть диалог,
+    // а не сразу вызвать мутацию.
+    const onDelete = vi.fn();
+    server.use(
+      http.delete("/api/invoices/documents/:id", () => {
+        onDelete();
+        return HttpResponse.json({ message: "Удалено" });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Review />);
+
+    const deleteBtn = await screen.findByRole("button", { name: /^Удалить$/i });
+    await user.click(deleteBtn);
+
+    // Radix/Base UI рендерит диалог в портале — ищем через screen (document body).
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it("cancelling the delete dialog does not call the delete mutation", async () => {
+    const onDelete = vi.fn();
+    server.use(
+      http.delete("/api/invoices/documents/:id", () => {
+        onDelete();
+        return HttpResponse.json({ message: "Удалено" });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Review />);
+
+    const deleteBtn = await screen.findByRole("button", { name: /^Удалить$/i });
+    await user.click(deleteBtn);
+    await screen.findByRole("alertdialog");
+
+    await user.click(screen.getByRole("button", { name: /Отмена/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    });
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it("confirming the delete dialog calls DELETE /api/invoices/documents/:id and navigates away", async () => {
+    const onDelete = vi.fn();
+    server.use(
+      http.delete("/api/invoices/documents/:id", () => {
+        onDelete();
+        return HttpResponse.json({ message: "Удалено" });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Review />);
+
+    const deleteBtn = await screen.findByRole("button", { name: /^Удалить$/i });
+    await user.click(deleteBtn);
+    await screen.findByRole("alertdialog");
+
+    // Внутри диалога кнопка тоже называется «Удалить» — уточняем через диалог.
+    const dialog = screen.getByRole("alertdialog");
+    const { getByRole } = within(dialog);
+    await user.click(getByRole("button", { name: /^Удалить$/i }));
+
+    await waitFor(() => expect(onDelete).toHaveBeenCalledOnce());
   });
 
   it("shows «ИИ-разбор: $0.00» when a parse happened but cost is 0 (parse_count > 0)", async () => {

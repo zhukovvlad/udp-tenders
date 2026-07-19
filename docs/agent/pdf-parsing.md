@@ -113,6 +113,105 @@ connection-ретраев → `logger.critical`, документ остаётс
 переопределяется через `app.dependency_overrides` на фабрику, отдающую
 тестовую сессию той же транзакции.
 
+Deployment-инвариант S1: `workers=1, replicas=1`, no-overlap deployment
+(stop-then-start). Startup-sweep в lifespan переводит все `pending|processing`
+в `error` на старте. Потребность в `workers>1`/rolling — триггер Ступени 2
+(advisory-lock). Guard мутаций СФ/документа (`_reject_if_busy`,
+`routers/invoices.py`) отклоняет 409-м оба нетерминальных статуса —
+`pending` включён осознанно (S1): в окне между commit `create_document`
+(`pending`) и guard-commit (`processing`) документ иначе можно было бы
+удалить, оставив S3-сироту; легитимных мутаций `pending`-документа не
+существует.
+
+## Асинхронная обработка: 202-контракт, дедуп, polling (ступень 1)
+
+Спека: `docs/superpowers/specs/2026-07-19-async-processing-stage-1-design.md`;
+план: `docs/superpowers/plans/2026-07-19-async-processing-stage-1.md`; итог —
+`docs/devlog/2026-07-19-async-processing-stage-1.md`.
+
+### 202-контракт эндпоинтов (S1-1, S1-2)
+
+Все три эндпоинта обработки (`POST /upload`, `POST /documents/{id}/reparse`,
+`POST /documents/{id}/deskew-reparse`) выполняют только быструю синхронную
+часть (валидация, для upload — запись в S3 и дедуп-проверка, существующие
+404/400/verified-409, guard `try_acquire_processing`) и ставят
+`process_document` в `BackgroundTasks.add_task(...)` вместо `await`. Ответ —
+`202 Accepted` + сериализованный документ со `status="processing"`,
+`invoices: []` (СФ ещё нет). Обрыв клиента после получения 202 не влияет на
+исход: Starlette выполняет `BackgroundTasks` после отправки ответа независимо
+от состояния соединения (AC-S1-2, проверяется ручным смоуком — TestClient
+исполняет фоновые таски ДО возврата из `client.post(...)`, поэтому wall-clock
+и обрыв соединения непроверяемы в CI).
+
+`rotations_applied` из ответа deskew удалён (фронт его не читал).
+Deskew-эндпоинт больше не мапит `413`/`502` синхронно (отвечать в фоне
+некому) — ошибки ориентации доезжают как `status="error"` + человекочитаемый
+`last_error` через polling, ровно так же, как ошибки парсинга.
+
+Контракт upload — единый shape независимо от кода: ключ `duplicate`
+присутствует всегда (`false` на свежем 202, `true` на дубликате), ключ
+`invoices` присутствует всегда (`[]` на свежем документе, реальный набор
+победителя — на дубликате). Тип фронта:
+`UploadResponse = DocumentDetail & { duplicate: boolean }`
+(`frontend/src/types/invoice.ts`).
+
+### Дедуп upload по file_hash (Q6)
+
+`documents.file_hash` (`String(64)`, индекс) и констрейнт
+`uq_documents_project_file_hash` — на схеме уже с ревизии `d1e2f3a4b5c6`;
+ступень 1 добавляет вычисление и использование. Алгоритм `upload_pdf`
+(`routers/invoices.py`):
+
+1. `file_hash = sha256(байтов файла)` — хеш **оригинала**, до какой-либо
+   коррекции. После deskew хеш НЕ пересчитывается (инвариант Q6: пересчёт
+   молча сломал бы дедуп — deskew-копия того же документа перестала бы
+   находиться как дубликат себя же).
+2. Fast-path: `SELECT` документа по `(project_id, file_hash)`. Найден →
+   `200 {"duplicate": true, ...}` с существующим документом; S3 не пишем,
+   новый документ не создаём. Дубль оригинала, ещё не завершившего
+   обработку, возвращает существующий документ со `status="processing"` —
+   это ожидаемо, не гонка.
+3. Не найден → запись в S3 → `create_document(..., file_hash=file_hash)`.
+4. Гонка двух параллельных upload одного файла: commit падает
+   `IntegrityError` на уникальном констрейнте → обязательный `db.rollback()`
+   (без него сессия в failed state) → повторный `SELECT` победителя:
+   - победитель найден → best-effort `delete_file_async` своего S3-объекта
+     (осиротел) → `200 duplicate:true` с документом-победителем;
+   - `winner is None` (IntegrityError не про этот констрейнт, например FK) →
+     свой S3-объект всё равно удаляется, но исходная ошибка
+     **перевыбрасывается** — дубликатом не маскируется.
+5. Не дубликат → guard → `add_task` → `202` (§ выше).
+
+Бэкфилл `file_hash` для исторических документов не делается — дедуп
+работает только для новых загрузок.
+
+### Polling и терминальный переход (S1-5, S1-7)
+
+Фронт: `useDocuments`/`useDocument` (`services/queries.ts`) получают
+`refetchInterval: processingRefetchInterval`
+(`services/processingRefetchInterval.ts`) — 2500 мс, пока в данных квери есть
+документ в нетерминальном статусе (`pending`/`processing`), иначе `false`
+(polling останавливается сам). Один и тот же модуль экспортирует
+`NON_TERMINAL_STATUSES`, переиспользуемый детектором и UI-дизейблами.
+
+Переход `pending|processing → parsed|error` детектируется одним глобальным
+подписчиком `QueryCache` (`services/terminalTransition.ts`,
+`subscribeTerminalTransitions` вызывается один раз в `App.tsx`) — общая
+`Map<documentId, status>` на весь детектор, инвалидация documents
+list/detail + dashboard ровно на переходе (не на постановке). Семантика —
+at-least-once: запоздалый out-of-order ответ может дать лишнюю
+(идемпотентную) инвалидацию, но не пропустит терминальный переход. Тосты
+мутаций reparse/deskew заменены на «Обработка запущена» (успех мутации
+означает постановку в очередь, не завершение); отдельного тоста на самом
+терминальном переходе нет — обратная связь идёт через смену статуса/бейджа.
+
+### Startup-sweep — deployment-инвариант
+
+См. «Deployment-инвариант S1» выше (в подразделе про инъекцию фабрики
+сессий): sweep в lifespan переводит `pending|processing` в `error` на
+старте процесса; корректность держится на no-overlap deployment
+(`workers=1, replicas=1`, stop-then-start).
+
 ## Трекинг стоимости разбора
 
 `parse_pdf` (фаза A) шлёт `usage: {include: true}` и захватывает реальную

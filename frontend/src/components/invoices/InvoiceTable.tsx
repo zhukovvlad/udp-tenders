@@ -61,6 +61,13 @@ import type { ID } from "@/types/common";
 
 interface InvoiceTableProps {
   invoices: DashboardInvoiceRow[];
+  /**
+   * document_id документов, которые сейчас обрабатываются (pending|processing,
+   * см. `isDocBusy`) — их СФ нельзя удалять (зеркалит серверный 409 из
+   * `_reject_if_busy`, спека §6). По умолчанию пустое множество — поведение
+   * не меняется для вызовов без этого пропа.
+   */
+  busyDocIds?: ReadonlySet<ID>;
 }
 
 type SortColumn = "date" | "supplier" | "total" | "number";
@@ -91,6 +98,10 @@ const STAGE_FILTER_OPTIONS: { stage: Stage; dotClass: string }[] = [
   { stage: "pending",   dotClass: "bg-neutral-dot" },
   { stage: "review",    dotClass: "bg-danger" },
 ];
+
+// Стабильная ссылка на дефолт — чтобы вызовы без busyDocIds не пересчитывали
+// зависящие от него useMemo на каждый рендер.
+const EMPTY_BUSY_DOC_IDS: ReadonlySet<ID> = new Set();
 
 function invoiceTotal(inv: DashboardInvoiceRow): number {
   return inv.items.reduce(
@@ -152,7 +163,7 @@ function PlainHead({ col, hiddenCols, children, className }: { col: ColKey; hidd
   return <TableHead className={className}>{children}</TableHead>;
 }
 
-export function InvoiceTable({ invoices }: InvoiceTableProps) {
+export function InvoiceTable({ invoices, busyDocIds = EMPTY_BUSY_DOC_IDS }: InvoiceTableProps) {
   const settingsQ = useSettings();
   const threshold = settingsQ.data?.confidence_threshold ?? REVIEW_CONFIDENCE_THRESHOLD;
   const deleteInvoice = useDeleteInvoice();
@@ -218,6 +229,21 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
   const toIdx        = Math.min(clampedPage * pageSize, sorted.length);
   const allSelected  = sorted.length > 0 && sorted.every((inv) => effectiveSelectedIds.has(inv.id));
   const someSelected  = effectiveSelectedIds.size > 0;
+
+  // document_id по id СФ — чтобы найти busy-документы среди выбранных строк.
+  const docIdByInvoiceId = useMemo(
+    () => new Map(invoices.map((inv) => [inv.id, inv.document_id])),
+    [invoices],
+  );
+  // Bulk delete запрещён, если ЛЮБАЯ выбранная строка принадлежит busy-документу
+  // (зеркалит атомарность серверного bulk-delete: 409 при любом busy, §6).
+  const anySelectedBusy = useMemo(
+    () => [...effectiveSelectedIds].some((id) => {
+      const docId = docIdByInvoiceId.get(id);
+      return docId !== undefined && busyDocIds.has(docId);
+    }),
+    [effectiveSelectedIds, docIdByInvoiceId, busyDocIds],
+  );
 
   // ── helpers ───────────────────────────────────────────────────────────────
 
@@ -354,6 +380,8 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
             className="text-danger hover:text-danger"
             leftIcon={<Trash2 size={14} />}
             onClick={() => setBulkDeleteOpen(true)}
+            disabled={anySelectedBusy}
+            title={anySelectedBusy ? "Среди выбранных есть документ в обработке" : undefined}
           >
             Удалить выбранные
           </Button>
@@ -510,6 +538,27 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
                             Снимите подтверждение перед удалением
                           </TooltipContent>
                         </Tooltip>
+                      ) : busyDocIds.has(inv.document_id) ? (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <span className="cursor-default">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  aria-label="Удалить"
+                                  className="text-fg-tertiary"
+                                  disabled
+                                >
+                                  <Trash2 size={14} />
+                                </Button>
+                              </span>
+                            }
+                          />
+                          <TooltipContent>
+                            Документ обрабатывается — дождитесь завершения
+                          </TooltipContent>
+                        </Tooltip>
                       ) : (
                         <Button
                           variant="ghost"
@@ -629,7 +678,7 @@ export function InvoiceTable({ invoices }: InvoiceTableProps) {
             <AlertDialogCancel>Отмена</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
-              disabled={deleteBulk.isPending}
+              disabled={deleteBulk.isPending || anySelectedBusy}
               onClick={() => {
                 deleteBulk.mutate([...effectiveSelectedIds], {
                   onSuccess: () => {

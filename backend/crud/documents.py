@@ -29,8 +29,10 @@ def get_document(db: Session, doc_id: int):
     return db.query(Document).filter(Document.id == doc_id).first()
 
 
-def create_document(db: Session, project_id: int, filename: str, s3_key: str) -> Document:
-    doc = Document(project_id=project_id, filename=filename, s3_key=s3_key)
+def create_document(db: Session, project_id: int, filename: str, s3_key: str,
+                    file_hash: str | None = None) -> Document:
+    """Создать документ (pending). file_hash — sha256 исходных байтов (Q6, дедуп)."""
+    doc = Document(project_id=project_id, filename=filename, s3_key=s3_key, file_hash=file_hash)
     db.add(doc)
     db.commit()
     db.refresh(doc)

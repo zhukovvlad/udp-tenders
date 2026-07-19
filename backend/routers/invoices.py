@@ -1,11 +1,12 @@
+import hashlib
 import logging
 import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import Response
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from crud.documents import (
@@ -20,7 +21,7 @@ from crud.units import item_has_issues, load_alias_map, normalize_item
 from database import get_db
 from models import Document, Invoice, InvoiceItem, MaterialClass
 from processing import get_processing_session_factory
-from s3 import delete_file, download_file, upload_file_async
+from s3 import delete_file, delete_file_async, download_file, upload_file_async
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -37,9 +38,15 @@ def _load_document_locked(db: Session, doc_id: int) -> Document | None:
     return db.query(Document).filter(Document.id == doc_id).with_for_update().first()
 
 
-def _reject_if_processing(doc: Document | None) -> None:
-    """409, если документ в обработке — мутации СФ запрещены до терминального статуса."""
-    if doc is not None and doc.status == "processing":
+def _reject_if_busy(doc: Document | None) -> None:
+    """409, если документ в нетерминальном статусе (pending|processing) —
+    мутации СФ/документа запрещены до терминального.
+
+    pending включён (S1): в окне между commit create_document (pending) и
+    guard-commit (processing) документ иначе можно было бы удалить,
+    оставив S3-сироту. Легитимных мутаций pending-документа не существует.
+    """
+    if doc is not None and doc.status in ("pending", "processing"):
         raise HTTPException(status_code=409, detail="Документ обрабатывается — дождитесь завершения")
 
 
@@ -187,13 +194,14 @@ def get_document_pdf(doc_id: int, db: Session = Depends(get_db)):
     return Response(content=file_bytes, media_type="application/pdf")
 
 
-@router.post("/documents/{doc_id}/reparse")
+@router.post("/documents/{doc_id}/reparse", status_code=202)
 async def reparse_document(
     doc_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     session_factory=Depends(get_processing_session_factory),
 ):
-    """Повторить парсинг документа из S3 (parse-then-swap, старые СФ переживают ошибку)."""
+    """Повторный парсинг в фоне: синхронные проверки + guard → 202 (S1-1)."""
     doc = get_document(db, doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
@@ -205,20 +213,21 @@ async def reparse_document(
         raise HTTPException(status_code=409, detail="Документ уже обрабатывается")
 
     from processing import process_document
-    await process_document(doc_id, mode="parse", session_factory=session_factory)
+    background_tasks.add_task(process_document, doc_id, mode="parse", session_factory=session_factory)
 
     db.expire_all()
     return _serialize_document(get_document(db, doc_id))
 
 
-@router.post("/documents/{doc_id}/deskew-reparse")
+@router.post("/documents/{doc_id}/deskew-reparse", status_code=202)
 async def deskew_reparse_document(
     doc_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     session_factory=Depends(get_processing_session_factory),
 ):
-    """Коррекция ориентации страниц + переразбор. Ошибки ориентации (413/502) доходят
-    прежним HTTP-кодом; ошибки парсинга → документ в error + 200 (AC-S0-8)."""
+    """Коррекция ориентации + переразбор в фоне; ошибки ориентации доезжают статусом
+    error + last_error через polling (S1)."""
     doc = get_document(db, doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
@@ -229,30 +238,40 @@ async def deskew_reparse_document(
     if not try_acquire_processing(db, doc_id):
         raise HTTPException(status_code=409, detail="Документ уже обрабатывается")
 
-    from processing import ProcessingError, process_document
-    try:
-        await process_document(doc_id, mode="deskew", reraise=True, session_factory=session_factory)
-    except ProcessingError as exc:
-        # process_document пробрасывает ТОЛЬКО ошибки с http_status (ориентация deskew).
-        # Статус документа уже записан в error внутри process_document.
-        raise HTTPException(status_code=exc.http_status, detail=exc.message)
+    from processing import process_document
+    background_tasks.add_task(process_document, doc_id, mode="deskew", session_factory=session_factory)
 
     db.expire_all()
     return _serialize_document(get_document(db, doc_id))
 
 
-@router.post("/upload")
+@router.post("/upload", status_code=202)
 async def upload_pdf(
+    response: Response,
+    background_tasks: BackgroundTasks,
     project_id: int = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     session_factory=Depends(get_processing_session_factory),
 ):
-    """Загрузить PDF: сохранить в S3, создать документ (pending), обработать инлайн."""
+    """Загрузить PDF: S3 + документ + guard, обработка в фоне; 202 немедленно (S1-1).
+
+    Дубликат по file_hash → 200 duplicate:true с существующим документом (Q6).
+    """
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Только PDF-файлы")
 
     file_bytes = await file.read()
+    file_hash = hashlib.sha256(file_bytes).hexdigest()  # хеш ОРИГИНАЛА; после deskew не пересчитывается (Q6)
+
+    # Fast-path дедупа: файл уже загружали в этот проект → отдаём существующий документ.
+    existing = (db.query(Document)
+                .filter(Document.project_id == project_id, Document.file_hash == file_hash)
+                .first())
+    if existing:
+        response.status_code = 200
+        return {**_serialize_document(existing), "duplicate": True}
+
     now = datetime.now(UTC)
     object_name = f"{now.year}/{now.month:02d}/{uuid.uuid4().hex}_{file.filename}"
     try:
@@ -262,16 +281,32 @@ async def upload_pdf(
         logger.exception("Upload: ошибка загрузки в S3")
         raise HTTPException(status_code=500, detail="Не удалось сохранить файл в хранилище")
 
-    doc = create_document(db, project_id, file.filename, object_name)
+    try:
+        doc = create_document(db, project_id, file.filename, object_name, file_hash=file_hash)
+    except IntegrityError:
+        # Гонка двух параллельных загрузок одного файла ИЛИ иная integrity-ошибка (FK).
+        db.rollback()  # обязателен: сессия в failed state (PendingRollbackError без него)
+        winner = (db.query(Document)
+                  .filter(Document.project_id == project_id, Document.file_hash == file_hash)
+                  .first())
+        try:
+            await delete_file_async(object_name)  # наш S3-объект осиротел — best-effort очистка
+        except Exception:
+            logger.warning(f"Дедуп-гонка: не удалось удалить S3-сироту {object_name}")
+        if winner is None:
+            raise  # IntegrityError был НЕ про uq_documents_project_file_hash — не маскируем под дубликат
+        response.status_code = 200
+        return {**_serialize_document(winner), "duplicate": True}
+
     if not try_acquire_processing(db, doc.id):
         raise HTTPException(status_code=409, detail="Документ уже обрабатывается")
 
     from processing import process_document
-    await process_document(doc.id, mode="parse", pdf_bytes=file_bytes, session_factory=session_factory)
+    background_tasks.add_task(process_document, doc.id, mode="parse",
+                              pdf_bytes=file_bytes, session_factory=session_factory)
 
     db.expire_all()
-    doc = get_document(db, doc.id)
-    return _serialize_document(doc)
+    return {**_serialize_document(get_document(db, doc.id)), "duplicate": False}
 
 
 @router.put("/{invoice_id}")
@@ -288,7 +323,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
         raise HTTPException(status_code=404, detail="СФ не найдена")
     # 2) блокируем документ; 3) отклоняем, если обрабатывается.
     doc = _load_document_locked(db, row.document_id)
-    _reject_if_processing(doc)
+    _reject_if_busy(doc)
     # 4) перезапрашиваем СФ ПОД блокировкой — фаза B могла её удалить.
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
@@ -397,7 +432,7 @@ def verify_invoice(invoice_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="СФ не найдена")
     # 2) блокируем документ; 3) отклоняем, если обрабатывается.
     doc = _load_document_locked(db, row.document_id)
-    _reject_if_processing(doc)
+    _reject_if_busy(doc)
     # 4) перезапрашиваем СФ ПОД блокировкой — фаза B могла её удалить (parse-then-swap).
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
@@ -419,7 +454,7 @@ def unverify_invoice(invoice_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="СФ не найдена")
     # 2) блокируем документ; 3) отклоняем, если обрабатывается.
     doc = _load_document_locked(db, row.document_id)
-    _reject_if_processing(doc)
+    _reject_if_busy(doc)
     # 4) перезапрашиваем СФ ПОД блокировкой — фаза B могла её удалить (parse-then-swap).
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
@@ -451,7 +486,7 @@ def bulk_delete_invoices(body: BulkDeleteRequest, db: Session = Depends(get_db))
         db.query(Invoice.document_id).filter(Invoice.id.in_(body.ids)).all()
     })
     for did in doc_ids:
-        _reject_if_processing(_load_document_locked(db, did))
+        _reject_if_busy(_load_document_locked(db, did))
 
     # 3) перезапрашиваем СФ ПОД блокировкой документов — фаза B могла часть удалить.
     invoices = db.query(Invoice).filter(Invoice.id.in_(body.ids)).all()
@@ -477,7 +512,7 @@ def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="СФ не найдена")
     # 2) блокируем документ; 3) отклоняем, если обрабатывается.
     doc = _load_document_locked(db, row.document_id)
-    _reject_if_processing(doc)
+    _reject_if_busy(doc)
     # 4) перезапрашиваем СФ ПОД блокировкой — фаза B могла её удалить (parse-then-swap).
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
@@ -495,7 +530,7 @@ def delete_document_route(doc_id: int, db: Session = Depends(get_db)):
     doc = _load_document_locked(db, doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
-    _reject_if_processing(doc)
+    _reject_if_busy(doc)
     if any(inv.verified for inv in doc.invoices):
         raise HTTPException(status_code=409, detail="Документ содержит подтверждённые СФ — снимите подтверждение перед удалением")
     if doc.s3_key:

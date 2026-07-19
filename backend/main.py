@@ -24,6 +24,33 @@ from routers import orgs as orgs_router
 from routers import settings as settings_router
 
 
+def _sweep_stuck_documents(session_factory=None) -> int:
+    """Startup-sweep (S1-4): все pending|processing → error одним UPDATE.
+
+    На старте процесса легитимных нетерминальных документов не существует
+    (однопроцессная модель, no-overlap deployment): pending — crash в окне
+    create_document→guard, processing — crash посреди фоновой таски. Оба
+    нетерминальны для polling'а — зомби заставил бы фронт поллиться вечно.
+    session_factory=None → поздний резолв SessionLocal (паттерн F1 S0);
+    в тестах инжектится тест-фабрика.
+    """
+    from sqlalchemy import text
+
+    if session_factory is None:
+        from database import SessionLocal
+        session_factory = SessionLocal
+    with session_factory() as db:
+        result = db.execute(text(
+            "UPDATE documents SET status='error', "
+            "last_error='Обработка прервана перезапуском сервера' "
+            "WHERE status IN ('pending', 'processing')"
+        ))
+        db.commit()
+    if result.rowcount:
+        logger.warning(f"Startup-sweep: {result.rowcount} документ(ов) переведено в error")
+    return result.rowcount
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Инициализация при старте приложения (не при импорте модуля)."""
@@ -34,6 +61,14 @@ async def lifespan(app: FastAPI):
         logger.info("MinIO bucket готов")
     except Exception as e:
         logger.warning(f"MinIO недоступен при старте: {e}")
+
+    # Fail-fast (ревью плана, P1): sweep обязан выполниться до приёма трафика.
+    # Проглотить ошибку нельзя — если БД оживёт позже, зомби-processing останутся
+    # навсегда и polling не завершится. БД недоступна → приложение не стартует
+    # (оно всё равно неработоспособно), рестарт повторит sweep.
+    swept = _sweep_stuck_documents()
+    logger.info(f"Startup-sweep выполнен: {swept} документ(ов)")
+
     yield
 
 

@@ -1,19 +1,12 @@
 import { useState, useCallback } from "react";
+import { toast } from "sonner";
+
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dropzone } from "@/components/ui-domain/Dropzone";
-import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { uploadApi } from "@/services/api/upload";
-import { qk } from "@/services/queryKeys";
-import type { ID } from "@/types/common";
+import { UploadJobRow, type JobState } from "@/components/upload/UploadJobRow";
 
-interface UploadStatus {
-  fileName: string;
-  fileIndex: number;
-  fileCount: number;
-  /** 0–100 during HTTP transfer; null while AI analyzes */
-  uploadPct: number | null;
-}
+import { useUploadInvoice } from "@/services/queries";
+import type { ID } from "@/types/common";
 
 interface Props {
   projectId: ID;
@@ -21,35 +14,70 @@ interface Props {
   onOpenChange: (open: boolean) => void;
 }
 
+/**
+ * Шит загрузки счетов-фактур/УПД, привязанный к объекту (ProjectPage).
+ * Джоб-модель (pending|uploading|ready|error) и сеяние 202-ответа в
+ * query-кэш — из донора `pages/Upload.tsx` (мёртвая страница, удалена вместе
+ * с переносом логики сюда, смоук PR #37). Шит НЕ закрывается автоматически
+ * после загрузки — пользователь видит статус обработки построчно
+ * (`<UploadJobRow>`, polling через `useDocument`), dropzone остаётся активной
+ * для докидывания новых файлов.
+ */
 export function UploadSheet({ projectId, open, onOpenChange }: Props) {
-  const qc = useQueryClient();
-  const [status, setStatus] = useState<UploadStatus | null>(null);
+  const upload = useUploadInvoice();
+  const [jobs, setJobs] = useState<JobState[]>([]);
 
-  const handleDrop = useCallback(async (files: File[]) => {
-    let success = 0;
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      setStatus({ fileName: file.name, fileIndex: i + 1, fileCount: files.length, uploadPct: 0 });
-      try {
-        await uploadApi.uploadInvoice(projectId, file, (pct) => {
-          setStatus((prev) =>
-            prev ? { ...prev, uploadPct: pct < 100 ? pct : null } : prev
+  const handleDrop = useCallback(
+    async (files: File[]) => {
+      const newJobs: JobState[] = files.map((f, i) => ({
+        id: `${Date.now()}-${i}-${f.name}`,
+        file: f,
+        status: "pending",
+        progress: 0,
+      }));
+      setJobs((prev) => [...newJobs, ...prev]);
+
+      for (const job of newJobs) {
+        setJobs((prev) =>
+          prev.map((j) => (j.id === job.id ? { ...j, status: "uploading" } : j))
+        );
+        try {
+          const result = await upload.mutateAsync({
+            projectId,
+            file: job.file,
+            onProgress: (pct) =>
+              setJobs((prev) =>
+                prev.map((j) => (j.id === job.id ? { ...j, progress: pct } : j))
+              ),
+          });
+          setJobs((prev) =>
+            prev.map((j) =>
+              j.id === job.id ? { ...j, status: "ready", result, progress: 100 } : j
+            )
           );
-        });
-        success++;
-      } catch {
-        toast.error(`Ошибка загрузки: ${file.name}`);
+          if (result.duplicate) {
+            toast.info(`«${job.file.name}» — файл уже был загружен`);
+          } else {
+            toast.success(`«${job.file.name}» принят в обработку`);
+          }
+        } catch (err) {
+          setJobs((prev) =>
+            prev.map((j) =>
+              j.id === job.id
+                ? {
+                    ...j,
+                    status: "error",
+                    error: err instanceof Error ? err.message : "Ошибка загрузки",
+                  }
+                : j
+            )
+          );
+          toast.error(`«${job.file.name}» — ошибка загрузки`);
+        }
       }
-    }
-    setStatus(null);
-    if (success > 0) {
-      qc.invalidateQueries({ queryKey: ["dashboard", "invoices", projectId] });
-      qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
-      qc.invalidateQueries({ queryKey: qk.documents.list() });
-      toast.success(`Загружено: ${success} файл(ов)`);
-      onOpenChange(false);
-    }
-  }, [projectId, qc, onOpenChange]);
+    },
+    [projectId, upload]
+  );
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -58,57 +86,16 @@ export function UploadSheet({ projectId, open, onOpenChange }: Props) {
           <SheetTitle>Добавить счёт</SheetTitle>
         </SheetHeader>
         <div className="mt-6">
-          <Dropzone onDrop={handleDrop} disabled={status !== null} />
-          {status && <UploadProgress status={status} />}
+          <Dropzone onDrop={handleDrop} />
         </div>
+        {jobs.length > 0 && (
+          <div className="mt-5 space-y-2">
+            {jobs.map((j) => (
+              <UploadJobRow key={j.id} job={j} />
+            ))}
+          </div>
+        )}
       </SheetContent>
     </Sheet>
-  );
-}
-
-function UploadProgress({ status }: { status: UploadStatus }) {
-  const { fileName, fileIndex, fileCount, uploadPct } = status;
-  const isAnalyzing = uploadPct === null;
-
-  return (
-    <div className="mt-5 space-y-3">
-      <div className="flex items-center justify-between text-xs text-fg-secondary">
-        <span className="max-w-[280px] truncate font-medium text-fg">{fileName}</span>
-        {fileCount > 1 && (
-          <span>{fileIndex} / {fileCount}</span>
-        )}
-      </div>
-
-      {/* Progress bar */}
-      <div
-        className="h-1.5 w-full overflow-hidden rounded-full bg-surface-hover"
-        aria-busy={isAnalyzing}
-      >
-        {isAnalyzing ? (
-          <div
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuetext="Анализируем документ с помощью ИИ…"
-            className="h-full w-2/5 animate-indeterminate rounded-full bg-accent"
-          />
-        ) : (
-          <div
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={uploadPct ?? 0}
-            className="h-full rounded-full bg-accent transition-all duration-200"
-            style={{ width: `${uploadPct}%` }}
-          />
-        )}
-      </div>
-
-      <p aria-live="polite" className="text-xs text-fg-secondary">
-        {isAnalyzing
-          ? "Анализируем документ с помощью ИИ…"
-          : `Отправка файла… ${uploadPct}%`}
-      </p>
-    </div>
   );
 }
