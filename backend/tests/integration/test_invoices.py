@@ -293,28 +293,30 @@ def test_delete_document_with_verified_invoice_returns_409(client, factories):
     assert response.status_code == 409
 
 
-# --- Блокировка мутаций СФ во время обработки документа (S0-8) ---
+# --- Блокировка мутаций СФ во время обработки документа (S0-8, расширено на pending в S1) ---
 
+@pytest.mark.parametrize("busy_status", ["pending", "processing"])
 @pytest.mark.parametrize("method,path_tmpl,body", [
     ("put", "/api/invoices/{invoice_id}", {"number": "X", "date": "2026-05-01", "vat_rate": 20, "items": []}),
     ("post", "/api/invoices/{invoice_id}/verify", None),
     ("post", "/api/invoices/{invoice_id}/unverify", None),
     ("delete", "/api/invoices/{invoice_id}", None),
 ])
-def test_invoice_mutations_return_409_while_processing(client, factories, method, path_tmpl, body):
-    """Любая мутация СФ документа в processing → 409 (S0-8)."""
-    doc = factories.DocumentFactory.create(status="processing")
+def test_invoice_mutations_return_409_while_busy(client, factories, method, path_tmpl, body, busy_status):
+    """Любая мутация СФ документа в pending|processing → 409 (S1: guard закрывает и pending-окно)."""
+    doc = factories.DocumentFactory.create(status=busy_status)
     inv = factories.InvoiceFactory.create(document=doc)
     url = path_tmpl.format(invoice_id=inv.id)
     resp = getattr(client, method)(url, json=body) if body is not None else getattr(client, method)(url)
     assert resp.status_code == 409
 
 
-def test_bulk_delete_returns_409_when_any_document_processing(client, factories, db_session):
-    """bulk-delete, если хоть один документ набора в processing → 409, НИЧЕГО не удалено (S0-8)."""
+@pytest.mark.parametrize("busy_status", ["pending", "processing"])
+def test_bulk_delete_returns_409_when_any_document_busy(client, factories, db_session, busy_status):
+    """bulk-delete, если хоть один документ набора в pending|processing → 409, НИЧЕГО не удалено (S0-8, S1)."""
     from models import Invoice
 
-    doc_busy = factories.DocumentFactory.create(status="processing")
+    doc_busy = factories.DocumentFactory.create(status=busy_status)
     doc_free = factories.DocumentFactory.create(status="parsed")
     inv_busy = factories.InvoiceFactory.create(document=doc_busy)
     inv_free = factories.InvoiceFactory.create(document=doc_free)
@@ -336,9 +338,10 @@ def test_bulk_delete_locks_documents_in_id_order(client, factories):
     assert resp.json()["deleted"] == 3
 
 
-def test_delete_document_returns_409_while_processing(client, factories):
-    """delete документа в processing → 409 (S0-8)."""
-    doc = factories.DocumentFactory.create(status="processing")
+@pytest.mark.parametrize("busy_status", ["pending", "processing"])
+def test_delete_document_returns_409_while_busy(client, factories, busy_status):
+    """delete документа в pending|processing → 409 (S0-8, S1)."""
+    doc = factories.DocumentFactory.create(status=busy_status)
     resp = client.delete(f"/api/invoices/documents/{doc.id}")
     assert resp.status_code == 409
 
