@@ -229,7 +229,7 @@ def _sweep_stuck_documents(session_factory=None) -> int:
 
 - [ ] **Step 3b: Подменить sweep в `client`-фикстуре (КРИТИЧНО — без этого падает весь integration-набор)**
 
-`client`-фикстура (conftest.py:233) входит в `with TestClient(app)` — lifespan (и sweep) выполняется на КАЖДОМ тесте с этой фикстурой. Sweep по умолчанию резолвит реальный `database.SessionLocal` — dependency override `get_db` на него НЕ действует: локально он бы ударил по dev-БД, в CI (`DATABASE_URL` → немигрированная БД без таблицы `documents`) startup упал бы и уронил почти весь набор.
+`client`-фикстура (conftest.py:191) входит в `with TestClient(app)` (строка :233) — lifespan (и sweep) выполняется на КАЖДОМ тесте с этой фикстурой. Sweep по умолчанию резолвит реальный `database.SessionLocal` — dependency override `get_db` на него НЕ действует: локально он бы ударил по dev-БД, в CI (`DATABASE_URL` → немигрированная БД без таблицы `documents`) startup упал бы и уронил почти весь набор.
 
 В `backend/tests/conftest.py`, фикстура `client`: добавить параметр `monkeypatch` и ДО создания TestClient:
 
@@ -254,6 +254,8 @@ def client(db_session, in_memory_s3, session_factory_test, monkeypatch) -> Itera
 ```
 
 Специальные lifespan-тесты (Step 1) свою подмену задают сами (spy/boom) — с фикстурой не конфликтуют (они не используют `client`).
+
+Страховка (единственное место вне conftest, создающее TestClient): `test_auth_coverage.py:28` держит module-scoped `TestClient(app)` БЕЗ контекст-менеджера — по семантике Starlette lifespan там НЕ запускается (докстринг файла утверждает обратное — он неточен). После Step 3 прогнать `just test-int-k 'auth'` вместе с `tests/test_auth_coverage.py`: если auth-coverage-тесты вдруг падают об sweep (lifespan всё же выполнился) — добавить noop-подмену sweep и туда, а заодно поправить докстринг файла.
 
 - [ ] **Step 4: Запустить — PASS**
 
