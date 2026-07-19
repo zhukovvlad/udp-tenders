@@ -155,6 +155,25 @@ describe("ReviewPage", () => {
     });
   });
 
+  it("mutation buttons are disabled when document is busy (status: processing)", async () => {
+    // Документ в обработке (реparse/deskew в фоне) — бэкенд отвечает 409 на любую
+    // мутацию (S1 контракт). UI обязан совпасть: все кнопки мутаций задизейблены.
+    server.use(
+      http.get("/api/invoices/documents/:id", () =>
+        HttpResponse.json({ ...sampleDocument, status: "processing" })
+      )
+    );
+
+    renderWithProviders(<Review />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^Переразобрать$/i })).toBeDisabled();
+    });
+    expect(screen.getByRole("button", { name: /Выпрямить и переразобрать/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Подтвердить/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Удалить$/i })).toBeDisabled();
+  });
+
   it("shows confidence issue on Проблемы tab when threshold is above ai_confidence", async () => {
     // sampleDocument.invoices[0].ai_confidence = 0.92; setting threshold to 0.95 triggers the issue
     server.use(

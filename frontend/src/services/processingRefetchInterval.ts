@@ -15,3 +15,8 @@ export function processingRefetchInterval(query: { state: { data?: unknown } }):
   const docs: DocLike[] = Array.isArray(data) ? data : data ? [data as DocLike] : [];
   return docs.some((d) => NON_TERMINAL_STATUSES.has(d?.status ?? "")) ? POLL_MS : false;
 }
+
+/** Документ в обработке: мутации запрещены (совпадает с 409-контрактом бэка S1). */
+export function isDocBusy(status: string | undefined): boolean {
+  return NON_TERMINAL_STATUSES.has(status ?? "");
+}

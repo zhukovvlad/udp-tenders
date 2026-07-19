@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui-domain/Skeleton";
 import { Surface } from "@/components/ui-domain/Surface";
 import { Button } from "@/components/ui-domain/Button";
 import { KpiCard } from "@/components/ui-domain/KpiCard";
+import { StatusPill } from "@/components/ui-domain/StatusPill";
 import { EntitySelect } from "@/components/ui-domain/EntitySelect";
 import { InvoiceKpiBar } from "@/components/invoices/InvoiceKpiBar";
 import { InvoiceTable } from "@/components/invoices/InvoiceTable";
@@ -68,6 +69,7 @@ import {
   useUnits,
 } from "@/services/queries";
 import { reportsApi } from "@/services/api/reports";
+import { isDocBusy } from "@/services/processingRefetchInterval";
 import { useDebounce } from "@/lib/useDebounce";
 import { useDefaultUnitId } from "@/lib/useDefaultUnitId";
 
@@ -679,6 +681,18 @@ export default function ProjectPage() {
           }
           actions={
             <>
+              {/* Документы в фоновой обработке (S1-6): мутации по ним запрещены бэком (409),
+                  бейдж — видимая обратная связь, пока идёт парсинг/переразбор/деskew. */}
+              {(docsQ.data ?? [])
+                .filter((d) => isDocBusy(d.status))
+                .map((d) => (
+                  <StatusPill
+                    key={d.id}
+                    tone="info"
+                    label={`Обрабатывается: ${d.filename}`}
+                    dot
+                  />
+                ))}
               <Button
                 variant="secondary"
                 leftIcon={<Download size={14} />}

@@ -28,6 +28,7 @@ import {
   useSettings,
 } from "@/services/queries";
 import { invoicesApi } from "@/services/api/invoices";
+import { isDocBusy } from "@/services/processingRefetchInterval";
 import { formatDate, formatUsd, pluralRu } from "@/lib/format";
 import { DEFAULT_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import type { InvoiceRow, InvoiceUpdateWarning } from "@/types/invoice";
@@ -189,7 +190,7 @@ export default function Review() {
             <button
               type="button"
               onClick={() => { setUnitWarnings([]); reparse.mutate(docId); }}
-              disabled={reparse.isPending || verify.isPending || unverify.isPending || documentLocked}
+              disabled={reparse.isPending || verify.isPending || unverify.isPending || documentLocked || isDocBusy(doc.status)}
               title={documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
               className="text-fg-secondary underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
             >
@@ -198,7 +199,7 @@ export default function Review() {
             <button
               type="button"
               onClick={() => { setUnitWarnings([]); deskew.mutate(docId); }}
-              disabled={deskew.isPending || reparse.isPending || verify.isPending || unverify.isPending || documentLocked}
+              disabled={deskew.isPending || reparse.isPending || verify.isPending || unverify.isPending || documentLocked || isDocBusy(doc.status)}
               title={documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
               className="text-fg-secondary underline-offset-2 hover:text-fg hover:underline disabled:opacity-50"
             >
@@ -229,7 +230,7 @@ export default function Review() {
             <Button
               variant="danger"
               size="sm"
-              disabled={verify.isPending || unverify.isPending || documentLocked}
+              disabled={verify.isPending || unverify.isPending || documentLocked || isDocBusy(doc.status)}
               title={documentLocked || verify.isPending || unverify.isPending ? "Сначала завершите или снимите подтверждение" : undefined}
               onClick={() => {
                 if (window.confirm("Удалить документ?")) {
@@ -247,7 +248,7 @@ export default function Review() {
                   variant="ghost"
                   size="sm"
                   leftIcon={<XCircle size={14} />}
-                  disabled={unverify.isPending || dirty}
+                  disabled={unverify.isPending || dirty || isDocBusy(doc.status)}
                   loading={unverify.isPending}
                   onClick={() => unverify.mutate(serverInv.id, { onSuccess: () => setOverrides(null) })}
                   title={dirty ? "Сначала сохраните изменения" : undefined}
@@ -259,7 +260,7 @@ export default function Review() {
                   variant="secondary"
                   size="sm"
                   leftIcon={<CheckCircle2 size={14} />}
-                  disabled={verify.isPending || dirty}
+                  disabled={verify.isPending || dirty || isDocBusy(doc.status)}
                   loading={verify.isPending}
                   onClick={() => verify.mutate(serverInv.id, { onSuccess: () => setOverrides(null) })}
                   title={dirty ? "Сначала сохраните изменения" : undefined}
@@ -270,7 +271,7 @@ export default function Review() {
             )}
             <Button
               variant="secondary"
-              disabled={!dirty || update.isPending}
+              disabled={!dirty || update.isPending || isDocBusy(doc.status)}
               loading={update.isPending}
               onClick={() => {
                 setUnitWarnings([]);
