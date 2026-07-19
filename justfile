@@ -35,9 +35,10 @@ dev-frontend:
 
 # === Tests ===
 
-# Все backend-тесты
+# Все backend-тесты. Если установлен локальный тестовый Postgres (см. ниже) —
+# гоняем на нём (~30 сек); иначе — TEST_DATABASE_URL из .env (Neon, ~6-8 мин).
 test-backend:
-    cd backend && pytest
+    @if test -d "{{pg_local}}/data"; then echo "==> backend-тесты на локальном Postgres (localhost:5433)"; just test-backend-local; else echo "==> backend-тесты на TEST_DATABASE_URL из .env (Neon)"; cd backend && pytest; fi
 
 # Только unit (быстро)
 test-backend-unit:
@@ -50,6 +51,36 @@ test-backend-integration:
 # Точечный прогон integration по -k паттерну
 test-int-k pattern:
     cd backend && pytest tests/integration -v -k "{{pattern}}"
+
+# --- Локальный тестовый Postgres (быстрые integration) ---
+# Портативный PostgreSQL 16 + pgvector (conda-forge, micromamba) в профиле
+# пользователя — без админ-прав и Docker; тот же стек, что CI-образ
+# pgvector/pgvector:pg16. Запросы ~0.2 мс вместо ~43 мс RTT до Neon —
+# интеграционный слой ~6.5x быстрее. Порт 5433, auth trust (только localhost).
+# Установка с нуля: docs/testing.md, раздел «Локальный тестовый Postgres».
+
+pg_local := "$LOCALAPPDATA/Programs/udp-pgtest"
+test_db_local := "postgresql+psycopg://postgres@localhost:5433/udp_test"
+
+# Запустить локальный тестовый Postgres (no-op, если уже работает)
+pg-test-start:
+    @test -d "{{pg_local}}/data" || { echo "Локальный тестовый Postgres не установлен — см. docs/testing.md, раздел «Локальный тестовый Postgres»"; exit 1; }
+    @"{{pg_local}}/Library/bin/pg_ctl" -D "{{pg_local}}/data" status >/dev/null 2>&1 || "{{pg_local}}/Library/bin/pg_ctl" -D "{{pg_local}}/data" -l "{{pg_local}}/data/log.txt" start
+
+pg-test-stop:
+    "{{pg_local}}/Library/bin/pg_ctl" -D "{{pg_local}}/data" stop
+
+# Integration против локального Postgres
+test-int-local: pg-test-start
+    cd backend && TEST_DATABASE_URL="{{test_db_local}}" pytest tests/integration -v
+
+# Точечный локальный прогон по -k паттерну
+test-int-local-k pattern: pg-test-start
+    cd backend && TEST_DATABASE_URL="{{test_db_local}}" pytest tests/integration -v -k "{{pattern}}"
+
+# Все backend-тесты против локального Postgres
+test-backend-local: pg-test-start
+    cd backend && TEST_DATABASE_URL="{{test_db_local}}" pytest
 
 # Точечный прогон unit по -k паттерну
 test-unit-k pattern:

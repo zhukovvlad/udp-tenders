@@ -32,10 +32,15 @@
 just install
 
 # Backend — нужен TEST_DATABASE_URL в .env.test (отдельная Neon test-ветка)
-just test-backend            # все: 441 PASSED, 6 SKIPPED
+just test-backend            # все; АВТО: локальный Postgres если установлен (~30 сек), иначе Neon
 just test-backend-unit       # быстро (без БД): 155 PASSED за ~1 сек
 just test-backend-integration # с реальной Postgres: 220 PASSED
 just coverage-backend        # HTML отчёт в backend/htmlcov/
+
+# Backend против ЛОКАЛЬНОГО Postgres (~6.5x быстрее Neon; установка — см. ниже)
+just test-int-local          # integration на localhost:5433
+just test-int-local-k "patt" # точечный локальный прогон
+just test-backend-local      # весь backend на localhost:5433
 
 # Frontend — без БД, всё через MSW-моки
 just test-frontend           # 134 PASSED за ~18–20 сек
@@ -60,6 +65,61 @@ just typecheck-frontend      # tsc --noEmit
   из шелла) и любой ad-hoc `psql`/`alembic` вне pytest её не увидят, если
   `.env.test` не подгружен в сам шелл вручную (`export $(cat .env.test)` / аналог
   в PowerShell) — это ожидаемое поведение `pytest-dotenv`, не баг.
+
+---
+
+## Локальный тестовый Postgres (быстрые integration)
+
+**Зачем.** `TEST_DATABASE_URL` по умолчанию указывает на Neon (eu-central-1) —
+каждый SQL-запрос платит ~43 мс сетевого RTT, и 324 integration-теста идут
+6–8 минут (замер 2026-07-20: `test_invoices.py`, 59 тестов — 63 с). Против
+localhost тот же файл проходит за 9.7 с (~6.5x). CI уже так работает
+(`pgvector/pgvector:pg16` service-container, полный прогон ~1 мин) — локальная
+установка воспроизводит тот же стек без Docker и без админ-прав.
+
+**Что установлено.** PostgreSQL 16 + pgvector 0.8.3 из conda-forge через
+портативный micromamba, целиком в профиле пользователя:
+
+- Окружение: `%LOCALAPPDATA%\Programs\udp-pgtest` (бинарники в `Library\bin`),
+  кластер — в `...\udp-pgtest\data`, лог — `data\log.txt`.
+- Порт **5433** (чтобы не конфликтовать с возможным системным Postgres),
+  auth `trust` — только localhost, тестовые данные.
+- База `udp_test`; conftest сам делает `DROP SCHEMA public CASCADE` + Alembic
+  на каждую pytest-сессию.
+- Сервер НЕ служба Windows: после перезагрузки его поднимает `just pg-test-start`
+  (вызывается автоматически из `test-int-local` / `test-backend-local`).
+
+**Установка с нуля (новая машина), без админ-прав:**
+
+```bash
+cd "$LOCALAPPDATA/Programs"
+curl -L -o micromamba.exe "https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-win-64.exe"
+./micromamba.exe create -y -p "$LOCALAPPDATA/Programs/udp-pgtest" -c conda-forge "postgresql=16" pgvector
+BIN="$LOCALAPPDATA/Programs/udp-pgtest/Library/bin"
+DATA="$LOCALAPPDATA/Programs/udp-pgtest/data"
+"$BIN/initdb.exe" -D "$DATA" -U postgres -E UTF8 --locale="en-US"
+echo "port = 5433" >> "$DATA/postgresql.conf"
+"$BIN/pg_ctl.exe" -D "$DATA" -l "$DATA/log.txt" start
+"$BIN/psql.exe" -h localhost -p 5433 -U postgres -c "CREATE DATABASE udp_test;"
+```
+
+Проверка: `just test-int-local-k "test_upload_creates_supplier_record"`.
+
+**Важно про локаль:** `--locale=C` НЕ подходит — в C-локали кириллица не
+считается alnum, `pg_trgm` строит пустые триграммы и
+`test_duplicates_finds_similar_names` падает (similarity=0). Нужна UTF-8-совместимая
+локаль (`en-US`): на Windows PostgreSQL использует wide-char CRT-функции, и
+кириллица корректно классифицируется/фолдится. ICU в conda-forge win-64 сборке
+не собран (`initdb --locale-provider=icu` → «ICU is not supported in this build»).
+
+`.env` не меняется: рецепты `*-local` передают `TEST_DATABASE_URL` инлайн —
+шелл-переменная имеет приоритет над значением из dotenv внутри pytest.
+
+`just test-backend` (и, следовательно, `just test`) сам выбирает БД: если
+каталог `%LOCALAPPDATA%\Programs\udp-pgtest\data` существует — локальный
+Postgres, иначе — Neon из `.env` (у контрибьюторов без локальной установки
+поведение прежнее). Явный прогон против Neon — `just test-backend-integration`:
+полезная финальная проверка перед PR, максимально близкая к прод-БД.
 
 ---
 

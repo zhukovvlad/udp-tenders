@@ -8,7 +8,7 @@ Frontend: React 19, TS (strict), Vite, shadcn/ui, Tailwind v4, Recharts, TanStac
 PostgreSQL (Neon) · MinIO (S3) · OpenRouter API (Claude Vision, `PDF_ENGINE=native`); pypdfium2 + pikepdf + Pillow — raster-коррекция ориентации страниц (deskew).
 
 ## Команды — только через `just`, никогда `cd backend && ...`
-`install` · `dev-backend` · `dev-frontend` · `test` · `test-backend-unit` · `test-backend-integration` · `test-frontend` · `lint` · `typecheck-frontend` · `db-migrate` · `create-superuser` · `create-org`
+`install` · `dev-backend` · `dev-frontend` · `test` · `test-backend-unit` · `test-backend-integration` · `test-int-local` (integration на локальном Postgres, ~6.5x быстрее — см. `docs/testing.md`) · `test-backend-local` · `test-frontend` · `lint` · `typecheck-frontend` · `db-migrate` · `create-superuser` · `create-org`
 
 Shell (Windows): `& "C:\Program Files\Git\bin\bash.exe" -c "cd /c/Users/zhukov_v/Projects/UDP && just <cmd> 2>&1"`
 
