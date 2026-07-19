@@ -82,6 +82,6 @@ describe("UploadJobRow (S1-6, AC-S1-5)", () => {
 
     await screen.findByText("Файл уже был загружен");
     const link = await screen.findByRole("link", { name: "К ошибкам проекта" });
-    expect(link).toHaveAttribute("href", "/projects/1?tab=errors");
+    expect(link).toHaveAttribute("href", "/projects/1?direction=all&view=errors&tab=errors");
   });
 });

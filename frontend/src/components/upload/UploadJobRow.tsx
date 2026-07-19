@@ -83,7 +83,12 @@ export function UploadJobRow({ job }: { job: JobState }) {
           // error-документе во вкладке «Ошибки» проекта (спека S1, Codex P2,
           // fix 3). Ссылка на /documents/:id вела бы в «Документ не найден»
           // (см. комментарий про serverBusy ниже), поэтому ведём в проект.
-          <Link to={`/projects/${job.result.project_id}?tab=errors`}>
+          // Три параметра нужны, чтобы работать в ЛЮБОМ режиме ProjectPage:
+          // direction=all + view=errors — путь через ErrorsView/ErrorDocsTab
+          // в режиме «Все направления» (моно- и мульти-); tab=errors — тот же
+          // ErrorDocsTab в legacy-режиме (пустые directions / упавший summary),
+          // где view игнорируется, а табы рендерятся напрямую.
+          <Link to={`/projects/${job.result.project_id}?direction=all&view=errors&tab=errors`}>
             <Button variant="secondary" size="sm">К ошибкам проекта</Button>
           </Link>
         )}
