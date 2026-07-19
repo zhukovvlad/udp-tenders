@@ -704,7 +704,7 @@ def test_deskew_reparse_verified_returns_409(client, factories, in_memory_s3):
     assert resp.status_code == 409
 
 
-def test_deskew_reparse_vision_failure_502(client, factories, in_memory_s3, monkeypatch):
+def test_deskew_vision_failure_becomes_error_via_polling(client, factories, in_memory_s3, monkeypatch):
     """Сбой vision (TransientError с http_status=502) → 202 сразу; ошибка доезжает
     через polling как status=error + last_error (S1: reraise/try-except убраны из
     эндпоинта, фоновой таске отвечать некому). S3 не тронут (AC-S0-8 сохранён)."""

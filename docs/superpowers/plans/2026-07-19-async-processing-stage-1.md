@@ -715,7 +715,7 @@ async def reparse_document(
 
 В `test_invoices.py` (искать по grep, полный список даст прогон):
 - Upload-тесты, читавшие СФ/статус из тела POST → после POST (теперь 202) делать `client.get(f"/api/invoices/documents/{doc_id}")` и ассертить терминальный результат там (TestClient уже выполнил фон). Ассерты про S3/стоимость не меняются.
-- deskew-тесты 413/502 (`test_deskew_reparse_vision_failure_502` и родственные): POST → 202; затем GET → `status == "error"`, `last_error == "Сервис распознавания ориентации недоступен"` (текст из pdf_orientation, сверить). Ассерты «S3 не тронут» сохраняются.
+- deskew-тесты 413/502 (`test_deskew_vision_failure_becomes_error_via_polling` и родственные): POST → 202; затем GET → `status == "error"`, `last_error == "Сервис распознавания ориентации недоступен"` (текст из pdf_orientation, сверить). Ассерты «S3 не тронут» сохраняются.
 - 404/400/409-тесты эндпоинтов — без изменений (синхронная часть).
 - Проверка S1-2: `grep -rn "rotations_applied" backend/ frontend/src/` → пусто (поле исчезло ещё в S0-свапе; если где-то всплыло — удалить).
 
