@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import uuid
 from datetime import UTC, date, datetime
@@ -6,6 +7,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from crud.documents import (
@@ -20,7 +22,7 @@ from crud.units import item_has_issues, load_alias_map, normalize_item
 from database import get_db
 from models import Document, Invoice, InvoiceItem, MaterialClass
 from processing import get_processing_session_factory
-from s3 import delete_file, download_file, upload_file_async
+from s3 import delete_file, delete_file_async, download_file, upload_file_async
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -259,6 +261,15 @@ async def upload_pdf(
         raise HTTPException(status_code=400, detail="Только PDF-файлы")
 
     file_bytes = await file.read()
+    file_hash = hashlib.sha256(file_bytes).hexdigest()  # хеш ОРИГИНАЛА; после deskew не пересчитывается (Q6)
+
+    # Fast-path дедупа: файл уже загружали в этот проект → отдаём существующий документ.
+    existing = (db.query(Document)
+                .filter(Document.project_id == project_id, Document.file_hash == file_hash)
+                .first())
+    if existing:
+        return {**_serialize_document(existing), "duplicate": True}
+
     now = datetime.now(UTC)
     object_name = f"{now.year}/{now.month:02d}/{uuid.uuid4().hex}_{file.filename}"
     try:
@@ -268,7 +279,22 @@ async def upload_pdf(
         logger.exception("Upload: ошибка загрузки в S3")
         raise HTTPException(status_code=500, detail="Не удалось сохранить файл в хранилище")
 
-    doc = create_document(db, project_id, file.filename, object_name)
+    try:
+        doc = create_document(db, project_id, file.filename, object_name, file_hash=file_hash)
+    except IntegrityError:
+        # Гонка двух параллельных загрузок одного файла ИЛИ иная integrity-ошибка (FK).
+        db.rollback()  # обязателен: сессия в failed state (PendingRollbackError без него)
+        winner = (db.query(Document)
+                  .filter(Document.project_id == project_id, Document.file_hash == file_hash)
+                  .first())
+        try:
+            await delete_file_async(object_name)  # наш S3-объект осиротел — best-effort очистка
+        except Exception:
+            logger.warning(f"Дедуп-гонка: не удалось удалить S3-сироту {object_name}")
+        if winner is None:
+            raise  # IntegrityError был НЕ про uq_documents_project_file_hash — не маскируем под дубликат
+        return {**_serialize_document(winner), "duplicate": True}
+
     if not try_acquire_processing(db, doc.id):
         raise HTTPException(status_code=409, detail="Документ уже обрабатывается")
 

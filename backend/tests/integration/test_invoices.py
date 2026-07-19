@@ -80,6 +80,42 @@ def test_upload_truncated_response_saves_no_invoices(
     assert body["invoice_count"] == 0
 
 
+def test_upload_duplicate_returns_200_with_flag(client, factories, in_memory_s3, mock_openrouter, sample_pdf_bytes):
+    """Повторная загрузка того же файла → 200 duplicate:true, S3 не растёт, документ не создан (Q6)."""
+    import io
+
+    files = {"file": ("a.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+    project = factories.ProjectFactory.create()
+    r1 = client.post("/api/invoices/upload", data={"project_id": project.id}, files=files)
+    assert r1.status_code in (200, 202)
+    s3_size_after_first = len(in_memory_s3)
+
+    files2 = {"file": ("copy.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+    r2 = client.post("/api/invoices/upload", data={"project_id": project.id}, files=files2)
+    assert r2.status_code == 200
+    d = r2.json()
+    assert d["duplicate"] is True
+    assert d["id"] == r1.json()["id"]           # тот же документ
+    assert len(in_memory_s3) == s3_size_after_first  # S3 не вырос
+
+
+def test_upload_duplicate_while_original_processing(client, factories, in_memory_s3, sample_pdf_bytes, db_session):
+    """Дубль, пока оригинал в processing → 200 duplicate:true со статусом processing (спека §2)."""
+    import hashlib
+    import io
+
+    project = factories.ProjectFactory.create()
+    file_hash = hashlib.sha256(sample_pdf_bytes).hexdigest()
+    factories.DocumentFactory.create(project=project, status="processing", file_hash=file_hash)
+    db_session.commit()
+
+    files = {"file": ("b.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+    r = client.post("/api/invoices/upload", data={"project_id": project.id}, files=files)
+    assert r.status_code == 200
+    assert r.json()["duplicate"] is True
+    assert r.json()["status"] == "processing"
+
+
 def test_upload_incomplete_totals_saves_no_invoices(
     client, factories, sample_pdf_bytes, mock_openrouter,
 ):
