@@ -72,6 +72,7 @@ export function UploadSheet({ projectId, open, onOpenChange }: Props) {
                 : j
             )
           );
+          toast.error(`«${job.file.name}» — ошибка загрузки`);
         }
       }
     },

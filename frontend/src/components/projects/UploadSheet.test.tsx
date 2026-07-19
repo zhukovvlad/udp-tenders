@@ -14,7 +14,10 @@ import { UploadSheet } from "./UploadSheet";
 vi.mock("sonner", async (importOriginal) => {
   /** Реальный модуль sonner с подменённым (spy) toast.info/success. */
   const actual = await importOriginal<typeof import("sonner")>();
-  return { ...actual, toast: { ...actual.toast, info: vi.fn(), success: vi.fn() } };
+  return {
+    ...actual,
+    toast: { ...actual.toast, info: vi.fn(), success: vi.fn(), error: vi.fn() },
+  };
 });
 
 /**
@@ -65,6 +68,23 @@ describe("UploadSheet (S1 upload UI перенесён из мёртвой pages
     expect(await screen.findByText("Файл уже был загружен")).toBeInTheDocument();
     await waitFor(() =>
       expect(toast.info).toHaveBeenCalledWith("«invoice.pdf» — файл уже был загружен")
+    );
+  });
+
+  it("провал загрузки (500): toast.error + строка джоба показывает «ошибка» (CodeRabbit, PR #37)", async () => {
+    server.use(
+      http.post("/api/invoices/upload", () => HttpResponse.json({ detail: "boom" }, { status: 500 }))
+    );
+
+    renderWithProviders(<UploadSheet projectId={1} open onOpenChange={() => {}} />);
+    await uploadFile();
+
+    await waitFor(() => {
+      expect(screen.getByText("invoice.pdf")).toBeInTheDocument();
+    });
+    expect(await screen.findByText("ошибка")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("«invoice.pdf» — ошибка загрузки")
     );
   });
 
