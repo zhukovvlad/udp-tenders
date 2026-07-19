@@ -16,6 +16,7 @@ import { adminApi } from "./api/admin";
 import { corridorsApi } from "./api/compensationCorridors";
 import type { CorridorUpsertPayload } from "@/types/compensationCorridor";
 import { qk } from "./queryKeys";
+import { processingRefetchInterval } from "./processingRefetchInterval";
 
 import type { ID } from "@/types/common";
 import type { ProjectCreateInput, ProjectUpdateInput } from "@/types/project";
@@ -176,6 +177,7 @@ export function useDocument(docId: ID | null | undefined) {
     queryKey: qk.documents.detail(docId ?? -1),
     queryFn: () => invoicesApi.getDocument(docId as ID),
     enabled: docId !== null && docId !== undefined,
+    refetchInterval: processingRefetchInterval,
   });
 }
 
@@ -374,6 +376,7 @@ export function useDocuments(projectId?: number) {
   return useQuery({
     queryKey: qk.documents.list(projectId),
     queryFn: () => invoicesApi.listDocuments(projectId),
+    refetchInterval: processingRefetchInterval,
   });
 }
 
