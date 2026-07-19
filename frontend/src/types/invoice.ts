@@ -89,6 +89,9 @@ export interface DocumentDetail extends DocumentSummary {
   invoices: InvoiceRow[];
 }
 
+/** Ответ POST /upload: 202 (создан, duplicate=false) или 200 (дубликат по file_hash, Q6). */
+export type UploadResponse = DocumentDetail & { duplicate: boolean };
+
 export interface InvoiceUpdateInput {
   number?: string;
   date?: ISODate;
