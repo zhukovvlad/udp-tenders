@@ -681,18 +681,6 @@ export default function ProjectPage() {
           }
           actions={
             <>
-              {/* Документы в фоновой обработке (S1-6): мутации по ним запрещены бэком (409),
-                  бейдж — видимая обратная связь, пока идёт парсинг/переразбор/деskew. */}
-              {(docsQ.data ?? [])
-                .filter((d) => isDocBusy(d.status))
-                .map((d) => (
-                  <StatusPill
-                    key={d.id}
-                    tone="info"
-                    label={`Обрабатывается: ${d.filename}`}
-                    dot
-                  />
-                ))}
               <Button
                 variant="secondary"
                 leftIcon={<Download size={14} />}
@@ -711,6 +699,26 @@ export default function ProjectPage() {
           }
         />
       </div>
+
+      {/* Документы в фоновой обработке (S1-6): мутации по ним запрещены бэком (409),
+          бейджи — видимая обратная связь, пока идёт парсинг/переразбор/деskew.
+          Отдельный оборачиваемый ряд (не PageHeader.actions — тот flex без wrap,
+          общий с кнопками Export/Добавить счёт, а multi-file upload — штатный
+          сценарий с несколькими одновременно busy-документами). */}
+      {(docsQ.data ?? []).some((d) => isDocBusy(d.status)) && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {(docsQ.data ?? [])
+            .filter((d) => isDocBusy(d.status))
+            .map((d) => (
+              <StatusPill
+                key={d.id}
+                tone="info"
+                label={`Обрабатывается: ${d.filename}`}
+                dot
+              />
+            ))}
+        </div>
+      )}
 
       {/* Upload sheet */}
       <UploadSheet
