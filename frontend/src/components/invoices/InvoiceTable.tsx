@@ -67,7 +67,7 @@ interface InvoiceTableProps {
    * `_reject_if_busy`, спека §6). По умолчанию пустое множество — поведение
    * не меняется для вызовов без этого пропа.
    */
-  busyDocIds?: Set<ID>;
+  busyDocIds?: ReadonlySet<ID>;
 }
 
 type SortColumn = "date" | "supplier" | "total" | "number";
