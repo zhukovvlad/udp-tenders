@@ -99,7 +99,11 @@ export default function Review() {
       !inv.number?.trim() ||
       inv.items.length === 0 ||
       inv.items.some((it) => !it.raw_name?.trim() || it.quantity <= 0));
-  const locked = inv.verified;
+  // Busy-документ (processing/pending) блокируется наравне с verified: поля
+  // формы, отредактированные во время фоновой обработки, исчезнут при
+  // parse-then-swap — до фикса реально сохранялась только кнопка «Сохранить»,
+  // сами поля принимали ввод (Codex P2, fix 3).
+  const locked = inv.verified || isDocBusy(doc.status);
   const documentLocked = doc.invoices.some((invoice) => invoice.verified);
 
   const tabs: Array<{ value: TabKey; label: string }> = [

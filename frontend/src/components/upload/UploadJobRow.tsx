@@ -73,10 +73,24 @@ export function UploadJobRow({ job }: { job: JobState }) {
           )}
           {job.error && <div className="mt-1 text-xs text-danger-text">{job.error}</div>}
         </div>
-        {job.result && (
+        {job.result && doc?.status === "parsed" && (
           <Link to={`/documents/${job.result.id}`}>
             <Button variant="secondary" size="sm">Проверить</Button>
           </Link>
+        )}
+        {job.result && serverBusy && (
+          // Свежий 202 содержит invoices: [] — Review трактует их отсутствие как
+          // «Документ не найден». Пока документ не дошёл до parsed, ссылка на
+          // /documents/:id вела бы на ложную ошибку (Codex P2, fix 2). Кнопка
+          // остаётся на месте (визуальная непрерывность), но задизейблена.
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled
+            title="Документ обрабатывается — дождитесь завершения"
+          >
+            Проверить
+          </Button>
         )}
       </div>
     </Surface>

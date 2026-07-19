@@ -179,6 +179,32 @@ describe("ReviewPage", () => {
     expect(screen.getByRole("button", { name: /^Удалить$/i })).toBeDisabled();
   });
 
+  it("fields are locked when document is busy (status: processing) — Codex P2, fix 3", async () => {
+    // Раньше locked = inv.verified — во время фоновой обработки поля шапки/позиций
+    // принимали ввод, который исчезнет после parse-then-swap; задизейблена была
+    // только кнопка «Сохранить». Теперь locked учитывает isDocBusy(doc.status).
+    server.use(
+      http.get("/api/invoices/documents/:id", () =>
+        HttpResponse.json({ ...sampleDocument, status: "processing" })
+      )
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<Review />);
+
+    const headerTab = await screen.findByRole("button", { name: /Шапка/i });
+    await user.click(headerTab);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("СФ-101")).toBeDisabled();
+    });
+
+    const itemsTab = screen.getByRole("button", { name: /Позиции/i });
+    await user.click(itemsTab);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue(/Бетон В25/)).toBeDisabled();
+    });
+  });
+
   it("shows confidence issue on Проблемы tab when threshold is above ai_confidence", async () => {
     // sampleDocument.invoices[0].ai_confidence = 0.92; setting threshold to 0.95 triggers the issue
     server.use(
