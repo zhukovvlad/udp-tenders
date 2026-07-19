@@ -224,6 +224,50 @@ describe("ReviewPage", () => {
     });
   });
 
+  it("shows «Обрабатывается» pill instead of готово/требует проверки when document status is processing", async () => {
+    // Смоук-финдинг: во время reparse/deskew данные СФ на странице устарели
+    // (parse-then-swap ещё не случился) — пилл hasProblems/«готово» вводит
+    // в заблуждение. Приоритет — статус документа.
+    server.use(
+      http.get("/api/invoices/documents/:id", () =>
+        HttpResponse.json({ ...sampleDocument, status: "processing" })
+      )
+    );
+
+    renderWithProviders(<Review />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Обрабатывается")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("готово")).not.toBeInTheDocument();
+    expect(screen.queryByText("требует проверки")).not.toBeInTheDocument();
+  });
+
+  it("shows «ошибка обработки» pill when document status is error", async () => {
+    // После рестарта сервера sweep переводит зависший документ в error —
+    // ранее это никак не отражалось в шапке Review, только в шите загрузки.
+    // Error-документ после неудачного reparse сохраняет старые СФ (invoices
+    // не пусты) — иначе страница отрендерит «Документ не найден».
+    server.use(
+      http.get("/api/invoices/documents/:id", () =>
+        HttpResponse.json({
+          ...sampleDocument,
+          status: "error",
+          last_error: "Не удалось распознать документ",
+        })
+      )
+    );
+
+    renderWithProviders(<Review />);
+
+    const pill = await screen.findByText("ошибка обработки");
+    expect(pill).toBeInTheDocument();
+    expect(pill.closest("span[title]")).toHaveAttribute(
+      "title",
+      "Не удалось распознать документ"
+    );
+  });
+
   it("shows «ИИ-разбор: $0.00» when a parse happened but cost is 0 (parse_count > 0)", async () => {
     // Регресс: разбор состоялся (parse_count=1), но OpenRouter не вернул usage.cost
     // (стоимость 0). Гейт parse_count > 0 (а не parse_cost_usd > 0) обязан показать метрику.

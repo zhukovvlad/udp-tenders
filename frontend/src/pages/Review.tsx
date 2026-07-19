@@ -128,14 +128,29 @@ export default function Review() {
         actions={
           <>
             <ConfidenceBadge value={inv.ai_confidence} />
-            {serverInv?.verified && (
-              <StatusPill tone="success" label="Проверено" dot />
+            {isDocBusy(doc.status) ? (
+              // Приоритет статуса документа: во время reparse/deskew данные СФ
+              // на странице устаревшие (parse-then-swap ещё не случился) —
+              // пилл hasProblems/verified вводит в заблуждение (смоук PR #37).
+              <StatusPill tone="info" label="Обрабатывается" dot />
+            ) : doc.status === "error" ? (
+              // StatusPill не принимает title — оборачиваем в span, чтобы
+              // причина ошибки (last_error) была доступна по наведению.
+              <span title={doc.last_error ?? undefined}>
+                <StatusPill tone="danger" label="ошибка обработки" dot />
+              </span>
+            ) : (
+              <>
+                {serverInv?.verified && (
+                  <StatusPill tone="success" label="Проверено" dot />
+                )}
+                <StatusPill
+                  tone={hasProblems ? "warning" : "success"}
+                  label={hasProblems ? "требует проверки" : "готово"}
+                  dot
+                />
+              </>
             )}
-            <StatusPill
-              tone={hasProblems ? "warning" : "success"}
-              label={hasProblems ? "требует проверки" : "готово"}
-              dot
-            />
           </>
         }
       />
