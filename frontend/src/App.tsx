@@ -6,6 +6,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes, useParams } from "react
 import { AppShell } from "@/components/layout/AppShell";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/hooks/useAuth";
+import { subscribeTerminalTransitions } from "@/services/terminalTransition";
 import Dashboard from "@/pages/Dashboard";
 import LoginPage from "@/pages/LoginPage";
 import MaterialPage from "@/pages/MaterialPage";
@@ -35,6 +36,8 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+subscribeTerminalTransitions(queryClient);
 
 /**
  * Layout-компонент: проверяет наличие авторизованного пользователя.

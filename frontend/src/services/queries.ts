@@ -189,7 +189,7 @@ export function useReparseDocument() {
       qc.invalidateQueries({ queryKey: qk.documents.detail(data.id) });
       qc.invalidateQueries({ queryKey: qk.documents.list(data.project_id) });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      toast.success("Документ переразобран");
+      toast.success("Обработка запущена");
     },
   });
 }
@@ -202,7 +202,7 @@ export function useDeskewReparseDocument() {
       qc.invalidateQueries({ queryKey: qk.documents.detail(data.id) });
       qc.invalidateQueries({ queryKey: qk.documents.list(data.project_id) });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      toast.success("Документ выпрямлен и переразобран");
+      toast.success("Обработка запущена");
     },
   });
 }
