@@ -124,6 +124,27 @@ function TabBarSlot() {
   return <div aria-hidden className="h-10" />;
 }
 
+// Известные значения вкладок (TabsTrigger value ниже) — используется для
+// валидации deep-link ?tab= при инициализации activeTab (Codex P2, PR #37:
+// ретрай дубликата упавшего документа ведёт на /projects/:id?tab=errors).
+const PROJECT_TAB_VALUES = [
+  "overview",
+  "invoices",
+  "prices",
+  "corridors",
+  "suppliers",
+  "monthly",
+  "errors",
+] as const;
+type ProjectTabValue = (typeof PROJECT_TAB_VALUES)[number];
+
+/** Валидирует значение ?tab= из URL; невалидное/отсутствующее → "overview". */
+function resolveInitialTab(raw: string | null): ProjectTabValue {
+  return (PROJECT_TAB_VALUES as readonly string[]).includes(raw ?? "")
+    ? (raw as ProjectTabValue)
+    : "overview";
+}
+
 // ─────────────────────────────────────────────
 // File-local sub-views
 // ─────────────────────────────────────────────
@@ -393,9 +414,6 @@ export default function ProjectPage() {
   const debouncedPeriodStart = useDebounce(periodStart, 400);
   const debouncedPeriodEnd = useDebounce(periodEnd, 400);
 
-  // ── active tab ──
-  const [activeTab, setActiveTab] = useState("overview");
-
   // ── invoice month filter (set when navigating from «По месяцам» tab) ──
   const [invoiceMonthFilter, setInvoiceMonthFilter] = useState<{ year: number; month: number } | null>(null);
 
@@ -435,6 +453,10 @@ export default function ProjectPage() {
   // ── направление: трёхзначное состояние из URL (спека §7.2) ──
   const [searchParams, setSearchParams] = useSearchParams();
   const rawDirection = searchParams.get("direction"); // null | 'all' | code
+
+  // ── active tab: инициализируется из ?tab= один раз (ленивый инициализатор),
+  // обратная запись в URL при переключении не делается (вне объёма фикса).
+  const [activeTab, setActiveTab] = useState(() => resolveInitialTab(searchParams.get("tab")));
   const directions = summaryQ.data?.directions;       // undefined пока summary грузится
   // Ошибка summary не должна навсегда запирать страницу в skeleton: деградируем
   // в legacy-режим (классические табы без направлений) — табы тянут данные из своих
@@ -470,10 +492,15 @@ export default function ProjectPage() {
   // Сброс вкладки на «Обзор» при смене direction — back/forward идут мимо
   // onChange (§7.2). Паттерн «adjust state during render» (react.dev/learn/
   // you-might-not-need-an-effect): синхронно, без лишнего рендера с эффектом.
+  // Первоначальное разрешение direction (undefined → значение, пока грузится
+  // summary) сбросом не считается — иначе deep-link ?tab= (Codex P2, fix 1)
+  // затирался бы «Обзором» сразу после первой загрузки summary.
   const [prevDirection, setPrevDirection] = useState(direction);
   if (prevDirection !== direction) {
     setPrevDirection(direction);
-    setActiveTab("overview");
+    if (prevDirection !== undefined) {
+      setActiveTab("overview");
+    }
   }
 
   // ── остальные запросы — гейт до определения режима (§7.2) ──

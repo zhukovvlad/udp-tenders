@@ -72,4 +72,16 @@ describe("UploadJobRow (S1-6, AC-S1-5)", () => {
     expect(screen.getByText("Файл уже был загружен")).toBeInTheDocument();
     expect(screen.getByRole("link")).toHaveAttribute("href", "/documents/7");
   });
+
+  it("дубликат упавшего файла: ссылка «К ошибкам проекта» — путь ретрая через reparse (Codex P2, fix 3)", async () => {
+    server.use(http.get("*/api/invoices/documents/7", () => HttpResponse.json({
+      ...baseDoc, status: "error", last_error: "Не удалось распознать документ",
+    })));
+    renderRow({ id: "j1", file: new File([], "a.pdf"), status: "ready", progress: 100,
+                result: { ...baseDoc, duplicate: true } });
+
+    await screen.findByText("Файл уже был загружен");
+    const link = await screen.findByRole("link", { name: "К ошибкам проекта" });
+    expect(link).toHaveAttribute("href", "/projects/1?tab=errors");
+  });
 });

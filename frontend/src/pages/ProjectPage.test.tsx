@@ -54,6 +54,22 @@ describe("ProjectPage", () => {
     });
   });
 
+  it("?tab=errors открывает вкладку «Ошибки» напрямую (deep-link ретрая дубликата, Codex P2)", async () => {
+    renderProject("1", "?tab=errors");
+    await waitFor(() => {
+      expect(screen.getByTestId("project-tab-errors")).toHaveAttribute("data-active");
+    });
+    // sampleDocument (дефолтный мок /api/invoices/documents) без ошибок — виден пустой стейт вкладки.
+    expect(await screen.findByText("Все документы разобраны успешно")).toBeInTheDocument();
+  });
+
+  it("?tab=unknown деградирует к «Обзор» (валидация против известных вкладок)", async () => {
+    renderProject("1", "?tab=unknown");
+    await waitFor(() => {
+      expect(screen.getByTestId("project-tab-overview")).toHaveAttribute("data-active");
+    });
+  });
+
   it("shows KPI cards after summary loads", async () => {
     renderProject();
     await waitFor(() => {

@@ -78,6 +78,15 @@ export function UploadJobRow({ job }: { job: JobState }) {
             <Button variant="secondary" size="sm">Проверить</Button>
           </Link>
         )}
+        {job.result && isDuplicate && serverError && (
+          // Дубликат упавшего файла: байты уже в S3, ретрай — reparse на
+          // error-документе во вкладке «Ошибки» проекта (спека S1, Codex P2,
+          // fix 3). Ссылка на /documents/:id вела бы в «Документ не найден»
+          // (см. комментарий про serverBusy ниже), поэтому ведём в проект.
+          <Link to={`/projects/${job.result.project_id}?tab=errors`}>
+            <Button variant="secondary" size="sm">К ошибкам проекта</Button>
+          </Link>
+        )}
         {job.result && serverBusy && (
           // Свежий 202 содержит invoices: [] — Review трактует их отсутствие как
           // «Документ не найден». Пока документ не дошёл до parsed, ссылка на
