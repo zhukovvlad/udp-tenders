@@ -6,6 +6,7 @@ import { StatusPill } from "@/components/ui-domain/StatusPill";
 import { ConfidenceBadge } from "@/components/ui-domain/ConfidenceBadge";
 import { Button } from "@/components/ui-domain/Button";
 import { useDocument } from "@/services/queries";
+import { isDocBusy } from "@/services/processingRefetchInterval";
 import type { UploadResponse } from "@/types/invoice";
 
 export interface JobState {
@@ -28,7 +29,7 @@ export function UploadJobRow({ job }: { job: JobState }) {
   const docQ = useDocument(job.result?.id ?? null);
   const doc = docQ.data ?? job.result;
   const isDuplicate = job.result?.duplicate === true;
-  const serverBusy = doc != null && (doc.status === "pending" || doc.status === "processing");
+  const serverBusy = doc != null && isDocBusy(doc.status);
   const serverError = doc?.status === "error";
 
   return (

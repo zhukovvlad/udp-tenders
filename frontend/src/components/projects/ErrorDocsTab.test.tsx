@@ -2,10 +2,19 @@ import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
+import { toast } from "sonner";
 import { server } from "@/test/server";
 import { renderWithProviders } from "@/test/utils";
 import { ErrorDocsTab } from "./ErrorDocsTab";
 import type { DocumentSummary } from "@/types/invoice";
+
+// Спай на toast.success (реальная реализация sonner) — §7: проверяем именно ТЕКСТ
+// уведомления «Обработка запущена», не только факт вызова API.
+vi.mock("sonner", async (importOriginal) => {
+  /** Реальный модуль sonner с подменённым (spy) toast.success/error. */
+  const actual = await importOriginal<typeof import("sonner")>();
+  return { ...actual, toast: { ...actual.toast, success: vi.fn(), error: vi.fn() } };
+});
 
 const makeDoc = (overrides: Partial<DocumentSummary> = {}): DocumentSummary => ({
   id: 1,
@@ -88,6 +97,18 @@ describe("ErrorDocsTab", () => {
     await waitFor(() => expect(onReparse).toHaveBeenCalledWith("1"));
   });
 
+  it("shows «Обработка запущена» toast on reparse success (спека §7)", async () => {
+    server.use(
+      http.post("/api/invoices/documents/:id/reparse", ({ params }) =>
+        HttpResponse.json(makeDoc({ id: Number(params.id), status: "parsed" })),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ErrorDocsTab docs={[makeDoc({ id: 1 })]} />);
+    await user.click(screen.getByRole("button", { name: /^переразобрать$/i }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Обработка запущена"));
+  });
+
   it("calls deskew-reparse endpoint on button click", async () => {
     const onDeskew = vi.fn();
     server.use(
@@ -100,5 +121,17 @@ describe("ErrorDocsTab", () => {
     renderWithProviders(<ErrorDocsTab docs={[makeDoc({ id: 1 })]} />);
     await user.click(screen.getByRole("button", { name: /Выпрямить и переразобрать/i }));
     await waitFor(() => expect(onDeskew).toHaveBeenCalledWith("1"));
+  });
+
+  it("shows «Обработка запущена» toast on deskew-reparse success (спека §7)", async () => {
+    server.use(
+      http.post("/api/invoices/documents/:id/deskew-reparse", ({ params }) =>
+        HttpResponse.json(makeDoc({ id: Number(params.id), status: "parsed" })),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ErrorDocsTab docs={[makeDoc({ id: 1 })]} />);
+    await user.click(screen.getByRole("button", { name: /Выпрямить и переразобрать/i }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Обработка запущена"));
   });
 });

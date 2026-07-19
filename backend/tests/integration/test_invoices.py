@@ -63,6 +63,34 @@ def test_reparse_enqueues_via_background_tasks(client, factories, in_memory_s3, 
     assert calls[0]["kwargs"]["mode"] == "parse"
 
 
+def test_deskew_reparse_enqueues_via_background_tasks(client, factories, in_memory_s3, monkeypatch):
+    """Deskew-reparse → 202 + processing; таска в BackgroundTasks с mode="deskew",
+    не исполнена (AC-S1-1, зеркало test_reparse_enqueues_via_background_tasks)."""
+    from fastapi import BackgroundTasks
+
+    import processing
+
+    calls: list[dict] = []
+
+    def spy_add_task(self, func, *args, **kwargs):
+        """Спай постановки в фон без исполнения."""
+        calls.append({"func": func, "args": args, "kwargs": kwargs})
+    monkeypatch.setattr(BackgroundTasks, "add_task", spy_add_task)
+
+    doc = factories.DocumentFactory.create(s3_key="k/d.pdf", status="parsed")
+    in_memory_s3["k/d.pdf"] = b"%PDF"
+    r = client.post(f"/api/invoices/documents/{doc.id}/deskew-reparse")
+    assert r.status_code == 202
+    assert r.json()["status"] == "processing"
+    assert len(calls) == 1
+    assert calls[0]["func"] is processing.process_document
+    assert calls[0]["args"][0] == doc.id
+    assert calls[0]["kwargs"]["mode"] == "deskew"
+    # Таска не исполнялась → документ в БД остался processing:
+    g = client.get(f"/api/invoices/documents/{doc.id}")
+    assert g.json()["status"] == "processing"
+
+
 def test_upload_rejects_non_pdf(client, factories):
     project = factories.ProjectFactory.create()
     response = client.post(
