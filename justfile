@@ -23,6 +23,10 @@ install-frontend:
 
 # === Dev ===
 
+# ИНВАРИАНТ S1 (async processing): один процесс — workers=1, replicas=1,
+# деплой строго stop-then-start (no-overlap; rolling запрещён до Ступени 2).
+# Startup-sweep на старте переводит pending/processing в error — при overlap
+# новый процесс пометил бы живые таски старого. См. docs/agent/pdf-parsing.md.
 dev-backend:
     cd backend && uvicorn main:app --reload --port 8259
 

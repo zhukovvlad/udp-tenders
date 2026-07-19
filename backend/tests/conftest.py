@@ -188,7 +188,7 @@ def db_session(db_engine) -> Iterator[Session]:
 
 
 @pytest.fixture
-def client(db_session, in_memory_s3, session_factory_test) -> Iterator:
+def client(db_session, in_memory_s3, session_factory_test, monkeypatch) -> Iterator:
     """FastAPI TestClient с переопределёнными зависимостями для интеграционных тестов.
 
     - get_db заменяется на транзакционную сессию с rollback после теста.
@@ -198,11 +198,14 @@ def client(db_session, in_memory_s3, session_factory_test) -> Iterator:
       dev-DATABASE_URL вместо тестовой транзакции (F1).
     - CSRF-токен: клиент отправляет test-значение и в куки, и в заголовок,
       чтобы csrf_middleware пропускал все запросы.
+    - startup-sweep (lifespan) перенаправляется на session_factory_test —
+      реальный SessionLocal не трогается (dependency override на него не действует).
     """
     from unittest.mock import MagicMock
 
     from fastapi.testclient import TestClient
 
+    import main
     from auth import get_current_user
     from database import get_db
     from main import app
@@ -223,6 +226,14 @@ def client(db_session, in_memory_s3, session_factory_test) -> Iterator:
         user.org_role = None
         user.is_active = True
         return user
+
+    real_sweep = main._sweep_stuck_documents
+
+    def _sweep_via_test_factory(session_factory=None):
+        """Sweep в lifespan через тестовую фабрику — dev/CI БД не затрагивается."""
+        return real_sweep(session_factory=session_factory_test)
+
+    monkeypatch.setattr(main, "_sweep_stuck_documents", _sweep_via_test_factory)
 
     # CSRF double-submit: одно и то же значение в куки и заголовке
     _csrf_token = "test-csrf-token"

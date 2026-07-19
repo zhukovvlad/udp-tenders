@@ -113,6 +113,11 @@ connection-ретраев → `logger.critical`, документ остаётс
 переопределяется через `app.dependency_overrides` на фабрику, отдающую
 тестовую сессию той же транзакции.
 
+Deployment-инвариант S1: `workers=1, replicas=1`, no-overlap deployment
+(stop-then-start). Startup-sweep в lifespan переводит все `pending|processing`
+в `error` на старте. Потребность в `workers>1`/rolling — триггер Ступени 2
+(advisory-lock).
+
 ## Трекинг стоимости разбора
 
 `parse_pdf` (фаза A) шлёт `usage: {include: true}` и захватывает реальную
