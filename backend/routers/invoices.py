@@ -4,8 +4,7 @@ import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import Response
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -195,13 +194,14 @@ def get_document_pdf(doc_id: int, db: Session = Depends(get_db)):
     return Response(content=file_bytes, media_type="application/pdf")
 
 
-@router.post("/documents/{doc_id}/reparse")
+@router.post("/documents/{doc_id}/reparse", status_code=202)
 async def reparse_document(
     doc_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     session_factory=Depends(get_processing_session_factory),
 ):
-    """Повторить парсинг документа из S3 (parse-then-swap, старые СФ переживают ошибку)."""
+    """Повторный парсинг в фоне: синхронные проверки + guard → 202 (S1-1)."""
     doc = get_document(db, doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
@@ -213,20 +213,21 @@ async def reparse_document(
         raise HTTPException(status_code=409, detail="Документ уже обрабатывается")
 
     from processing import process_document
-    await process_document(doc_id, mode="parse", session_factory=session_factory)
+    background_tasks.add_task(process_document, doc_id, mode="parse", session_factory=session_factory)
 
     db.expire_all()
     return _serialize_document(get_document(db, doc_id))
 
 
-@router.post("/documents/{doc_id}/deskew-reparse")
+@router.post("/documents/{doc_id}/deskew-reparse", status_code=202)
 async def deskew_reparse_document(
     doc_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     session_factory=Depends(get_processing_session_factory),
 ):
-    """Коррекция ориентации страниц + переразбор. Ошибки ориентации (413/502) доходят
-    прежним HTTP-кодом; ошибки парсинга → документ в error + 200 (AC-S0-8)."""
+    """Коррекция ориентации + переразбор в фоне; ошибки ориентации доезжают статусом
+    error + last_error через polling (S1)."""
     doc = get_document(db, doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
@@ -237,26 +238,26 @@ async def deskew_reparse_document(
     if not try_acquire_processing(db, doc_id):
         raise HTTPException(status_code=409, detail="Документ уже обрабатывается")
 
-    from processing import ProcessingError, process_document
-    try:
-        await process_document(doc_id, mode="deskew", reraise=True, session_factory=session_factory)
-    except ProcessingError as exc:
-        # process_document пробрасывает ТОЛЬКО ошибки с http_status (ориентация deskew).
-        # Статус документа уже записан в error внутри process_document.
-        raise HTTPException(status_code=exc.http_status, detail=exc.message)
+    from processing import process_document
+    background_tasks.add_task(process_document, doc_id, mode="deskew", session_factory=session_factory)
 
     db.expire_all()
     return _serialize_document(get_document(db, doc_id))
 
 
-@router.post("/upload")
+@router.post("/upload", status_code=202)
 async def upload_pdf(
+    response: Response,
+    background_tasks: BackgroundTasks,
     project_id: int = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     session_factory=Depends(get_processing_session_factory),
 ):
-    """Загрузить PDF: сохранить в S3, создать документ (pending), обработать инлайн."""
+    """Загрузить PDF: S3 + документ + guard, обработка в фоне; 202 немедленно (S1-1).
+
+    Дубликат по file_hash → 200 duplicate:true с существующим документом (Q6).
+    """
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Только PDF-файлы")
 
@@ -268,6 +269,7 @@ async def upload_pdf(
                 .filter(Document.project_id == project_id, Document.file_hash == file_hash)
                 .first())
     if existing:
+        response.status_code = 200
         return {**_serialize_document(existing), "duplicate": True}
 
     now = datetime.now(UTC)
@@ -293,17 +295,18 @@ async def upload_pdf(
             logger.warning(f"Дедуп-гонка: не удалось удалить S3-сироту {object_name}")
         if winner is None:
             raise  # IntegrityError был НЕ про uq_documents_project_file_hash — не маскируем под дубликат
+        response.status_code = 200
         return {**_serialize_document(winner), "duplicate": True}
 
     if not try_acquire_processing(db, doc.id):
         raise HTTPException(status_code=409, detail="Документ уже обрабатывается")
 
     from processing import process_document
-    await process_document(doc.id, mode="parse", pdf_bytes=file_bytes, session_factory=session_factory)
+    background_tasks.add_task(process_document, doc.id, mode="parse",
+                              pdf_bytes=file_bytes, session_factory=session_factory)
 
     db.expire_all()
-    doc = get_document(db, doc.id)
-    return _serialize_document(doc)
+    return {**_serialize_document(get_document(db, doc.id)), "duplicate": False}
 
 
 @router.put("/{invoice_id}")

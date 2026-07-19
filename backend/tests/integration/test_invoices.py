@@ -2,6 +2,67 @@
 import pytest
 
 
+def test_upload_enqueues_via_background_tasks(client, factories, in_memory_s3,
+                                              sample_pdf_bytes, monkeypatch):
+    """Upload → 202/processing/invoices=[]/duplicate=false; process_document поставлен
+    именно в BackgroundTasks и НЕ исполнен к моменту ответа (AC-S1-1)."""
+    import io
+
+    from fastapi import BackgroundTasks
+
+    import processing
+
+    calls: list[dict] = []
+
+    def spy_add_task(self, func, *args, **kwargs):
+        """Фиксирует постановку в фон, НЕ исполняя таску (документ останется processing)."""
+        calls.append({"func": func, "args": args, "kwargs": kwargs})
+    monkeypatch.setattr(BackgroundTasks, "add_task", spy_add_task)
+
+    project = factories.ProjectFactory.create()
+    files = {"file": ("a.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+    r = client.post("/api/invoices/upload", data={"project_id": project.id}, files=files)
+
+    assert r.status_code == 202
+    d = r.json()
+    assert d["status"] == "processing"
+    assert d["invoices"] == []
+    assert d["duplicate"] is False
+    # Поставлена ИМЕННО фоновая таска с правильной функцией и аргументами:
+    assert len(calls) == 1
+    assert calls[0]["func"] is processing.process_document
+    assert calls[0]["args"][0] == d["id"]
+    assert calls[0]["kwargs"]["mode"] == "parse"
+    assert calls[0]["kwargs"]["pdf_bytes"] is not None
+    # Таска не исполнялась → документ в БД остался processing (ответ не ждал обработку):
+    g = client.get(f"/api/invoices/documents/{d['id']}")
+    assert g.json()["status"] == "processing"
+
+
+def test_reparse_enqueues_via_background_tasks(client, factories, in_memory_s3, monkeypatch):
+    """Reparse → 202 + processing; таска в BackgroundTasks, не исполнена (AC-S1-1)."""
+    from fastapi import BackgroundTasks
+
+    import processing
+
+    calls: list[dict] = []
+
+    def spy_add_task(self, func, *args, **kwargs):
+        """Спай постановки в фон без исполнения."""
+        calls.append({"func": func, "args": args, "kwargs": kwargs})
+    monkeypatch.setattr(BackgroundTasks, "add_task", spy_add_task)
+
+    doc = factories.DocumentFactory.create(s3_key="k/r.pdf", status="parsed")
+    in_memory_s3["k/r.pdf"] = b"%PDF"
+    r = client.post(f"/api/invoices/documents/{doc.id}/reparse")
+    assert r.status_code == 202
+    assert r.json()["status"] == "processing"
+    assert len(calls) == 1
+    assert calls[0]["func"] is processing.process_document
+    assert calls[0]["args"][0] == doc.id
+    assert calls[0]["kwargs"]["mode"] == "parse"
+
+
 def test_upload_rejects_non_pdf(client, factories):
     project = factories.ProjectFactory.create()
     response = client.post(
@@ -13,14 +74,16 @@ def test_upload_rejects_non_pdf(client, factories):
 
 
 def test_upload_creates_document_with_invoices(client, factories, sample_pdf_bytes, mock_openrouter):
+    """Upload → 202 сразу; терминальный результат парсинга проверяем через GET (S1: обработка в фоне)."""
     project = factories.ProjectFactory.create()
     response = client.post(
         "/api/invoices/upload",
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
         data={"project_id": project.id},
     )
-    assert response.status_code == 200
-    body = response.json()
+    assert response.status_code == 202
+    doc_id = response.json()["id"]
+    body = client.get(f"/api/invoices/documents/{doc_id}").json()
     assert body["status"] == "parsed"
     assert body["doc_type"] == "invoice"
     assert body["invoice_count"] == 1
@@ -31,6 +94,7 @@ def test_upload_creates_document_with_invoices(client, factories, sample_pdf_byt
 def test_upload_unparseable_marks_doc_type_unknown(
     client, factories, sample_pdf_bytes, mock_openrouter,
 ):
+    """202 сразу; терминальный doc_type=unknown/status=error виден через GET (S1)."""
     mock_openrouter.use_scenario("unparseable")
     project = factories.ProjectFactory.create()
     response = client.post(
@@ -38,8 +102,9 @@ def test_upload_unparseable_marks_doc_type_unknown(
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
         data={"project_id": project.id},
     )
-    assert response.status_code == 200
-    body = response.json()
+    assert response.status_code == 202
+    doc_id = response.json()["id"]
+    body = client.get(f"/api/invoices/documents/{doc_id}").json()
     # При doc_type=unknown бэкенд проставляет ОБА поля: doc_type=unknown и status=error.
     assert body["doc_type"] == "unknown"
     assert body["status"] == "error"
@@ -49,6 +114,7 @@ def test_upload_unparseable_marks_doc_type_unknown(
 def test_upload_invalid_json_marks_error(
     client, factories, sample_pdf_bytes, mock_openrouter,
 ):
+    """202 сразу; терминальный error виден через GET (S1)."""
     mock_openrouter.use_scenario("invalid_json")
     project = factories.ProjectFactory.create()
     response = client.post(
@@ -56,8 +122,9 @@ def test_upload_invalid_json_marks_error(
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
         data={"project_id": project.id},
     )
-    assert response.status_code == 200
-    body = response.json()
+    assert response.status_code == 202
+    doc_id = response.json()["id"]
+    body = client.get(f"/api/invoices/documents/{doc_id}").json()
     assert body["status"] == "error"
     # Невалидный JSON не должен оставлять полу-сохранённых СФ в БД.
     assert body["invoice_count"] == 0
@@ -66,7 +133,9 @@ def test_upload_invalid_json_marks_error(
 def test_upload_truncated_response_saves_no_invoices(
     client, factories, sample_pdf_bytes, mock_openrouter,
 ):
-    """finish_reason=length → parse returns error, no Invoice rows created."""
+    """finish_reason=length → parse returns error, no Invoice rows created.
+
+    202 сразу; терминальный error виден через GET (S1)."""
     mock_openrouter.use_scenario("truncated_length")
     project = factories.ProjectFactory.create()
     response = client.post(
@@ -74,8 +143,9 @@ def test_upload_truncated_response_saves_no_invoices(
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
         data={"project_id": project.id},
     )
-    assert response.status_code == 200
-    body = response.json()
+    assert response.status_code == 202
+    doc_id = response.json()["id"]
+    body = client.get(f"/api/invoices/documents/{doc_id}").json()
     assert body["status"] == "error"
     assert body["invoice_count"] == 0
 
@@ -119,7 +189,9 @@ def test_upload_duplicate_while_original_processing(client, factories, in_memory
 def test_upload_incomplete_totals_saves_no_invoices(
     client, factories, sample_pdf_bytes, mock_openrouter,
 ):
-    """Item sum ≠ printed «Всего к оплате» → parse returns error, no Invoice rows created."""
+    """Item sum ≠ printed «Всего к оплате» → parse returns error, no Invoice rows created.
+
+    202 сразу; терминальный error виден через GET (S1)."""
     mock_openrouter.use_scenario("incomplete_totals")
     project = factories.ProjectFactory.create()
     response = client.post(
@@ -127,8 +199,9 @@ def test_upload_incomplete_totals_saves_no_invoices(
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
         data={"project_id": project.id},
     )
-    assert response.status_code == 200
-    body = response.json()
+    assert response.status_code == 202
+    doc_id = response.json()["id"]
+    body = client.get(f"/api/invoices/documents/{doc_id}").json()
     assert body["status"] == "error"
     assert body["invoice_count"] == 0
 
@@ -394,7 +467,7 @@ def test_upload_creates_supplier_record(client, factories, sample_pdf_bytes, moc
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
         data={"project_id": project.id},
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 202
 
     # Фикстура happy_path содержит supplier_inn="0000000000", supplier_name="ООО Поставщик"
     supplier = db_session.query(Supplier).filter(Supplier.inn == "0000000000").first()
@@ -419,13 +492,13 @@ def test_upload_reuse_existing_supplier(client, factories, sample_pdf_bytes, moc
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
         data={"project_id": p1.id},
     )
-    assert resp1.status_code == 200
+    assert resp1.status_code == 202
     resp2 = client.post(
         "/api/invoices/upload",
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
         data={"project_id": p2.id},
     )
-    assert resp2.status_code == 200
+    assert resp2.status_code == 202
 
     suppliers = db_session.query(Supplier).filter(Supplier.inn == "0000000000").all()
     assert len(suppliers) == 1
@@ -570,7 +643,7 @@ def test_deskew_reparse_rotates_and_backs_up(client, factories, in_memory_s3, mo
     monkeypatch.setattr(po, "deskew_pdf", fake_deskew)
 
     resp = client.post(f"/api/invoices/documents/{doc.id}/deskew-reparse")
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     assert in_memory_s3["k/sample.pdf.orig"] == b"%PDF-original"   # бэкап оригинала
     assert in_memory_s3["k/sample.pdf"] == b"%PDF-corrected"        # перезапись
 
@@ -590,7 +663,7 @@ def test_deskew_reparse_no_rotation_keeps_s3(client, factories, in_memory_s3, mo
     monkeypatch.setattr(po, "deskew_pdf", fake_deskew)
 
     resp = client.post(f"/api/invoices/documents/{doc.id}/deskew-reparse")
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     assert "k/up.pdf.orig" not in in_memory_s3   # бэкап не создан
 
 
@@ -604,7 +677,9 @@ def test_deskew_reparse_verified_returns_409(client, factories, in_memory_s3):
 
 
 def test_deskew_reparse_vision_failure_502(client, factories, in_memory_s3, monkeypatch):
-    """Сбой vision (TransientError с http_status=502) → 502, S3 не тронут (AC-S0-8 сохранён)."""
+    """Сбой vision (TransientError с http_status=502) → 202 сразу; ошибка доезжает
+    через polling как status=error + last_error (S1: reraise/try-except убраны из
+    эндпоинта, фоновой таске отвечать некому). S3 не тронут (AC-S0-8 сохранён)."""
     import pdf_orientation as po
     from processing import TransientError
 
@@ -612,12 +687,16 @@ def test_deskew_reparse_vision_failure_502(client, factories, in_memory_s3, monk
     in_memory_s3["k/x.pdf"] = b"%PDF-x"
 
     async def boom(pdf_bytes):
-        """Эмулирует недоступность vision-сервиса на detect."""
-        raise TransientError("vision down", http_status=502)
+        """Эмулирует недоступность vision-сервиса на detect — тот же текст, что и
+        реальный сбой httpx в pdf_orientation.detect_orientation (сверено grep'ом)."""
+        raise TransientError("Сервис распознавания ориентации недоступен", http_status=502)
     monkeypatch.setattr(po, "deskew_pdf", boom)
 
     resp = client.post(f"/api/invoices/documents/{doc.id}/deskew-reparse")
-    assert resp.status_code == 502                      # контракт сохранён
+    assert resp.status_code == 202
+    g = client.get(f"/api/invoices/documents/{doc.id}").json()
+    assert g["status"] == "error"
+    assert g["last_error"] == "Сервис распознавания ориентации недоступен"
     assert "k/x.pdf.orig" not in in_memory_s3
     assert in_memory_s3["k/x.pdf"] == b"%PDF-x"          # оригинал не тронут
 
@@ -648,38 +727,40 @@ def test_new_document_defaults_to_pending(db_session, factories):
 
 
 def test_upload_records_parse_cost(client, mock_openrouter, factories, sample_pdf_bytes):
-    """Успешный разбор записывает стоимость и счётчик разборов на документ."""
+    """Успешный разбор записывает стоимость и счётчик разборов на документ (202 → GET, S1)."""
     project = factories.ProjectFactory.create()
     resp = client.post(
         "/api/invoices/upload",
         data={"project_id": project.id},
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
     )
-    assert resp.status_code == 200
-    body = resp.json()
+    assert resp.status_code == 202
+    body = client.get(f"/api/invoices/documents/{resp.json()['id']}").json()
     assert body["parse_cost_usd"] > 0
     assert body["parse_count"] == 1
 
 
 def test_reparse_accumulates_parse_cost(client, mock_openrouter, factories, sample_pdf_bytes):
-    """Повторный разбор суммирует стоимость, а не перезаписывает."""
+    """Повторный разбор суммирует стоимость, а не перезаписывает (202 → GET после каждого шага, S1)."""
     project = factories.ProjectFactory.create()
     up = client.post(
         "/api/invoices/upload",
         data={"project_id": project.id},
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
     )
+    assert up.status_code == 202
     doc_id = up.json()["id"]
-    first_cost = up.json()["parse_cost_usd"]
+    first_cost = client.get(f"/api/invoices/documents/{doc_id}").json()["parse_cost_usd"]
 
     re = client.post(f"/api/invoices/documents/{doc_id}/reparse")
-    assert re.status_code == 200
-    assert re.json()["parse_count"] == 2
-    assert re.json()["parse_cost_usd"] > first_cost
+    assert re.status_code == 202
+    final = client.get(f"/api/invoices/documents/{doc_id}").json()
+    assert final["parse_count"] == 2
+    assert final["parse_cost_usd"] > first_cost
 
 
 def test_failed_parse_is_still_billed(client, mock_openrouter, factories, sample_pdf_bytes):
-    """КЛЮЧЕВОЙ ИНВАРИАНТ: провал сверки итогов — платный, стоимость учтена."""
+    """КЛЮЧЕВОЙ ИНВАРИАНТ: провал сверки итогов — платный, стоимость учтена (202 → GET, S1)."""
     mock_openrouter.use_scenario("incomplete_totals")
     project = factories.ProjectFactory.create()
     resp = client.post(
@@ -687,15 +768,15 @@ def test_failed_parse_is_still_billed(client, mock_openrouter, factories, sample
         data={"project_id": project.id},
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
     )
-    assert resp.status_code == 200
-    body = resp.json()
+    assert resp.status_code == 202
+    body = client.get(f"/api/invoices/documents/{resp.json()['id']}").json()
     assert body["status"] == "error"
     assert body["parse_cost_usd"] > 0
     assert body["parse_count"] == 1
 
 
 def test_missing_cost_defaults_zero_but_counts(client, mock_openrouter, factories, sample_pdf_bytes):
-    """usage.cost отсутствует → стоимость 0, но вызов был — parse_count растёт."""
+    """usage.cost отсутствует → стоимость 0, но вызов был — parse_count растёт (202 → GET, S1)."""
     mock_openrouter.use_scenario("happy_path_no_cost")
     project = factories.ProjectFactory.create()
     resp = client.post(
@@ -703,14 +784,14 @@ def test_missing_cost_defaults_zero_but_counts(client, mock_openrouter, factorie
         data={"project_id": project.id},
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
     )
-    assert resp.status_code == 200
-    body = resp.json()
+    assert resp.status_code == 202
+    body = client.get(f"/api/invoices/documents/{resp.json()['id']}").json()
     assert body["parse_cost_usd"] == 0
     assert body["parse_count"] == 1
 
 
 def test_non_200_is_not_billed(client, mock_openrouter, factories, sample_pdf_bytes):
-    """Ошибка ДО платного ответа (OpenRouter != 200) → документ не биллится."""
+    """Ошибка ДО платного ответа (OpenRouter != 200) → документ не биллится (202 → GET, S1)."""
     mock_openrouter.use_http_status(500)
     project = factories.ProjectFactory.create()
     resp = client.post(
@@ -718,15 +799,15 @@ def test_non_200_is_not_billed(client, mock_openrouter, factories, sample_pdf_by
         data={"project_id": project.id},
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
     )
-    assert resp.status_code == 200
-    body = resp.json()
+    assert resp.status_code == 202
+    body = client.get(f"/api/invoices/documents/{resp.json()['id']}").json()
     assert body["status"] == "error"
     assert body["parse_cost_usd"] == 0
     assert body["parse_count"] == 0
 
 
 def test_200_invalid_json_is_billed(client, mock_openrouter, factories, sample_pdf_bytes):
-    """HTTP 200 с непарсящимся телом — платный вызов: parse_count растёт, стоимость 0."""
+    """HTTP 200 с непарсящимся телом — платный вызов: parse_count растёт, стоимость 0 (202 → GET, S1)."""
     mock_openrouter.use_raw_body(b"not a json body")
     project = factories.ProjectFactory.create()
     resp = client.post(
@@ -734,8 +815,8 @@ def test_200_invalid_json_is_billed(client, mock_openrouter, factories, sample_p
         data={"project_id": project.id},
         files={"file": ("test.pdf", sample_pdf_bytes, "application/pdf")},
     )
-    assert resp.status_code == 200
-    body = resp.json()
+    assert resp.status_code == 202
+    body = client.get(f"/api/invoices/documents/{resp.json()['id']}").json()
     assert body["status"] == "error"
     assert body["parse_cost_usd"] == 0
     assert body["parse_count"] == 1
