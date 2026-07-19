@@ -31,9 +31,34 @@ import { invoicesApi } from "@/services/api/invoices";
 import { isDocBusy } from "@/services/processingRefetchInterval";
 import { formatDate, formatUsd, pluralRu } from "@/lib/format";
 import { DEFAULT_CONFIDENCE_THRESHOLD } from "@/lib/constants";
-import type { InvoiceRow, InvoiceUpdateWarning } from "@/types/invoice";
+import type { DocumentSummary, InvoiceRow, InvoiceUpdateWarning } from "@/types/invoice";
 
 type TabKey = "header" | "items" | "issues";
+
+/**
+ * Пилл статуса документа: busy/error приоритетнее остальной логики (данные СФ
+ * могут быть устаревшими во время фонового reparse/deskew — parse-then-swap
+ * ещё не случился). Возвращает null, если статус документа — терминальный
+ * "parsed" без ошибки: в этом случае решение о пилле принимает вызывающий код
+ * (например, hasProblems/verified в основном рендере СФ).
+ * Общий хелпер для основного рендера Review и слим-вида документа без СФ —
+ * вынесен, чтобы не дублировать логику приоритета (смоук PR #37).
+ */
+function docStatusPill(doc: Pick<DocumentSummary, "status" | "last_error">) {
+  if (isDocBusy(doc.status)) {
+    return <StatusPill tone="info" label="Обрабатывается" dot />;
+  }
+  if (doc.status === "error") {
+    // StatusPill не принимает title — оборачиваем в span, чтобы причина
+    // ошибки (last_error) была доступна по наведению.
+    return (
+      <span title={doc.last_error ?? undefined}>
+        <StatusPill tone="danger" label="ошибка обработки" dot />
+      </span>
+    );
+  }
+  return null;
+}
 
 export default function Review() {
   const { id } = useParams<{ id: string }>();
@@ -80,10 +105,89 @@ export default function Review() {
     );
   }
 
-  if (!docQ.data || !draft) {
+  if (!docQ.data) {
     return (
       <div className="container-page py-8">
         <EmptyState title="Документ не найден" />
+      </div>
+    );
+  }
+
+  if (!draft) {
+    // Документ существует, но СФ нет (пользователь удалил все СФ документа —
+    // DELETE /api/invoices/{id} удаляет СФ, не документ; либо первичный
+    // парсинг упал раньше создания СФ). Раньше это рендерило «Документ не
+    // найден», делая документ недостижимым для reparse/deskew/удаления
+    // (смоук-баг, root-caused PR #37).
+    const slimDoc = docQ.data;
+    return (
+      <div className="container-page py-6">
+        <Breadcrumbs
+          items={[
+            { label: "Дашборд", to: "/" },
+            { label: slimDoc.filename },
+          ]}
+        />
+
+        <PageHeader
+          title={slimDoc.filename}
+          subtitle="Документ без счетов-фактур"
+          actions={docStatusPill(slimDoc)}
+        />
+
+        <div className="mt-6">
+          <EmptyState
+            title="В документе нет счетов-фактур"
+            description="Запустите повторный разбор или удалите документ."
+            action={
+              <div className="flex items-center justify-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={reparse.isPending || isDocBusy(slimDoc.status)}
+                  title={isDocBusy(slimDoc.status) ? "Документ обрабатывается — дождитесь завершения" : undefined}
+                  onClick={() => reparse.mutate(docId)}
+                >
+                  Переразобрать
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={deskew.isPending || reparse.isPending || isDocBusy(slimDoc.status)}
+                  title={isDocBusy(slimDoc.status) ? "Документ обрабатывается — дождитесь завершения" : undefined}
+                  onClick={() => deskew.mutate(docId)}
+                >
+                  Выпрямить и переразобрать
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  disabled={remove.isPending || isDocBusy(slimDoc.status)}
+                  title={isDocBusy(slimDoc.status) ? "Документ обрабатывается — дождитесь завершения" : undefined}
+                  onClick={() => {
+                    if (window.confirm("Удалить документ?")) {
+                      remove.mutate(docId, {
+                        onSuccess: () => navigate("/"),
+                      });
+                    }
+                  }}
+                >
+                  Удалить
+                </Button>
+              </div>
+            }
+          />
+        </div>
+
+        <section className="mt-8">
+          <Surface padding="none" className="overflow-hidden">
+            <iframe
+              title="Документ"
+              src={invoicesApi.documentPdfUrl(docId)}
+              className="h-[90vh] w-full border-0 bg-surface-sunken"
+            />
+          </Surface>
+        </section>
       </div>
     );
   }
@@ -128,18 +232,7 @@ export default function Review() {
         actions={
           <>
             <ConfidenceBadge value={inv.ai_confidence} />
-            {isDocBusy(doc.status) ? (
-              // Приоритет статуса документа: во время reparse/deskew данные СФ
-              // на странице устаревшие (parse-then-swap ещё не случился) —
-              // пилл hasProblems/verified вводит в заблуждение (смоук PR #37).
-              <StatusPill tone="info" label="Обрабатывается" dot />
-            ) : doc.status === "error" ? (
-              // StatusPill не принимает title — оборачиваем в span, чтобы
-              // причина ошибки (last_error) была доступна по наведению.
-              <span title={doc.last_error ?? undefined}>
-                <StatusPill tone="danger" label="ошибка обработки" dot />
-              </span>
-            ) : (
+            {docStatusPill(doc) ?? (
               <>
                 {serverInv?.verified && (
                   <StatusPill tone="success" label="Проверено" dot />

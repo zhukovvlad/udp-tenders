@@ -268,6 +268,62 @@ describe("ReviewPage", () => {
     );
   });
 
+  it("shows slim view (not «Документ не найден») when doc is parsed but has no invoices", async () => {
+    // Смоук-баг: пользователь удалил все СФ документа (DELETE /api/invoices/{id}).
+    // Документ-родитель остаётся (status=parsed, invoices=[]) — «документ-призрак».
+    // Ранний return `!docQ.data || !draft` рендерил «Документ не найден», делая
+    // документ недостижимым для reparse/удаления.
+    server.use(
+      http.get("/api/invoices/documents/:id", () =>
+        HttpResponse.json({ ...sampleDocument, invoices: [] })
+      )
+    );
+
+    renderWithProviders(<Review />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("doc.pdf").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("Документ не найден")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Переразобрать$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Выпрямить и переразобрать/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Удалить$/i })).toBeInTheDocument();
+  });
+
+  it("slim view shows «ошибка обработки» pill with last_error tooltip when doc has no invoices", async () => {
+    server.use(
+      http.get("/api/invoices/documents/:id", () =>
+        HttpResponse.json({
+          ...sampleDocument,
+          invoices: [],
+          status: "error",
+          last_error: "Не удалось распознать документ",
+        })
+      )
+    );
+
+    renderWithProviders(<Review />);
+
+    const pill = await screen.findByText("ошибка обработки");
+    expect(pill).toBeInTheDocument();
+    expect(pill.closest("span[title]")).toHaveAttribute(
+      "title",
+      "Не удалось распознать документ"
+    );
+  });
+
+  it("still shows «Документ не найден» when the document truly does not exist (404)", async () => {
+    server.use(
+      http.get("/api/invoices/documents/:id", () => HttpResponse.json({ detail: "Not found" }, { status: 404 }))
+    );
+
+    renderWithProviders(<Review />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Документ не найден")).toBeInTheDocument();
+    });
+  });
+
   it("shows «ИИ-разбор: $0.00» when a parse happened but cost is 0 (parse_count > 0)", async () => {
     // Регресс: разбор состоялся (parse_count=1), но OpenRouter не вернул usage.cost
     // (стоимость 0). Гейт parse_count > 0 (а не parse_cost_usd > 0) обязан показать метрику.
