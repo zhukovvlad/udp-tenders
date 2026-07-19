@@ -321,6 +321,21 @@
 
 ## Инфраструктура / общее
 
+- [ ] **Async processing Ступень 2 — отложена до открытия YAGNI-триггеров (решение 2026-07-20)**
+  Ступени 0 и 1 в main (PR #36, #37): 202-контракт, polling, дедуп по file_hash, startup-sweep.
+  Ступень 2 (очередь — кандидат procrastinate; `processing_run_id` ownership-token; ретраи Transient;
+  stalled-детектор по `processing_started_at`; снятие no-overlap-инварианта — `workers>1`/rolling)
+  сознательно НЕ реализуется, пока не сработал ни один триггер.
+  **Триггеры:** потребность в `workers>1` или rolling-деплое; очередь под реальной нагрузкой
+  (прод пока не развёрнут — следующая веха трека именно прод-деплой, он же даст данные для S2).
+  **Порядок при старте:** brainstorming → обязательный спайк S2-0 (Neon + долгоживущие соединения:
+  scale-to-zero, обрывы, ср. `pool_recycle=300` — от этого зависит судьба advisory lock) → спека →
+  ревью-раунды → план → реализация. Повестка и ADR — `docs/superpowers/specs/2026-07-16-async-processing-design.md`
+  (базовая), `2026-07-19-async-processing-stage-1-design.md` §3/§8,
+  `docs/devlog/2026-07-19-async-processing-stage-1.md`.
+  **Напоминание:** до S2 деплой строго stop-then-start (startup-sweep корректен только без overlap;
+  комментарий-инвариант в justfile у `dev-backend`).
+
 - [ ] **auto_calculate не идемпотентен при частичном сбое**
   Если транзакция прерывается на середине цикла, часть месяцев будет рассчитана,
   часть — нет. Нет механизма retry или rollback-маркера.
