@@ -503,6 +503,24 @@ export default function ProjectPage() {
     }
   }
 
+  // Синхронизация activeTab при внутристраничной навигации на валидный ?tab=
+  // (клик по ссылке ретрая дубликата из UploadJobRow меняет query string у уже
+  // смонтированного ProjectPage — lazy-инициализатор activeTab выше срабатывает
+  // только при первом рендере и такую навигацию не ловит, Codex P2). Невалидный
+  // /исчезнувший tabParam вкладку не трогает — переключаем только на известное
+  // значение. ВАЖНО: блок идёт ПОСЛЕ сброса вкладки на direction-change выше —
+  // ссылка ретрая меняет direction (на all) и tab одновременно; оба setState
+  // применяются в одном рендер-проходе, и последний вызов побеждает, поэтому
+  // при обратном порядке сброс на «Обзор» затёр бы «Ошибки».
+  const tabParam = searchParams.get("tab");
+  const [prevTabParam, setPrevTabParam] = useState(tabParam);
+  if (prevTabParam !== tabParam) {
+    setPrevTabParam(tabParam);
+    if (tabParam !== null && (PROJECT_TAB_VALUES as readonly string[]).includes(tabParam)) {
+      setActiveTab(tabParam as ProjectTabValue);
+    }
+  }
+
   // ── остальные запросы — гейт до определения режима (§7.2) ──
   const queriesEnabled = direction !== undefined;
   const invoicesQ = useDashboardInvoices(projectId, scopedDirection, { enabled: queriesEnabled });

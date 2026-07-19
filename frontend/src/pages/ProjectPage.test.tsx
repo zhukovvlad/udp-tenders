@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse, type JsonBodyType } from "msw";
-import { Link, Routes, Route, useParams } from "react-router-dom";
+import { Link, Routes, Route, useParams, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "@/test/utils";
 import { server } from "@/test/server";
 import {
@@ -32,6 +32,32 @@ function renderProject(id: string = "1", search = "") {
 
 function mockSummary(payload: JsonBodyType) {
   server.use(http.get("/api/dashboard/summary", () => HttpResponse.json(payload)));
+}
+
+/**
+ * ProjectPage + кнопка-навигатор в одном матче Route — симулирует
+ * внутристраничный переход (клик по ссылке ретрая из UploadJobRow меняет
+ * только query string, ProjectPage НЕ размонтируется). Обычный rerender с
+ * новым initialRoute этого не проверяет — MemoryRouter пересоздаёт историю.
+ */
+function NavHarness({ to }: { to: string }) {
+  const navigate = useNavigate();
+  return (
+    <>
+      <button onClick={() => navigate(to)}>go</button>
+      <ProjectPage />
+    </>
+  );
+}
+
+/** Render ProjectPage вместе с NavHarness внутри того же Route (для in-page навигации). */
+function renderProjectWithNav(to: string, id: string = "1", search = "") {
+  return renderWithProviders(
+    <Routes>
+      <Route path="/projects/:id" element={<NavHarness to={to} />} />
+    </Routes>,
+    { initialRoute: `/projects/${id}${search}` },
+  );
 }
 
 describe("ProjectPage", () => {
@@ -68,6 +94,29 @@ describe("ProjectPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("project-tab-overview")).toHaveAttribute("data-active");
     });
+  });
+
+  it("внутристраничный переход на ?tab=errors переключает вкладку без размонтирования (Codex P2)", async () => {
+    // Legacy-режим (пустые directions) — direction всегда резолвится в "all"
+    // независимо от URL, поэтому Tabs остаются смонтированными и tab=errors —
+    // единственный работающий параметр (см. комментарий у href в UploadJobRow).
+    mockSummary(sampleDashboardSummaryEmpty);
+    const user = userEvent.setup();
+    renderProjectWithNav("/projects/1?direction=all&view=errors&tab=errors");
+
+    // Смонтировано без tab= — активна «Обзор» (дефолт lazy-инициализатора).
+    await waitFor(() => {
+      expect(screen.getByTestId("project-tab-overview")).toHaveAttribute("data-active");
+    });
+
+    // Клик меняет query string у уже смонтированного ProjectPage (тот же Route,
+    // без размонтирования) — только lazy-инициализатор useState это не ловит.
+    await user.click(screen.getByRole("button", { name: "go" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("project-tab-errors")).toHaveAttribute("data-active");
+    });
+    expect(await screen.findByText("Все документы разобраны успешно")).toBeInTheDocument();
   });
 
   it("shows KPI cards after summary loads", async () => {
