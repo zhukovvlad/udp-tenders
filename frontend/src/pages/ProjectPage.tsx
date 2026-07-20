@@ -204,6 +204,7 @@ function AllDirectionsSummaryView({
   errorDocCount,
   calculations,
   invoices,
+  invoicesLoading,
   busyDocIds,
   onOpenErrors,
   changeDirection,
@@ -221,6 +222,7 @@ function AllDirectionsSummaryView({
   errorDocCount: number;
   calculations: DashboardCalculation[];
   invoices: DashboardInvoiceRow[];
+  invoicesLoading: boolean;
   busyDocIds: Set<ID>;
   onOpenErrors: () => void;
   changeDirection: (code: string) => void;
@@ -355,7 +357,13 @@ function AllDirectionsSummaryView({
               </button>
             )}
           </div>
-          {invoices.length === 0 ? (
+          {invoicesLoading ? (
+            <div className="space-y-2" data-testid="invoices-overview-loading">
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
+            </div>
+          ) : invoices.length === 0 ? (
             <p className="text-sm text-fg-tertiary">Нет счетов.</p>
           ) : (
             <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
@@ -1603,6 +1611,7 @@ export default function ProjectPage() {
             errorDocCount={errorDocCount}
             calculations={calculations}
             invoices={invoices}
+            invoicesLoading={invoicesQ.isLoading}
             busyDocIds={busyDocIds}
             onOpenErrors={() =>
               setSearchParams((p) => {
