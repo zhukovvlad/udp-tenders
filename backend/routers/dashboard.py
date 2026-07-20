@@ -241,6 +241,7 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db)):
         "first_invoice_date": first_invoice_date.isoformat() if first_invoice_date else None,
         "last_invoice_date": last_invoice_date.isoformat() if last_invoice_date else None,
         "full_compensation_amount": full_compensation,
+        "calculations": [_serialize_calc_row(r) for r in calc_rows],
         "directions": dir_data["directions"],
         "mixed_invoice_count": dir_data["mixed_invoice_count"],
         "other_invoice_count": (invoice_count or 0) - len(dir_data["directed_invoice_ids"]),
