@@ -1069,6 +1069,31 @@ describe("ProjectPage", () => {
       expect(screen.queryByTestId("direction-switcher")).not.toBeInTheDocument();
     });
 
+    it("invoices loading: обзор показывает лоадер, а не мигающий «Нет счетов»", async () => {
+      // Сводка приходит сразу (обзор «Все» рендерится), но список счетов ещё грузится:
+      // в секции «Счета» должен быть лоадер, а не пустой стейт «Нет счетов.».
+      mockSummary(sampleDashboardSummaryMulti);
+      let release!: () => void;
+      const pending = new Promise<void>((r) => { release = r; });
+      server.use(
+        http.get("/api/dashboard/invoices", async () => {
+          await pending;
+          return HttpResponse.json([]);
+        }),
+      );
+      renderProject();
+
+      // Обзор отрисован (сводка загрузилась), но счета ещё в полёте → лоадер, не пусто.
+      await screen.findByTestId("direction-switcher");
+      expect(await screen.findByTestId("invoices-overview-loading")).toBeInTheDocument();
+      expect(screen.queryByText("Нет счетов.")).not.toBeInTheDocument();
+
+      // Счета догрузились пустыми — честный пустой стейт, лоадер исчез.
+      release();
+      expect(await screen.findByText("Нет счетов.")).toBeInTheDocument();
+      expect(screen.queryByTestId("invoices-overview-loading")).not.toBeInTheDocument();
+    });
+
     it("summary error: состояние ошибки с «Повторить», НЕ legacy-табы", async () => {
       server.use(
         http.get("/api/dashboard/summary", () => new HttpResponse(null, { status: 500 })),
