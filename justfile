@@ -145,6 +145,12 @@ db-migrate:
 db-test-migrate:
     cd backend && DATABASE_URL=$TEST_DATABASE_URL alembic upgrade head
 
+# Проверка дрейфа ORM/БД: локальная тест-БД до head + alembic check.
+# Нулевой код = моделей и схемы совпадают (нет pending upgrade ops).
+db-test-check: pg-test-start
+    cd backend && DATABASE_URL="{{test_db_local}}" alembic upgrade head
+    cd backend && DATABASE_URL="{{test_db_local}}" alembic check
+
 # === Misc ===
 
 # Создать суперюзера системы (интерактивный ввод пароля)
