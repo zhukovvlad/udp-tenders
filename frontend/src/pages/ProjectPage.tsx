@@ -124,6 +124,23 @@ function TabBarSlot() {
   return <div aria-hidden className="h-10" />;
 }
 
+/** Цельный скелетон страницы проекта на время загрузки summary (§4.2). */
+function ProjectPageSkeleton() {
+  return (
+    <div className="container-page py-8 space-y-6" data-testid="project-page-skeleton">
+      <Skeleton className="h-4 w-40" />       {/* breadcrumbs */}
+      <Skeleton className="h-8 w-1/3" />       {/* заголовок */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Skeleton className="h-20" />
+        <Skeleton className="h-20" />
+        <Skeleton className="h-20" />
+        <Skeleton className="h-20" />
+      </div>
+      <Skeleton className="h-[240px]" />       {/* контент */}
+    </div>
+  );
+}
+
 // Известные значения вкладок (TabsTrigger value ниже) — используется для
 // валидации deep-link ?tab= при инициализации activeTab (Codex P2, PR #37:
 // ретрай дубликата упавшего документа ведёт на /projects/:id?tab=errors).
@@ -458,22 +475,17 @@ export default function ProjectPage() {
   // обратная запись в URL при переключении не делается (вне объёма фикса).
   const [activeTab, setActiveTab] = useState(() => resolveInitialTab(searchParams.get("tab")));
   const directions = summaryQ.data?.directions;       // undefined пока summary грузится
-  // Ошибка summary не должна навсегда запирать страницу в skeleton: деградируем
-  // в legacy-режим (классические табы без направлений) — табы тянут данные из своих
-  // эндпойнтов. direction резолвим в "all" лишь чтобы снять гейт queriesEnabled (§7.2);
-  // фактический режим задаёт isLegacy ниже.
-  const summaryFailed = summaryQ.isError;
 
-  // undefined = режим не определён (summary ещё грузится) — НЕ 'all'
+  // undefined = summary ещё не резолвился в этом кадре — НЕ 'all'.
   const direction: string | undefined =
-    directions === undefined ? (summaryFailed ? "all" : undefined)
+    directions === undefined ? undefined
     : rawDirection === "all" ? "all"
     : directions.some((d) => d.code === rawDirection) ? (rawDirection as string)
     : directions.length === 1 ? directions[0].code     // автодефолт моно-объекта (ADR #10)
     : "all";
 
-  // Пустой объект (ADR #11) либо упавший summary → классические табы без направлений
-  const isLegacy = summaryFailed || (directions !== undefined && directions.length === 0);
+  // Legacy — ТОЛЬКО настоящий пустой проект (ADR #11); ошибка summary разведена выше.
+  const isLegacy = directions !== undefined && directions.length === 0;
   const scopedDirection = direction !== undefined && direction !== "all" ? direction : undefined;
   // ?view=errors читается только на «Все»; в других режимах ИГНОРИРУЕТСЯ, URL не
   // чистим (зафиксированный выбор из §7.2 «игнорируется/удаляется» — игнор дешевле,
@@ -617,6 +629,22 @@ export default function ProjectPage() {
     );
   }
 
+  if (projectsQ.isError) {
+    return (
+      <div className="container-page py-8">
+        <EmptyState
+          title="Не удалось загрузить объекты"
+          description="Проверьте соединение и повторите."
+          action={
+            <Button variant="secondary" loading={projectsQ.isFetching} onClick={() => projectsQ.refetch()}>
+              Повторить
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
   if (!project || projectId === null) {
     return (
       <div className="container-page py-8">
@@ -630,6 +658,29 @@ export default function ProjectPage() {
             </Link>
           }
         />
+      </div>
+    );
+  }
+
+  if (summaryQ.isLoading) {
+    return <ProjectPageSkeleton />;
+  }
+
+  if (summaryQ.isError) {
+    return (
+      <div className="container-page py-8">
+        <Breadcrumbs items={[{ label: "Объекты", to: "/projects" }, { label: project.name }]} />
+        <div className="mt-6">
+          <EmptyState
+            title="Не удалось загрузить сводку"
+            description="Данные объекта временно недоступны."
+            action={
+              <Button loading={summaryQ.isFetching} onClick={() => summaryQ.refetch()}>
+                Повторить
+              </Button>
+            }
+          />
+        </div>
       </div>
     );
   }
