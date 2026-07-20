@@ -19,7 +19,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"   # Vite 6 / React 19; поднять, если команда стандартизирует выше.
+          # Parity с dev-окружением (node 24), где сьют валидируется. На node 20
+          # перехват blob-ответа в MSW (axios responseType:"blob" через jsdom XHR)
+          # зависает — это несовместимость ТЕСТ-инфры, не баг приложения (в браузере
+          # XHR blob работает). Держим CI на том же major, что и локальная разработка.
+          node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
