@@ -25,6 +25,14 @@ def upgrade() -> None:
     # ставка на масштаб. Прод не развёрнут, таблицы малы → обычная транзакционная
     # миграция допустима; при росте таблиц заменить на CREATE INDEX CONCURRENTLY
     # (autocommit-блок Alembic).
+    #
+    # ix_documents_project_id ЧАСТИЧНО перекрывается левым префиксом уникального
+    # индекса uq_documents_project_file_hash (project_id, file_hash): его префикс
+    # (project_id) тоже обслуживает WHERE project_id = ?. Оставлен осознанно —
+    # это самый частый фильтр (project → documents), а узкий одноколоночный B-tree
+    # плотнее композита для чистого project_id-скана; documents — low-write, накладные
+    # на лишний индекс малы. Польза vs uq-префикс — проверить на нагрузочном наборе
+    # (гейт вариантов B/C); если планировщик стабильно предпочитает uq — кандидат на снос.
     op.create_index("ix_documents_project_id", "documents", ["project_id"])
     op.create_index("ix_invoices_document_id_date", "invoices", ["document_id", "date"])
 
