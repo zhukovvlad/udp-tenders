@@ -316,6 +316,31 @@ def list_project_invoices(
     ]
 
 
+def _serialize_calc_row(r: dict) -> dict:
+    """JSON-форма строки compute_calculations — единый контракт /summary и /calculations."""
+    return {
+        "project_id": r["project_id"],
+        "material_class_id": r["material_class_id"],
+        "material_class_name": r["material_class_name"],
+        "direction": r["direction"],
+        "period_start": r["period_start"].isoformat(),
+        "period_end": r["period_end"].isoformat(),
+        "material_total": r["material_total"],
+        "delivery_total": r["delivery_total"],
+        "total_qty": r["total_qty"],
+        "avg_price": r["avg_price"],
+        "unit_symbol": r["unit_symbol"],
+        "dimension_mismatch": r["dimension_mismatch"],
+        "invoice_count": r["invoice_count"],
+        "reference_price": r["reference_price"],
+        "deviation_pct": r["deviation_pct"],
+        "deviation_amount": r["deviation_amount"],
+        "corridor_pct": r["corridor_pct"],
+        "compensation_per_unit": r["compensation_per_unit"],
+        "compensation_amount": r["compensation_amount"],
+    }
+
+
 @router.get("/calculations")
 def list_calculations(
     project_id: int | None = None,
@@ -357,30 +382,7 @@ def list_calculations(
             direction_type_id=direction_type_id,
         )
 
-    return [
-        {
-            "project_id": r["project_id"],
-            "material_class_id": r["material_class_id"],
-            "material_class_name": r["material_class_name"],
-            "direction": r["direction"],
-            "period_start": r["period_start"].isoformat(),
-            "period_end": r["period_end"].isoformat(),
-            "material_total": r["material_total"],
-            "delivery_total": r["delivery_total"],
-            "total_qty": r["total_qty"],
-            "avg_price": r["avg_price"],
-            "unit_symbol": r["unit_symbol"],
-            "dimension_mismatch": r["dimension_mismatch"],
-            "invoice_count": r["invoice_count"],
-            "reference_price": r["reference_price"],
-            "deviation_pct": r["deviation_pct"],
-            "deviation_amount": r["deviation_amount"],
-            "corridor_pct": r["corridor_pct"],
-            "compensation_per_unit": r["compensation_per_unit"],
-            "compensation_amount": r["compensation_amount"],
-        }
-        for r in rows
-    ]
+    return [_serialize_calc_row(r) for r in rows]
 
 
 @router.get("/monthly-summary")
