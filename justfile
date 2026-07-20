@@ -167,6 +167,6 @@ clean:
 
 # === Storage ===
 
-# Локальный MinIO (S3): API :9000, консоль :9001, данные — ./minio-data
+# Локальный MinIO (S3): API :9259, консоль :9260, данные — ./minio-data
 minio:
-    minio server ./minio-data --console-address ":9001"
+    minio server ./minio-data --address ":9259" --console-address ":9260"

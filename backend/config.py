@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+psycopg://udp_app:CHANGE_ME@localhost:5432/udp"
 
     # MinIO / S3
-    S3_ENDPOINT: str = "http://localhost:9000"
+    S3_ENDPOINT: str = "http://localhost:9259"
     S3_ACCESS_KEY: str = "minioadmin"
     S3_SECRET_KEY: str = "minioadmin"
     S3_BUCKET: str = "invoices"

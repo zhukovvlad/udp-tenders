@@ -1,13 +1,13 @@
-import os
-
 import anyio
 import boto3
 from botocore.config import Config
 
-S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://localhost:9000")
-S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "minioadmin")
-S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "minioadmin")
-S3_BUCKET = os.getenv("S3_BUCKET", "invoices")
+from config import settings
+
+S3_ENDPOINT = settings.S3_ENDPOINT
+S3_ACCESS_KEY = settings.S3_ACCESS_KEY
+S3_SECRET_KEY = settings.S3_SECRET_KEY
+S3_BUCKET = settings.S3_BUCKET
 
 
 def get_s3_client():
