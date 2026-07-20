@@ -38,7 +38,7 @@ B2B веб-приложение для тендерных менеджеров �
 
 ### Требования
 
-- Python 3.12+ и Node.js 20+
+- Python 3.12+ и Node.js 24+
 - [just](https://just.systems/) — установить по инструкции на сайте или `winget install Casey.Just`
 - MinIO — скачать `minio.exe` со [страницы загрузки](https://min.io/download)
 - Аккаунт на [Neon](https://neon.tech) (бесплатный tier) и [OpenRouter](https://openrouter.ai)
