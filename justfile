@@ -94,6 +94,10 @@ test-backend-watch:
 test-frontend:
     cd frontend && npm test
 
+# Точечный фронт-прогон одного файла
+test-frontend-file file:
+    cd frontend && npx vitest run {{file}}
+
 test-frontend-watch:
     cd frontend && npm run test:watch
 
