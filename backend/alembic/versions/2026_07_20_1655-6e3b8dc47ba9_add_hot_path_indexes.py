@@ -19,6 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    """Создаёт индексы ix_documents_project_id и ix_invoices_document_id_date."""
     # Горячие колонки: project-фильтр и путь documents→invoices(document_id)+date range.
     # На текущих малых данных прироста может не быть (доминируют round-trip'ы) —
     # ставка на масштаб. Прод не развёрнут, таблицы малы → обычная транзакционная
@@ -29,5 +30,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Удаляет оба индекса в обратном порядке создания."""
     op.drop_index("ix_invoices_document_id_date", table_name="invoices")
     op.drop_index("ix_documents_project_id", table_name="documents")

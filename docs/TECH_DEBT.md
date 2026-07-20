@@ -101,6 +101,9 @@
   `ix_invoices_document_id_date`) добавлены реальной миграцией и объявлены в моделях —
   `just db-test-check` даёт чистый `No new upgrade operations detected`.
 
+- [ ] **Шаблон alembic script.py.mako даёт ruff I001 на каждой новой ревизии**
+  The default import order emitted by `backend/alembic/script.py.mako` trips ruff `I001` on every `just db-revision`; `pyproject.toml` per-file-ignores for `alembic/versions/*` cover E402/F401/UP007/UP035 but NOT I001, so each new revision needs a manual `ruff check --fix`. Two candidate fixes: (a) preferred — reorder imports in `backend/alembic/script.py.mako` (it is a template, not a historical migration → editing allowed); (b) add `I001` to the `alembic/versions/*` per-file ignore in `pyproject.toml`. Обнаружено в PR-1 (миграция add_hot_path_indexes).
+
 ---
 
 ## Frontend
