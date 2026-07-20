@@ -74,7 +74,7 @@
   `selectinload(Document.invoices).selectinload(Invoice.items)` + вычисление метрик в Python
   без дополнительных запросов на документ.
 
-- [ ] **Дрейф ORM/БД: индексы созданы raw SQL, но не объявлены в моделях**
+- [x] **Дрейф ORM/БД: индексы созданы raw SQL, но не объявлены в моделях**
   `alembic revision --autogenerate` устойчиво предлагает лишние диффы, не связанные с текущими
   изменениями: `drop_index('ix_invoice_items_invoice_id_item_type')`, `drop_index('ix_invoices_supplier_id')`,
   `drop_index('ix_suppliers_name_trgm')` (GIN trigram), `drop_index('uq_suppliers_name_no_inn')`
@@ -91,10 +91,15 @@
   `index=True` в `__table_args__`. Именно объявление в метаданных убирает диффы (как
   только метаданные совпадут с БД, автоген перестанет предлагать drop) — отдельная
   no-op миграция для этого не нужна и не помогает. Для `create_index('ix_suppliers_id')`
-  ситуация обратная: `Supplier.id` уже имеет `index=True` (models.py:282), но индекса нет
-  в БД — либо создать его реальной миграцией, либо убрать избыточный `index=True` с PK
+  ситуация обратная: `Supplier.id` имел `index=True` (было актуально на момент фиксации
+  бага — `backend/models.py:291`), но индекса нет в БД — избыточный `index=True` с PK убран
   (первичный ключ и так проиндексирован). Отдельной сфокусированной задачей, не на зелёной
   feature-ветке.
+  **Решено (PR-1):** 4 индекса (`Supplier.name` trigram GIN, `uq_suppliers_name_no_inn`,
+  `Invoice.supplier_id`, `InvoiceItem(invoice_id, item_type)`) объявлены как метаданные;
+  избыточный `index=True` с `Supplier.id` убран; 2 новых индекса (`ix_documents_project_id`,
+  `ix_invoices_document_id_date`) добавлены реальной миграцией и объявлены в моделях —
+  `just db-test-check` даёт чистый `No new upgrade operations detected`.
 
 ---
 

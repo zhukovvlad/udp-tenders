@@ -252,7 +252,7 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
     filename = Column(String, nullable=False)
     s3_key = Column(String)
     doc_type = Column(String, default="unknown")
@@ -376,6 +376,10 @@ class Invoice(Base):
     verified = Column(Boolean, default=False, nullable=False)
     verified_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
+
+    __table_args__ = (
+        Index("ix_invoices_document_id_date", "document_id", "date"),
+    )
 
     document = relationship("Document", back_populates="invoices")
     supplier = relationship("Supplier", back_populates="invoices")
