@@ -34,6 +34,9 @@ export interface DashboardSummary {
   full_compensation_amount: number | null;
   /** Направления с данными, без типа other (ADR #9); порядок — по id типа. */
   directions: DirectionSummary[];
+  /** Готовые строки расчёта за полный период (без direction-фильтра). Опционально:
+   * старый бэкенд поля не отдаёт → фронт фолбэчит на сетевой /calculations (§2). */
+  calculations?: DashboardCalculation[];
   /** Счета с позициями ≥2 направлений (§5.5). */
   mixed_invoice_count: number;
   /** Счета без единой direction-позиции — хвост «· N проч.» в KPI. */

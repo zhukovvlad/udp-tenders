@@ -24,6 +24,7 @@ import type { MaterialClassCreateInput } from "@/types/materialClass";
 import type { MaterialType, Unit } from "@/types/unit";
 import type { ReferencePriceCreateInput, ReferencePriceUpdateInput } from "@/types/referencePrice";
 import type { DocumentDetail, InvoiceUpdateInput } from "@/types/invoice";
+import type { DashboardSummary } from "@/types/dashboard";
 import type { AppSettings } from "./api/settings";
 import type {
   AdminUserCreateInput,
@@ -322,12 +323,32 @@ export function useDashboardCalculations(
   direction?: string,
   options?: { enabled?: boolean },
 ) {
+  const qc = useQueryClient();
   return useQuery({
     queryKey: projectId
       ? qk.dashboard.calculations(projectId, periodStart, periodEnd, direction)
       : ["dashboard", "calculations", "none"],
     queryFn: () => dashboardApi.calculations(projectId as ID, periodStart, periodEnd, direction),
     enabled: projectId !== null && (options?.enabled ?? true),
+    // Переиспользуем calc-rows из уже загруженного summary: на первой отрисовке дефолтного
+    // вида (период не задан) запрос не уходит. Изменённый период / старый бэк без поля /
+    // projectId===null (query disabled) → undefined → сеть. Клиентский фильтр по direction
+    // эквивалентен бэкенд-фильтру (применяется после аллокации). §2 спеки.
+    initialData: () => {
+      if (projectId === null || periodStart || periodEnd) return undefined;
+      const s = qc.getQueryData<DashboardSummary>(qk.dashboard.summary(projectId));
+      if (s?.calculations === undefined) return undefined;
+      // direction здесь уже провалидирован вызывающей стороной (scopedDirection на
+      // ProjectPage сверяется с summary.directions, "other" туда не попадает) —
+      // фильтр по неизвестному коду и падение бэка на 422 недостижимы отсюда.
+      return direction
+        ? s.calculations.filter((r) => r.direction === direction)
+        : s.calculations;
+    },
+    initialDataUpdatedAt: () =>
+      projectId === null
+        ? undefined
+        : qc.getQueryState(qk.dashboard.summary(projectId))?.dataUpdatedAt,
   });
 }
 
@@ -536,6 +557,7 @@ export function useSetTypeCorridor(projectId: ID | null) {
       qc.invalidateQueries({ queryKey: qk.corridors(projectId) });
       qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
       qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
+      qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
     },
   });
 }
@@ -552,6 +574,7 @@ export function useDeleteTypeCorridor(projectId: ID | null) {
       qc.invalidateQueries({ queryKey: qk.corridors(projectId) });
       qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
       qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
+      qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
     },
   });
 }
@@ -568,6 +591,7 @@ export function useSetClassCorridor(projectId: ID | null) {
       qc.invalidateQueries({ queryKey: qk.corridors(projectId) });
       qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
       qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
+      qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
     },
   });
 }
@@ -584,6 +608,7 @@ export function useDeleteClassCorridor(projectId: ID | null) {
       qc.invalidateQueries({ queryKey: qk.corridors(projectId) });
       qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
       qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
+      qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
     },
   });
 }

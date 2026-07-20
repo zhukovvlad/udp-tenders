@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse, type JsonBodyType } from "msw";
+import { http, HttpResponse, delay, type JsonBodyType } from "msw";
 import { Link, Routes, Route, useParams, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "@/test/utils";
 import { server } from "@/test/server";
@@ -1056,13 +1056,52 @@ describe("ProjectPage", () => {
       expect(screen.queryByTestId("direction-switcher")).not.toBeInTheDocument();
     });
 
-    it("summary error: degrades to legacy tabs instead of infinite skeleton", async () => {
+    it("summary loading: цельный skeleton, без табов/switcher (§4.2)", async () => {
+      server.use(
+        http.get("/api/dashboard/summary", async () => {
+          await delay("infinite");                 // держим загрузку summary
+          return HttpResponse.json(sampleDashboardSummaryMulti);
+        }),
+      );
+      renderProject();
+      expect(await screen.findByTestId("project-page-skeleton")).toBeInTheDocument();
+      expect(screen.queryByTestId("project-page-tabs-list")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("direction-switcher")).not.toBeInTheDocument();
+    });
+
+    it("summary error: состояние ошибки с «Повторить», НЕ legacy-табы", async () => {
       server.use(
         http.get("/api/dashboard/summary", () => new HttpResponse(null, { status: 500 })),
       );
       renderProject();
-      expect(await screen.findByTestId("project-page-tabs-list")).toBeInTheDocument();
-      expect(screen.queryByTestId("direction-switcher")).not.toBeInTheDocument();
+      expect(await screen.findByText("Не удалось загрузить сводку")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Повторить" })).toBeInTheDocument();
+      expect(screen.queryByTestId("project-page-tabs-list")).not.toBeInTheDocument();
+    });
+
+    it("summary 500 → «Повторить» → 200: нормальный экран", async () => {
+      let calls = 0;
+      server.use(
+        http.get("/api/dashboard/summary", () => {
+          calls += 1;
+          return calls === 1
+            ? new HttpResponse(null, { status: 500 })
+            : HttpResponse.json(sampleDashboardSummaryMulti);
+        }),
+      );
+      const user = userEvent.setup();
+      renderProject();
+      await user.click(await screen.findByRole("button", { name: "Повторить" }));
+      await screen.findByTestId("direction-switcher");   // сводка догрузилась
+    });
+
+    it("projects error: ошибка списка, НЕ «Объект не найден»", async () => {
+      server.use(
+        http.get("/api/projects", () => new HttpResponse(null, { status: 500 })),
+      );
+      renderProject();
+      expect(await screen.findByText("Не удалось загрузить объекты")).toBeInTheDocument();
+      expect(screen.queryByText("Объект не найден")).not.toBeInTheDocument();
     });
 
     it("?direction=rebar opens rebar mode directly (criterion #3)", async () => {
