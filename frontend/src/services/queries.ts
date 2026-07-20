@@ -338,6 +338,9 @@ export function useDashboardCalculations(
       if (projectId === null || periodStart || periodEnd) return undefined;
       const s = qc.getQueryData<DashboardSummary>(qk.dashboard.summary(projectId));
       if (s?.calculations === undefined) return undefined;
+      // direction здесь уже провалидирован вызывающей стороной (scopedDirection на
+      // ProjectPage сверяется с summary.directions, "other" туда не попадает) —
+      // фильтр по неизвестному коду и падение бэка на 422 недостижимы отсюда.
       return direction
         ? s.calculations.filter((r) => r.direction === direction)
         : s.calculations;
@@ -554,6 +557,7 @@ export function useSetTypeCorridor(projectId: ID | null) {
       qc.invalidateQueries({ queryKey: qk.corridors(projectId) });
       qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
       qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
+      qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
     },
   });
 }
@@ -570,6 +574,7 @@ export function useDeleteTypeCorridor(projectId: ID | null) {
       qc.invalidateQueries({ queryKey: qk.corridors(projectId) });
       qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
       qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
+      qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
     },
   });
 }
@@ -586,6 +591,7 @@ export function useSetClassCorridor(projectId: ID | null) {
       qc.invalidateQueries({ queryKey: qk.corridors(projectId) });
       qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
       qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
+      qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
     },
   });
 }
@@ -602,6 +608,7 @@ export function useDeleteClassCorridor(projectId: ID | null) {
       qc.invalidateQueries({ queryKey: qk.corridors(projectId) });
       qc.invalidateQueries({ queryKey: ["dashboard", "calculations", projectId] });
       qc.invalidateQueries({ queryKey: qk.dashboard.calculationsAll });
+      qc.invalidateQueries({ queryKey: qk.dashboard.summary(projectId) });
     },
   });
 }
