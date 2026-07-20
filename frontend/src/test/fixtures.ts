@@ -1,3 +1,5 @@
+import type { DashboardCalculation, DashboardSummary } from "@/types/dashboard";
+
 export const sampleProject = {
   id: 1,
   name: "ЖК Радуга",
@@ -119,6 +121,38 @@ export const sampleDashboardSummaryEmpty = {
   first_invoice_date: null, last_invoice_date: null, full_compensation_amount: null,
   directions: [], mixed_invoice_count: 0, other_invoice_count: 0,
   delivery_total: 0, other_total: 0,
+};
+
+const _calcBase = {
+  period_start: "2026-01-01", period_end: "2026-01-31",
+  reference_price: null, deviation_pct: null, deviation_amount: null,
+  corridor_pct: null, compensation_per_unit: null, compensation_amount: null,
+  material_total: 100000, delivery_total: 0, total_qty: 10, invoice_count: 1,
+};
+
+export const sampleCalcRowConcrete: DashboardCalculation = {
+  ..._calcBase, material_class_id: 10, material_class_name: "В25",
+  direction: "concrete", avg_price: 9600,
+};
+export const sampleCalcRowRebar: DashboardCalculation = {
+  ..._calcBase, material_class_id: 20, material_class_name: "А500С Ø12",
+  direction: "rebar", avg_price: 62000,
+};
+/** Строка типа other — для проверки, что моно-фильтр её отсекает. */
+export const sampleCalcRowOther: DashboardCalculation = {
+  ..._calcBase, material_class_id: 99, material_class_name: "Прочий материал",
+  direction: "other", avg_price: 1234,
+};
+
+/** Мульти-объект с готовыми calc-rows (для теста «0 вызовов /calculations»). */
+export const sampleSummaryMultiWithCalcs: DashboardSummary = {
+  ...sampleDashboardSummaryMulti,
+  calculations: [sampleCalcRowConcrete, sampleCalcRowRebar],
+};
+/** Моно-объект: в calc-rows есть чужая other-строка, которую фильтр обязан отсечь. */
+export const sampleSummaryMonoWithCalcs: DashboardSummary = {
+  ...sampleDashboardSummary,
+  calculations: [sampleCalcRowConcrete, sampleCalcRowOther],
 };
 
 export const sampleReferencePrice = {
