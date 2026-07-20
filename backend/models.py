@@ -252,7 +252,7 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
     filename = Column(String, nullable=False)
     s3_key = Column(String)
     doc_type = Column(String, default="unknown")
@@ -288,12 +288,18 @@ class Document(Base):
 class Supplier(Base):
     __tablename__ = "suppliers"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     inn = Column(String, nullable=True, unique=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
 
     invoices = relationship("Invoice", back_populates="supplier")
+
+    __table_args__ = (
+        # Оба уже в БД (миграция b3c7e9f12a45) — объявляем как метаданные.
+        Index("ix_suppliers_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"}),
+        Index("uq_suppliers_name_no_inn", "name", unique=True, postgresql_where=sa_text("inn IS NULL")),
+    )
 
 
 class ProjectSupplierExclusion(Base):
@@ -360,7 +366,7 @@ class Invoice(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
-    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True, index=True)
     number = Column(String, nullable=False)
     date = Column(Date, nullable=False)
     supplier_name = Column(String)
@@ -370,6 +376,10 @@ class Invoice(Base):
     verified = Column(Boolean, default=False, nullable=False)
     verified_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
+
+    __table_args__ = (
+        Index("ix_invoices_document_id_date", "document_id", "date"),
+    )
 
     document = relationship("Document", back_populates="invoices")
     supplier = relationship("Supplier", back_populates="invoices")
@@ -397,6 +407,11 @@ class InvoiceItem(Base):
     unit_price = Column(Numeric(19, 4), nullable=False)
     amount = Column(Numeric(15, 2), nullable=False)
     vat_amount = Column(Numeric(15, 2))
+
+    __table_args__ = (
+        # Уже в БД (миграция c7d8e9f0a1b2) — объявляем, чтобы autogenerate не предлагал drop.
+        Index("ix_invoice_items_invoice_id_item_type", "invoice_id", "item_type"),
+    )
 
     invoice = relationship("Invoice", back_populates="items")
     material_class = relationship("MaterialClass", back_populates="invoice_items")

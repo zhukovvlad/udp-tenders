@@ -145,6 +145,12 @@ db-migrate:
 db-test-migrate:
     cd backend && DATABASE_URL=$TEST_DATABASE_URL alembic upgrade head
 
+# Проверка дрейфа ORM/БД: локальная тест-БД до head + alembic check.
+# Нулевой код = моделей и схемы совпадают (нет pending upgrade ops).
+db-test-check: pg-test-start
+    cd backend && DATABASE_URL="{{test_db_local}}" alembic upgrade head
+    cd backend && DATABASE_URL="{{test_db_local}}" alembic check
+
 # === Misc ===
 
 # Создать суперюзера системы (интерактивный ввод пароля)
@@ -161,6 +167,6 @@ clean:
 
 # === Storage ===
 
-# Локальный MinIO (S3): API :9000, консоль :9001, данные — ./minio-data
+# Локальный MinIO (S3): API :9259, консоль :9260, данные — ./minio-data
 minio:
-    minio server ./minio-data --console-address ":9001"
+    minio server ./minio-data --address ":9259" --console-address ":9260"
