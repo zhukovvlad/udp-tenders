@@ -26,6 +26,9 @@
   приписывать коммиты чужой модели.
 - **Новых зависимостей не добавляем.** Сломанный рецепт `test-backend-watch` (ptw) удаляется.
 - **`.env` / `.env.test` не трогать.** Исторические миграции и `docs/done/**` не редактировать.
+  **Исторические** также корневые `2026-05-06-udp-price-tracker.md` и
+  `2026-05-06-udp-price-tracker-design.md` (git-tracked, вне `docs/done/`): их упоминания
+  `pip install -r requirements.txt` — снимок прошлого, НЕ править, несмотря на миграцию.
 - **CI:** `uv sync --locked` (не `--frozen`), все uv-команды с `working-directory: backend`.
 - **Предусловие:** локально `uv` установлен заранее; в CI его ставит `astral-sh/setup-uv`.
 - **Приёмка:** `just install && just lint && just test` — всё зелёное.
@@ -335,14 +338,20 @@ Deliverable: `.github/workflows/backend-tests.yml` использует `astral-
 
 - [ ] **Step 1: Подтвердить актуальную версию setup-uv и uv**
 
-Открыть https://docs.astral.sh/uv/guides/integration/github/ и https://github.com/astral-sh/setup-uv/releases, взять текущий релиз action (ориентир — `v8` / `v8.1.0`) и текущую версию uv (ориентир — `0.11.29`). НЕ хардкодить непроверенный SHA — использовать актуальный major-tag либо подтверждённый SHA.
+**Важно:** с v8.0.0 `setup-uv` перешёл на immutable-релизы — плавающие теги `@v8` / `@v8.0`
+**не резолвятся** и публиковаться не будут. Работают только полные неизменяемые теги
+(`@v8.3.2`) или SHA. Дока рекомендует SHA-пин.
+Открыть https://github.com/astral-sh/setup-uv/releases и взять текущий полный тег + его SHA.
+На момент написания: **v8.3.2** → SHA `11f9893b081a58869d3b5fccaea48c9e9e46f990`.
+Версия uv — `0.11.29` (текущий пример в офиц. доке uv). Значения переиспользовать в Step 2;
+если релиз с тех пор сменился — подставить новый полный тег/SHA (major-tag как опции больше нет).
 
 - [ ] **Step 2: Заменить блок установки Python + зависимостей**
 
 В `.github/workflows/backend-tests.yml` удалить шаги `actions/setup-python@v5` (с `cache: pip` и `cache-dependency-path`) и `Install backend dependencies`. Вместо них — setup-uv + sync (версии из Step 1):
 
 ```yaml
-      - uses: astral-sh/setup-uv@v8
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: "0.11.29"
           enable-cache: true
@@ -364,16 +373,17 @@ Deliverable: `.github/workflows/backend-tests.yml` использует `astral-
       - name: Run backend tests (unit + integration)
         run: cd backend && pytest
 ```
-на:
+на (флаг `--locked` не даёт `uv run` молча пересобрать lock в раннере при рассинхроне —
+любой дрейф pyproject/lock падает явно, согласуясь с recovery-процедурой Task 6 Step 5):
 ```yaml
       - name: Lint (ruff)
-        run: uv run ruff check .
+        run: uv run --locked ruff check .
         working-directory: backend
 
       - name: Run backend tests (unit + integration)
         # conftest applies Alembic to head on TEST_DATABASE_URL once per session;
         # pgvector image makes CREATE EXTENSION vector succeed.
-        run: uv run pytest
+        run: uv run --locked pytest
         working-directory: backend
 ```
 Блок `env:` (DATABASE_URL, TEST_DATABASE_URL, SECRET_KEY, OPENROUTER_API_KEY) и `services.postgres` — без изменений.
