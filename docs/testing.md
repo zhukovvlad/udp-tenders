@@ -21,7 +21,7 @@
 | GitHub Actions CI | — | backend ✅ / frontend ручной | — |
 | **Grand total (локально)** | **52** | **581** | ✅ |
 
-Все 581 тест зелёный локально (backend — `pytest --co` собирает 447; frontend — 134). CI настроен для backend (GitHub Actions, `.github/workflows/backend-tests.yml`); frontend запускается вручную.
+Все 581 тест зелёный локально (backend — `uv run pytest --co` собирает 447; frontend — 134). CI настроен для backend (GitHub Actions, `.github/workflows/backend-tests.yml`); frontend запускается вручную.
 
 ---
 
