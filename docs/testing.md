@@ -53,6 +53,8 @@ just lint                    # backend (ruff) + frontend (eslint)
 just typecheck-frontend      # tsc --noEmit
 ```
 
+`just install` создаёт изолированный `backend/.venv` из `uv.lock` (uv sync) — отдельный venv активировать не нужно, все рецепты идут через `uv run`.
+
 ### Конфигурация
 
 - **`.env.test`** в корне репо (в `.gitignore`) с `TEST_DATABASE_URL` — отдельная Neon test-ветка, **не прод**.
@@ -127,7 +129,7 @@ Postgres, иначе — Neon из `.env` (у контрибьюторов бе�
 
 ### Backend
 
-- **pytest 8** + `pytest-asyncio` (auto-mode), `pytest-cov`, `pytest-dotenv`.
+- **pytest 9** + `pytest-asyncio` (auto-mode), `pytest-cov`, `pytest-dotenv`.
 - **`db_engine`** (session-scoped): открывает соединение к Neon test-ветке, накатывает Alembic
   миграции один раз на всю сессию pytest.
 - **`db_session`** (function-scoped): каждый тест запускается в своей транзакции с
@@ -271,7 +273,7 @@ describe("MyComponent", () => {
 # Реальный PDF лежит локально, в .gitignore
 cp /path/to/real.pdf backend/tests/fixtures/pdf/real/
 cd backend
-python scripts/snapshot_ai_responses.py tests/fixtures/pdf/real/real.pdf my_scenario
+uv run python scripts/snapshot_ai_responses.py tests/fixtures/pdf/real/real.pdf my_scenario
 # → backend/tests/fixtures/openrouter/my_scenario.json (sanitized, ИНН/имена → фейки)
 git add backend/tests/fixtures/openrouter/my_scenario.json
 ```

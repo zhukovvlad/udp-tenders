@@ -50,6 +50,8 @@ T3MP3ST не применялся (клонирование отклонено �
 Рекомендация: поднять минимальные версии в `backend/requirements.txt`:
 `python-multipart>=0.0.31`, `pillow>=12.3.0`, `python-dotenv>=1.2.2`, `pydantic-settings>=2.14.2`.
 
+> **Обновление (миграция на uv):** источник backend-зависимостей переведён с `requirements*.txt` на `pyproject.toml` + `uv.lock`. Указанные фиксы зафиксированы как `>=` границы в pyproject; точные версии — в `uv.lock`. См. `docs/superpowers/specs/2026-07-21-uv-migration-design.md`.
+
 ## 3. SAST (bandit, backend без tests/alembic/scripts)
 
 0 high / 0 medium. Два low (CWE-703), оба осознанные:
