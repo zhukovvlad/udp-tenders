@@ -6,6 +6,7 @@ backend/.env
 backend/database.db
 backend/database.db.backup
 backend/logs/
+/backend/.venv/
 
 # Node
 node_modules/
