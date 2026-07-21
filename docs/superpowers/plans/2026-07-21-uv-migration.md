@@ -25,6 +25,9 @@
   (человек или агент) добавляет собственный трейлер согласно своему harness — не
   приписывать коммиты чужой модели.
 - **Новых зависимостей не добавляем.** Сломанный рецепт `test-backend-watch` (ptw) удаляется.
+  `rapidfuzz` **не переносим** в pyproject — объявлен, но нигде не импортируется (0 вхождений
+  в prod/tests/scripts); удаляется как мёртвая зависимость (решение пользователя 2026-07-21).
+  Если понадобится под RP-2 (fuzzy-валидатор направлений) — добавить явно тогда же.
 - **`.env` / `.env.test` не трогать.** Исторические миграции и `docs/done/**` не редактировать.
   **Исторические** также корневые `2026-05-06-udp-price-tracker.md` и
   `2026-05-06-udp-price-tracker-design.md` (git-tracked, вне `docs/done/`): их упоминания
@@ -124,7 +127,6 @@ dev = [
     "faker==30.10.0",
     "freezegun==1.5.1",
     "ruff==0.7.4",
-    "rapidfuzz==3.9.7",
 ]
 
 [tool.uv]
@@ -182,7 +184,7 @@ Expected: создан `backend/.venv`; вывод содержит `Installed N
 Теперь `.venv` существует, поэтому `uv pip list` работает. Сверить установленные версии
 прямых зависимостей с исходными (те же, что были в requirements — файлы ещё на месте):
 
-Run: `cd backend && uv pip list --format=freeze | grep -Ei "^(fastapi|uvicorn|sqlalchemy|python-multipart|python-dotenv|httpx|openpyxl|boto3|psycopg|alembic|pgvector|pyjwt|pwdlib|pydantic-settings|pydantic|click|pypdfium2|pikepdf|pillow|pytest|pytest-asyncio|pytest-cov|pytest-xdist|pytest-dotenv|respx|factory-boy|faker|freezegun|ruff|rapidfuzz)=="`
+Run: `cd backend && uv pip list --format=freeze | grep -Ei "^(fastapi|uvicorn|sqlalchemy|python-multipart|python-dotenv|httpx|openpyxl|boto3|psycopg|alembic|pgvector|pyjwt|pwdlib|pydantic-settings|pydantic|click|pypdfium2|pikepdf|pillow|pytest|pytest-asyncio|pytest-cov|pytest-xdist|pytest-dotenv|respx|factory-boy|faker|freezegun|ruff)=="`
 Expected (прямые версии — точно исходные, включая security-фиксы):
 ```
 alembic==1.14.1
@@ -210,7 +212,6 @@ pytest-dotenv==0.5.2
 pytest-xdist==3.6.1
 python-dotenv==1.2.2
 python-multipart==0.0.31
-rapidfuzz==3.9.7
 respx==0.21.1
 ruff==0.7.4
 sqlalchemy==2.0.35
