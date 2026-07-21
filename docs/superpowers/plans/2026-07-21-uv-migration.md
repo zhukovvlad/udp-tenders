@@ -342,7 +342,7 @@ Deliverable: `.github/workflows/backend-tests.yml` использует `astral-
 **Важно:** с v8.0.0 `setup-uv` перешёл на immutable-релизы — плавающие теги `@v8` / `@v8.0`
 **не резолвятся** и публиковаться не будут. Работают только полные неизменяемые теги
 (`@v8.3.2`) или SHA. Дока рекомендует SHA-пин.
-Открыть https://github.com/astral-sh/setup-uv/releases и взять текущий полный тег + его SHA.
+Открыть релиз https://github.com/astral-sh/setup-uv/releases/tag/v8.3.2 и сверить его SHA.
 Пин: **v8.3.2** → SHA `11f9893b081a58869d3b5fccaea48c9e9e46f990`, uv `0.11.29` — оба
 подтверждены (setup-uv release v8.3.2; uv 0.11.29 от 2026-07-15). Задача Step 1 —
 **только сверить**, что SHA всё ещё указывает на тег `v8.3.2` (immutable-релиз не меняется).
@@ -397,8 +397,9 @@ Deliverable: `.github/workflows/backend-tests.yml` использует `astral-
 сверить, что у каждого uv-шага есть `working-directory: backend`, блок `env:` и
 `services.postgres` не тронуты, а `actions/setup-python` больше не упоминается:
 Run: `grep -nE "setup-python|working-directory|uv (sync|run)" .github/workflows/backend-tests.yml`
-Expected: строк с `setup-python` нет; у `uv sync --locked`, `uv run ruff`, `uv run pytest`
-и шага `setup-uv` присутствует `working-directory: backend`.
+Expected: строк с `setup-python` нет; присутствуют `uv sync --locked`,
+`uv run --locked ruff` и `uv run --locked pytest`; у каждого uv-шага и у `setup-uv` —
+`working-directory: backend`.
 Полная валидность workflow подтверждается прогоном CI на PR (Task 6, Step 5).
 
 - [ ] **Step 5: Commit**
@@ -566,4 +567,4 @@ gh pr create --base main --title "build: миграция backend на uv (proje
 
 **Placeholder scan:** setup-uv запинен на подтверждённый immutable-релиз v8.3.2 (SHA `11f9893…`) + uv 0.11.29 — конкретные проверенные значения, не placeholder; Step 1 лишь повторно сверяет соответствие `v8.3.2 ↔ SHA`. Числа passed-тестов даны с оговоркой «или текущие». Прочих TBD/TODO нет.
 
-**Type/имена consistency:** имена файлов, рецептов и команд (`uv sync`, `uv run`, `--locked`, `backend/.venv/`, `test-int-local`) согласованы между задачами и со спекой. Прямые версии в Task 1 (`==`→`>=`) идентичны списку из требований.
+**Type/имена consistency:** имена файлов, рецептов и команд (`uv sync`, `uv run`, `--locked`, `backend/.venv/`, `test-int-local`) согласованы между задачами и со спекой. Прямые версии в Task 1 (`==`→`>=`) идентичны списку из требований, за исключением осознанно удалённого `rapidfuzz`.
