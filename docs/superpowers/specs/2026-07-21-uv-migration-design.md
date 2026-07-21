@@ -76,12 +76,16 @@ dev = [
     "faker>=30.10.0",
     "freezegun>=1.5.1",
     "ruff>=0.7.4",
-    "rapidfuzz>=3.9.7",
 ]
 
 [tool.uv]
 package = false
 ```
+
+**`rapidfuzz` не переносится:** пакет был объявлен в `requirements-test.txt`, но нигде не
+импортируется (0 вхождений в prod/tests/scripts) — удаляется как мёртвая зависимость
+(решение пользователя 2026-07-21), симметрично удалению сломанного рецепта `ptw`. Если
+понадобится под RP-2 (fuzzy-валидатор направлений) — добавить явно тогда же.
 
 **`package = false`** объявляет проект как non-package (это flat-layout приложение:
 нет build backend и каталога-пакета `udp_backend`). Настройка штатная для uv и
@@ -157,12 +161,12 @@ dev-backend:
   `.python-version` не гарантированно подхватится.
 - **Версия Python** приезжает из `.python-version`; блок `python-version: "3.12"`
   и `cache: pip` из `setup-python` уходят (кеш обеспечивает setup-uv).
-- **Пиннинг action:** `setup-uv` пинится на текущий релиз. Ориентир на момент
-  написания — `astral-sh/setup-uv@v8` (v8.1.0), uv `version: "0.11.29"`,
-  `enable-cache: true`. **Точную актуальную версию/SHA подтвердить по официальной
-  доке на момент реализации** — здесь коммит-SHA не фиксируется, чтобы не
-  захардкодить непроверенное значение. Опционально — SHA-пиннинг, если проект
-  примет такую политику.
+- **Пиннинг action:** с v8.0.0 `setup-uv` перешёл на immutable-релизы — плавающие
+  теги (`@v8`, `@v8.0`) **не резолвятся**, только полный неизменяемый тег или SHA.
+  Пин: `astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2`,
+  uv `version: "0.11.29"`, `enable-cache: true` (оба значения подтверждены). При
+  реализации — лишь сверить соответствие `v8.3.2 ↔ SHA`; проверенный immutable-пин
+  на новый релиз не менять.
 
 Env-переменные (`DATABASE_URL`, `TEST_DATABASE_URL`, `SECRET_KEY`,
 `OPENROUTER_API_KEY`) и Postgres service-container — без изменений.
@@ -172,16 +176,16 @@ https://docs.astral.sh/uv/reference/settings/
 
 Целевые шаги job:
 ```yaml
-- uses: astral-sh/setup-uv@<подтвердить-актуальную>
+- uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
   with:
-    version: "0.11.29"          # подтвердить
+    version: "0.11.29"
     enable-cache: true
     working-directory: backend
 - run: uv sync --locked
   working-directory: backend
-- run: uv run ruff check .
+- run: uv run --locked ruff check .
   working-directory: backend
-- run: uv run pytest
+- run: uv run --locked pytest
   working-directory: backend
 ```
 
