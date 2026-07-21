@@ -163,7 +163,7 @@ create-org name:
 
 # Записать snapshot AI-ответа от реального PDF (пути — относительно backend/; см. docs/testing.md)
 snapshot-ai pdf scenario:
-    cd backend && uv run python scripts/snapshot_ai_responses.py {{pdf}} {{scenario}}
+    cd backend && uv run python scripts/snapshot_ai_responses.py "{{pdf}}" "{{scenario}}"
 
 clean:
     rm -rf backend/.pytest_cache backend/htmlcov backend/.coverage backend/coverage.xml
