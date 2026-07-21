@@ -16,7 +16,7 @@ install: install-backend install-frontend
     @echo "==> Установка завершена"
 
 install-backend:
-    cd backend && pip install -r requirements.txt -r requirements-test.txt
+    cd backend && uv sync
 
 install-frontend:
     cd frontend && npm ci
@@ -28,7 +28,7 @@ install-frontend:
 # Startup-sweep на старте переводит pending/processing в error — при overlap
 # новый процесс пометил бы живые таски старого. См. docs/agent/pdf-parsing.md.
 dev-backend:
-    cd backend && uvicorn main:app --reload --port 8259
+    cd backend && uv run uvicorn main:app --reload --port 8259
 
 dev-frontend:
     cd frontend && npm run dev
@@ -38,19 +38,19 @@ dev-frontend:
 # Все backend-тесты. Если установлен локальный тестовый Postgres (см. ниже) —
 # гоняем на нём (~30 сек); иначе — TEST_DATABASE_URL из .env (Neon, ~6-8 мин).
 test-backend:
-    @if test -d "{{pg_local}}/data"; then echo "==> backend-тесты на локальном Postgres (localhost:5433)"; just test-backend-local; else echo "==> backend-тесты на TEST_DATABASE_URL из .env (Neon)"; cd backend && pytest; fi
+    @if test -d "{{pg_local}}/data"; then echo "==> backend-тесты на локальном Postgres (localhost:5433)"; just test-backend-local; else echo "==> backend-тесты на TEST_DATABASE_URL из .env (Neon)"; cd backend && uv run pytest; fi
 
 # Только unit (быстро)
 test-backend-unit:
-    cd backend && pytest tests/unit -v
+    cd backend && uv run pytest tests/unit -v
 
 # Только integration (нужен TEST_DATABASE_URL)
 test-backend-integration:
-    cd backend && pytest tests/integration -v
+    cd backend && uv run pytest tests/integration -v
 
 # Точечный прогон integration по -k паттерну
 test-int-k pattern:
-    cd backend && pytest tests/integration -v -k "{{pattern}}"
+    cd backend && uv run pytest tests/integration -v -k "{{pattern}}"
 
 # --- Локальный тестовый Postgres (быстрые integration) ---
 # Портативный PostgreSQL 16 + pgvector (conda-forge, micromamba) в профиле
@@ -72,23 +72,19 @@ pg-test-stop:
 
 # Integration против локального Postgres
 test-int-local: pg-test-start
-    cd backend && TEST_DATABASE_URL="{{test_db_local}}" pytest tests/integration -v
+    cd backend && TEST_DATABASE_URL="{{test_db_local}}" uv run pytest tests/integration -v
 
 # Точечный локальный прогон по -k паттерну
 test-int-local-k pattern: pg-test-start
-    cd backend && TEST_DATABASE_URL="{{test_db_local}}" pytest tests/integration -v -k "{{pattern}}"
+    cd backend && TEST_DATABASE_URL="{{test_db_local}}" uv run pytest tests/integration -v -k "{{pattern}}"
 
 # Все backend-тесты против локального Postgres
 test-backend-local: pg-test-start
-    cd backend && TEST_DATABASE_URL="{{test_db_local}}" pytest
+    cd backend && TEST_DATABASE_URL="{{test_db_local}}" uv run pytest
 
 # Точечный прогон unit по -k паттерну
 test-unit-k pattern:
-    cd backend && pytest tests/unit -v -k "{{pattern}}"
-
-# Watch-режим (нужен pytest-watch)
-test-backend-watch:
-    cd backend && ptw tests -- -v
+    cd backend && uv run pytest tests/unit -v -k "{{pattern}}"
 
 # Frontend
 test-frontend:
@@ -112,7 +108,7 @@ test:
 # === Coverage ===
 
 coverage-backend:
-    cd backend && pytest --cov=. --cov-report=html --cov-report=term
+    cd backend && uv run pytest --cov=. --cov-report=html --cov-report=term
 
 coverage-frontend:
     cd frontend && npm run test:coverage
@@ -120,7 +116,7 @@ coverage-frontend:
 # === Lint ===
 
 lint-backend:
-    cd backend && ruff check .
+    cd backend && uv run ruff check .
 
 lint-frontend:
     cd frontend && npm run lint
@@ -134,36 +130,40 @@ lint:
     just lint-frontend
 
 format-backend:
-    cd backend && ruff format .
+    cd backend && uv run ruff format .
 
 # === DB ===
 
 # Создать НОВУЮ ревизию Alembic (без autogenerate — тело заполняется вручную).
 # Это создание нового файла в versions/, НЕ правка исторических миграций.
 db-revision message:
-    cd backend && alembic revision -m "{{message}}"
+    cd backend && uv run alembic revision -m "{{message}}"
 
 db-migrate:
-    cd backend && alembic upgrade head
+    cd backend && uv run alembic upgrade head
 
 db-test-migrate:
-    cd backend && DATABASE_URL=$TEST_DATABASE_URL alembic upgrade head
+    cd backend && DATABASE_URL=$TEST_DATABASE_URL uv run alembic upgrade head
 
 # Проверка дрейфа ORM/БД: локальная тест-БД до head + alembic check.
 # Нулевой код = моделей и схемы совпадают (нет pending upgrade ops).
 db-test-check: pg-test-start
-    cd backend && DATABASE_URL="{{test_db_local}}" alembic upgrade head
-    cd backend && DATABASE_URL="{{test_db_local}}" alembic check
+    cd backend && DATABASE_URL="{{test_db_local}}" uv run alembic upgrade head
+    cd backend && DATABASE_URL="{{test_db_local}}" uv run alembic check
 
 # === Misc ===
 
 # Создать суперюзера системы (интерактивный ввод пароля)
 create-superuser email:
-    cd backend && python -m cli create-superuser --email {{email}}
+    cd backend && uv run python -m cli create-superuser --email {{email}}
 
 # Создать организацию
 create-org name:
-    cd backend && python -m cli create-org --name "{{name}}"
+    cd backend && uv run python -m cli create-org --name "{{name}}"
+
+# Записать snapshot AI-ответа от реального PDF (пути — относительно backend/; см. docs/testing.md)
+snapshot-ai pdf scenario:
+    cd backend && uv run python scripts/snapshot_ai_responses.py "{{pdf}}" "{{scenario}}"
 
 clean:
     rm -rf backend/.pytest_cache backend/htmlcov backend/.coverage backend/coverage.xml

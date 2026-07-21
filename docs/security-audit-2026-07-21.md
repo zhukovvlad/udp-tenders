@@ -50,6 +50,8 @@ T3MP3ST не применялся (клонирование отклонено �
 Рекомендация: поднять минимальные версии в `backend/requirements.txt`:
 `python-multipart>=0.0.31`, `pillow>=12.3.0`, `python-dotenv>=1.2.2`, `pydantic-settings>=2.14.2`.
 
+> **Обновление (миграция на uv):** источник backend-зависимостей переведён с `requirements*.txt` на `pyproject.toml` + `uv.lock`. Указанные фиксы зафиксированы как `>=` границы в pyproject; точные версии — в `uv.lock`. См. `docs/superpowers/specs/2026-07-21-uv-migration-design.md`.
+
 ## 3. SAST (bandit, backend без tests/alembic/scripts)
 
 0 high / 0 medium. Два low (CWE-703), оба осознанные:
@@ -93,7 +95,7 @@ T3MP3ST не применялся (клонирование отклонено �
 
 ## Приоритеты
 
-1. **Обновить зависимости**: `npm audit fix` + bump 4 пакетов в requirements.txt (особенно python-multipart — сетевой DoS на загрузке).
+1. **Обновить зависимости**: backend — 4 пакета зафиксированы `>=` границами в `backend/pyproject.toml` (+ точные версии в `uv.lock`), см. §2 ✅ (источник зависимостей мигрировал с `requirements.txt` на uv — было критично из-за python-multipart, сетевой DoS на загрузке); фронт — `npm audit fix` (в первую очередь axios + react-router).
 2. **M2** — лимит размера + magic bytes на upload.
 3. **M1** — rate limiting на login.
 4. M3, L1, L2 — по возможности.

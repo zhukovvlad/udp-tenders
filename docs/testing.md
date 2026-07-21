@@ -12,16 +12,16 @@
 
 | Слой | Файлов | Тестов | Статус |
 |---|---|---|---|
-| Backend unit | 14 | 155 | ✅ |
-| Backend integration | 17 | 220 | ✅ |
-| Backend top-level | 1 | 72 | ✅ |
-| **Backend total** | **32** | **447** | ✅ |
-| Frontend (Vitest + RTL + MSW) | 20 | 134 | ✅ |
+| Backend unit | 19 | 189 | ✅ |
+| Backend integration | 28 | 327 | ✅ |
+| Backend top-level | 1 | 74 | ✅ |
+| **Backend total** | **48** | **590** | ✅ |
+| Frontend (Vitest + RTL + MSW) | 28 | 219 | ✅ |
 | E2E (Playwright) | — | — | ⏳ отложено |
 | GitHub Actions CI | — | backend ✅ / frontend ручной | — |
-| **Grand total (локально)** | **52** | **581** | ✅ |
+| **Grand total (локально)** | **76** | **809** | ✅ |
 
-Все 581 тест зелёный локально (backend — `pytest --co` собирает 447; frontend — 134). CI настроен для backend (GitHub Actions, `.github/workflows/backend-tests.yml`); frontend запускается вручную.
+Последний прогон `just test` локально: backend **584 passed / 6 skipped** (`uv run pytest`, 590 собрано; локальный Postgres), frontend **219 passed** (28 файлов). CI настроен для backend (GitHub Actions, `.github/workflows/backend-tests.yml`); frontend запускается вручную.
 
 ---
 
@@ -52,6 +52,8 @@ just coverage-frontend       # HTML в frontend/coverage/
 just lint                    # backend (ruff) + frontend (eslint)
 just typecheck-frontend      # tsc --noEmit
 ```
+
+`just install` создаёт изолированный `backend/.venv` из `uv.lock` (uv sync) — отдельный venv активировать не нужно, все рецепты идут через `uv run`.
 
 ### Конфигурация
 
@@ -127,7 +129,7 @@ Postgres, иначе — Neon из `.env` (у контрибьюторов бе�
 
 ### Backend
 
-- **pytest 8** + `pytest-asyncio` (auto-mode), `pytest-cov`, `pytest-dotenv`.
+- **pytest 9** + `pytest-asyncio` (auto-mode), `pytest-cov`, `pytest-dotenv`.
 - **`db_engine`** (session-scoped): открывает соединение к Neon test-ветке, накатывает Alembic
   миграции один раз на всю сессию pytest.
 - **`db_session`** (function-scoped): каждый тест запускается в своей транзакции с
@@ -270,8 +272,8 @@ describe("MyComponent", () => {
 ```bash
 # Реальный PDF лежит локально, в .gitignore
 cp /path/to/real.pdf backend/tests/fixtures/pdf/real/
-cd backend
-python scripts/snapshot_ai_responses.py tests/fixtures/pdf/real/real.pdf my_scenario
+# Пути — относительно backend/ (рецепт сам делает cd backend)
+just snapshot-ai tests/fixtures/pdf/real/real.pdf my_scenario
 # → backend/tests/fixtures/openrouter/my_scenario.json (sanitized, ИНН/имена → фейки)
 git add backend/tests/fixtures/openrouter/my_scenario.json
 ```

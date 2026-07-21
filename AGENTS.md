@@ -3,7 +3,7 @@
 Русскоязычный B2B для тендерных менеджеров в стройке: PDF УПД → LLM-парсинг → история цен → отчёты об отклонениях в Excel.
 
 ## Стек
-Backend: Python 3.12+, FastAPI, SQLAlchemy (sync), Alembic, pydantic-settings; auth — pyjwt HS256 + argon2, httpOnly cookies, CSRF.
+Backend: Python 3.12, FastAPI, SQLAlchemy (sync), Alembic, pydantic-settings; auth — pyjwt HS256 + argon2, httpOnly cookies, CSRF. Зависимости — uv (pyproject.toml + uv.lock).
 Frontend: React 19, TS (strict), Vite, shadcn/ui, Tailwind v4, Recharts, TanStack Query v5.
 PostgreSQL (Neon) · MinIO (S3) · OpenRouter API (Claude Vision, `PDF_ENGINE=native`); pypdfium2 + pikepdf + Pillow — raster-коррекция ориентации страниц (deskew).
 

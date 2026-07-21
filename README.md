@@ -21,14 +21,14 @@ B2B веб-приложение для тендерных менеджеров �
 
 | Слой | Технология |
 |------|-----------|
-| Бэкенд | Python 3.12+, FastAPI, SQLAlchemy (sync), Alembic, pydantic-settings |
+| Бэкенд | Python 3.12, FastAPI, SQLAlchemy (sync), Alembic, pydantic-settings |
 | Аутентификация | pyjwt (HS256), pwdlib[argon2] — httpOnly cookies, double-submit CSRF, ротация refresh-токенов |
 | База данных | PostgreSQL via Neon (serverless) — `postgresql+psycopg://` DSN |
 | Хранилище PDF | MinIO (S3-совместимое), локальный бинарь `minio.exe` |
 | PDF-парсинг | OpenRouter API — Mistral OCR / Claude Vision |
-| Фронтенд | React 18, TypeScript, Vite, shadcn/ui, Tailwind CSS v4, Recharts |
+| Фронтенд | React 19, TypeScript, Vite, shadcn/ui, Tailwind CSS v4, Recharts |
 | State / данные | TanStack Query v5, axios |
-| Тесты (BE) | pytest 8, respx, factory_boy |
+| Тесты (BE) | pytest 9, respx, factory_boy |
 | Тесты (FE) | Vitest + Testing Library + MSW v2 |
 | Task runner | `just` |
 
@@ -38,8 +38,9 @@ B2B веб-приложение для тендерных менеджеров �
 
 ### Требования
 
-- Python 3.12+ и Node.js 24+
+- Python 3.12 и Node.js 24+
 - [just](https://just.systems/) — установить по инструкции на сайте или `winget install Casey.Just`
+- [uv](https://docs.astral.sh/uv/) — менеджер зависимостей/окружений Python (`winget install astral-sh.uv` или см. сайт)
 - MinIO — скачать `minio.exe` со [страницы загрузки](https://min.io/download)
 - Аккаунт на [Neon](https://neon.tech) (бесплатный tier) и [OpenRouter](https://openrouter.ai)
 
