@@ -15,9 +15,12 @@
 - **`[tool.uv] package = false`** — проект non-package (flat-layout, нет build backend).
 - **Прямые версии не апгрейдим** — двухпроходный `uv lock` сохраняет текущие, включая security-фиксы: `python-multipart>=0.0.31`, `pillow>=12.3.0`, `python-dotenv>=1.2.2`, `pydantic-settings>=2.14.2`.
 - **Команды только через `just`** (правило AGENTS.md). Все python-рецепты идут через `uv run`.
-  **Bootstrap-исключение:** в Task 1 прямые команды `uv python install`, `uv lock` и
-  `uv sync` разрешены как начальная загрузка миграции (подходящих just-рецептов ещё
-  нет). После перевода justfile (Task 2) все проверки выполняются только через `just`.
+  **Bootstrap-исключение:** в Task 1 прямые команды `uv python install`, `uv lock`,
+  `uv sync` и `uv run pytest` разрешены как начальная загрузка миграции (подходящих
+  just-рецептов ещё нет). После перевода justfile (Task 2) все проверки выполняются
+  только через `just`. **Recovery-исключение:** единственный прямой `uv lock` в Task 6
+  Step 5 — аварийное восстановление при рассинхроне lock на CI (заводить отдельный
+  рецепт ради этого сценария не будем).
 - **Provenance:** шаблоны коммитов ниже даны без attribution-трейлера. Исполнитель
   (человек или агент) добавляет собственный трейлер согласно своему harness — не
   приписывать коммиты чужой модели.
@@ -43,7 +46,7 @@
 | `backend/requirements-test.txt` | — | Delete |
 | `README.md` | Требования/стек: Python 3.12, uv, pytest 9 | Modify |
 | `AGENTS.md` | Стек: Python 3.12 + uv | Modify |
-| `docs/testing.md` | «pytest 8» → «pytest 9» | Modify |
+| `docs/testing.md` | «pytest 8» → «pytest 9», snapshot-команда на `uv run`, заметка про `backend/.venv` | Modify |
 | `docs/security-audit-2026-07-21.md` | Отметка о новом источнике зависимостей | Modify (append) |
 
 **Прерусловие исполнителю:** работаем в ветке `build/uv-migration` (уже создана). Проверить, что `uv` доступен: `uv --version` (любой вывод версии = ок). Если нет — установить по https://docs.astral.sh/uv/getting-started/installation/ и только потом начинать.
@@ -425,8 +428,8 @@ Expected: `no refs` (в justfile и workflows — ни одной ссылки).
 
 - [ ] **Step 4: Проверить, что установка ещё работает**
 
-Run: `cd backend && uv sync --locked`
-Expected: `Audited N packages` (окружение уже синхронно с lock), exit 0.
+Run: `just install-backend`
+Expected: `uv sync` отрабатывает, `Audited N packages` (окружение уже синхронно с lock), exit 0.
 
 - [ ] **Step 5: Commit**
 
@@ -529,7 +532,7 @@ gh pr create --base main --title "build: миграция backend на uv (proje
 
 Проверить, что workflow `backend-tests` на PR прошёл (setup-uv + uv sync --locked + uv run pytest).
 Если `--locked` падает на рассинхроне lock/pyproject — **не** переснимать lock вслепую:
-1. `cd backend && uv lock` локально;
+1. `cd backend && uv lock` локально (recovery-исключение к правилу «только just» — см. Global Constraints);
 2. `git diff backend/uv.lock` — убедиться, что изменились только метаданные/хеши, а **версии
    прямых зависимостей не поехали** (иначе разобраться, что во второй проход подтянуло апгрейд);
 3. только после проверки diff — закоммитить обновлённый `uv.lock` и запушить.
