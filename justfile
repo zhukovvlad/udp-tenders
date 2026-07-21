@@ -161,6 +161,10 @@ create-superuser email:
 create-org name:
     cd backend && uv run python -m cli create-org --name "{{name}}"
 
+# Записать snapshot AI-ответа от реального PDF (пути — относительно backend/; см. docs/testing.md)
+snapshot-ai pdf scenario:
+    cd backend && uv run python scripts/snapshot_ai_responses.py {{pdf}} {{scenario}}
+
 clean:
     rm -rf backend/.pytest_cache backend/htmlcov backend/.coverage backend/coverage.xml
     find backend -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

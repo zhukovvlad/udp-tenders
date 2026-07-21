@@ -26,7 +26,7 @@ B2B веб-приложение для тендерных менеджеров �
 | База данных | PostgreSQL via Neon (serverless) — `postgresql+psycopg://` DSN |
 | Хранилище PDF | MinIO (S3-совместимое), локальный бинарь `minio.exe` |
 | PDF-парсинг | OpenRouter API — Mistral OCR / Claude Vision |
-| Фронтенд | React 18, TypeScript, Vite, shadcn/ui, Tailwind CSS v4, Recharts |
+| Фронтенд | React 19, TypeScript, Vite, shadcn/ui, Tailwind CSS v4, Recharts |
 | State / данные | TanStack Query v5, axios |
 | Тесты (BE) | pytest 9, respx, factory_boy |
 | Тесты (FE) | Vitest + Testing Library + MSW v2 |

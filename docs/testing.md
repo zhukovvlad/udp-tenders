@@ -12,16 +12,16 @@
 
 | Слой | Файлов | Тестов | Статус |
 |---|---|---|---|
-| Backend unit | 14 | 155 | ✅ |
-| Backend integration | 17 | 220 | ✅ |
-| Backend top-level | 1 | 72 | ✅ |
-| **Backend total** | **32** | **447** | ✅ |
-| Frontend (Vitest + RTL + MSW) | 20 | 134 | ✅ |
+| Backend unit | 19 | 189 | ✅ |
+| Backend integration | 28 | 327 | ✅ |
+| Backend top-level | 1 | 74 | ✅ |
+| **Backend total** | **48** | **590** | ✅ |
+| Frontend (Vitest + RTL + MSW) | 28 | 219 | ✅ |
 | E2E (Playwright) | — | — | ⏳ отложено |
 | GitHub Actions CI | — | backend ✅ / frontend ручной | — |
-| **Grand total (локально)** | **52** | **581** | ✅ |
+| **Grand total (локально)** | **76** | **809** | ✅ |
 
-Все 581 тест зелёный локально (backend — `uv run pytest --co` собирает 447; frontend — 134). CI настроен для backend (GitHub Actions, `.github/workflows/backend-tests.yml`); frontend запускается вручную.
+Последний прогон `just test` локально: backend **584 passed / 6 skipped** (`uv run pytest`, 590 собрано; локальный Postgres), frontend **219 passed** (28 файлов). CI настроен для backend (GitHub Actions, `.github/workflows/backend-tests.yml`); frontend запускается вручную.
 
 ---
 
@@ -272,8 +272,8 @@ describe("MyComponent", () => {
 ```bash
 # Реальный PDF лежит локально, в .gitignore
 cp /path/to/real.pdf backend/tests/fixtures/pdf/real/
-cd backend
-uv run python scripts/snapshot_ai_responses.py tests/fixtures/pdf/real/real.pdf my_scenario
+# Пути — относительно backend/ (рецепт сам делает cd backend)
+just snapshot-ai tests/fixtures/pdf/real/real.pdf my_scenario
 # → backend/tests/fixtures/openrouter/my_scenario.json (sanitized, ИНН/имена → фейки)
 git add backend/tests/fixtures/openrouter/my_scenario.json
 ```

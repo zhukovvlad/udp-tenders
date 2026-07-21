@@ -95,7 +95,7 @@ T3MP3ST не применялся (клонирование отклонено �
 
 ## Приоритеты
 
-1. **Обновить зависимости**: `npm audit fix` + bump 4 пакетов в requirements.txt (особенно python-multipart — сетевой DoS на загрузке).
+1. **Обновить зависимости**: backend — 4 пакета зафиксированы `>=` границами в `backend/pyproject.toml` (+ точные версии в `uv.lock`), см. §2 ✅ (источник зависимостей мигрировал с `requirements.txt` на uv — было критично из-за python-multipart, сетевой DoS на загрузке); фронт — `npm audit fix` (в первую очередь axios + react-router).
 2. **M2** — лимит размера + magic bytes на upload.
 3. **M1** — rate limiting на login.
 4. M3, L1, L2 — по возможности.
