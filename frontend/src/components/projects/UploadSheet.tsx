@@ -85,11 +85,11 @@ export function UploadSheet({ projectId, open, onOpenChange }: Props) {
         <SheetHeader>
           <SheetTitle>Добавить счёт</SheetTitle>
         </SheetHeader>
-        <div className="mt-6">
+        <div className="mt-6 shrink-0">
           <Dropzone onDrop={handleDrop} />
         </div>
         {jobs.length > 0 && (
-          <div className="mt-5 space-y-2">
+          <div className="mt-5 flex-1 min-h-0 space-y-2 overflow-y-auto pr-1">
             {jobs.map((j) => (
               <UploadJobRow key={j.id} job={j} />
             ))}

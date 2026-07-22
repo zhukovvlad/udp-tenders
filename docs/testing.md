@@ -18,10 +18,10 @@
 | **Backend total** | **48** | **590** | ✅ |
 | Frontend (Vitest + RTL + MSW) | 28 | 219 | ✅ |
 | E2E (Playwright) | — | — | ⏳ отложено |
-| GitHub Actions CI | — | backend ✅ / frontend ручной | — |
+| GitHub Actions CI | — | backend ✅ / frontend ✅ | — |
 | **Grand total (локально)** | **76** | **809** | ✅ |
 
-Последний прогон `just test` локально: backend **584 passed / 6 skipped** (`uv run pytest`, 590 собрано; локальный Postgres), frontend **219 passed** (28 файлов). CI настроен для backend (GitHub Actions, `.github/workflows/backend-tests.yml`); frontend запускается вручную.
+Последний прогон `just test` локально: backend **584 passed / 6 skipped** (`uv run pytest`, 590 собрано; локальный Postgres), frontend **219 passed** (28 файлов). CI настроен для backend (`.github/workflows/backend-tests.yml`) и frontend (`.github/workflows/frontend-tests.yml`) — оба гоняются в GitHub Actions на каждый push в `main` и PR.
 
 ---
 
@@ -43,7 +43,7 @@ just test-int-local-k "patt" # точечный локальный прогон
 just test-backend-local      # весь backend на localhost:5433
 
 # Frontend — без БД, всё через MSW-моки
-just test-frontend           # 134 PASSED за ~18–20 сек
+just test-frontend           # 219 PASSED за ~33 сек
 just test-frontend-watch     # watch режим
 just test-frontend-ui        # @vitest/ui дашборд в браузере
 just coverage-frontend       # HTML в frontend/coverage/
@@ -156,6 +156,13 @@ Postgres, иначе — Neon из `.env` (у контрибьюторов бе�
   что в реальном `App.tsx`.
 - **`window.matchMedia` mock** в setup — `next-themes` его требует, jsdom не
   реализует.
+- **`css: false`** в `vitest.config.ts` (дефолт Vitest — НЕ включать обратно).
+  jsdom не считает layout/каскад, поэтому обработка CSS не даёт реальной проверки
+  стилей, а с Tailwind v4 раздувает transform/import/environment: полный прогон
+  ~87с → ~33с при выключении (219/219 зелёные). Тесты через RTL проверяют
+  DOM/атрибуты (`className` остаётся в разметке — `toHaveClass` работает).
+  Визуальные проверки, если появятся, — отдельным слоем (Playwright/Storybook),
+  не в jsdom.
 
 ---
 
@@ -210,16 +217,20 @@ Postgres, иначе — Neon из `.env` (у контрибьюторов бе�
 - Mock-OpenRouter сервис на FastAPI (`e2e/mock_openrouter/`), `/api/test/reset`
   роутер на бэкенде под `TEST_MODE=1`.
 
-### ✅ Backend CI — настроен
+### ✅ CI — настроен (backend + frontend)
 
-- `.github/workflows/backend-tests.yml`: ruff lint → pytest (unit + integration + top-level, 447 тестов) на каждый push/PR.
-- Postgres + pgvector запускается как service-container; `TEST_DATABASE_URL` подставляется из env.
-- Frontend в CI **не гоняется** — запускать вручную (`just test-frontend`).
+- **Backend** (`.github/workflows/backend-tests.yml`): ruff lint → полный `uv run pytest`
+  (unit + integration + top-level) на каждый push в `main` / PR. Postgres + pgvector
+  запускается как service-container; `DATABASE_URL`/`TEST_DATABASE_URL` — из env job'а.
+- **Frontend** (`.github/workflows/frontend-tests.yml`): eslint → `tsc -b --noEmit` →
+  `vitest --run` на каждый push в `main` / PR. Версия Node — из `frontend/.nvmrc`
+  (baseline 24; на Node 20 MSW-перехват blob-ответа зависает — несовместимость
+  тест-инфры, не баг приложения).
 
-### ⏳ Frontend CI + E2E — отложено
+### ⏳ E2E CI + branch protection — отложено
 
-- GitHub Actions workflow с frontend / e2e jobs.
-- `branch protection` на `main` через UI.
+- GitHub Actions job для e2e (Playwright).
+- `branch protection` на `main` через UI (пока не включён).
 
 ---
 
@@ -299,5 +310,5 @@ git add backend/tests/fixtures/openrouter/my_scenario.json
 
 - **Этап 4 (Playwright E2E):** 10 задач (`Task 4.1-4.10` в плане). Mock-OpenRouter
   сервер, `/api/test/reset`, 5 spec'ов.
-- **Этап 5 (CI + docs):** 5 задач (`Task 5.1-5.5`). GitHub Actions workflow,
-  branch protection.
+- **Этап 5 (CI + docs):** GitHub Actions workflow'ы для backend и frontend — ✅ готовы.
+  Осталось: `branch protection` на `main`, e2e-job (после Этапа 4).
