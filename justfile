@@ -171,6 +171,11 @@ clean:
 
 # === Storage ===
 
-# Локальный MinIO (S3): API :9259, консоль :9260, данные — ./minio-data
+# Локальный MinIO (S3): API :9259, консоль :9260, данные — C:\minio\data
+# ВАЖНО: данные и temp держим на Windows-томе C:\ (135 ГБ), а НЕ в профиле.
+# Профиль C:\Users\<user>\ смонтирован на отдельный маленький 20-ГБ "User Disk";
+# при его переполнении MinIO меряет свободное место по data-каталогу и падает
+# с XMinioStorageFull, хотя сам бакет крошечный. Путь вне профиля это лечит.
 minio:
-    minio server ./minio-data --address ":9259" --console-address ":9260"
+    mkdir -p /c/minio/data /c/minio/tmp
+    TMP="C:/minio/tmp" TEMP="C:/minio/tmp" TMPDIR="C:/minio/tmp" minio server C:/minio/data --address ":9259" --console-address ":9260"
