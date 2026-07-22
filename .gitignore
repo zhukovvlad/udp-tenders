@@ -50,3 +50,5 @@ e2e/playwright-report/
 
 # Прячем superpowers/
 .superpowers/
+
+/tesseract-playground
