@@ -156,6 +156,13 @@ Postgres, иначе — Neon из `.env` (у контрибьюторов бе�
   что в реальном `App.tsx`.
 - **`window.matchMedia` mock** в setup — `next-themes` его требует, jsdom не
   реализует.
+- **`css: false`** в `vitest.config.ts` (дефолт Vitest — НЕ включать обратно).
+  jsdom не считает layout/каскад, поэтому обработка CSS не даёт реальной проверки
+  стилей, а с Tailwind v4 раздувает transform/import/environment: полный прогон
+  ~87с → ~33с при выключении (219/219 зелёные). Тесты через RTL проверяют
+  DOM/атрибуты (`className` остаётся в разметке — `toHaveClass` работает).
+  Визуальные проверки, если появятся, — отдельным слоем (Playwright/Storybook),
+  не в jsdom.
 
 ---
 
