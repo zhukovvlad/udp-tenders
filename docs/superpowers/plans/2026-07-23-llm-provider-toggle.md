@@ -48,6 +48,17 @@ from config import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _clean_llm_env(monkeypatch):
+    """Гермет: Settings(_env_file=None) отсекает файл, но НЕ os.environ, куда
+    pytest уже загрузил .env.test (env_files в pyproject) — чистим LLM-семейства."""
+    for var in ("LLM_PROVIDER", "OPENROUTER_MODEL", "OPENROUTER_PDF_ENGINE",
+                "OPENROUTER_MAX_TOKENS", "OPENROUTER_BASE_URL", "OPENROUTER_API_KEY",
+                "GATEWAY_BASE_URL", "GATEWAY_MODEL",
+                "AI_MODEL", "AI_MAX_TOKENS", "PDF_ENGINE"):
+        monkeypatch.delenv(var, raising=False)
+
+
 def _mk(**kw) -> Settings:
     """Собрать Settings без чтения .env (важно: чистые дефолты + переданные поля)."""
     base = {"SECRET_KEY": "x" * 32}
@@ -441,7 +452,7 @@ def _provider(**kw) -> OpenRouterProvider:
     return OpenRouterProvider.from_settings(Settings(_env_file=None, **base))
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 @respx.mock
 async def test_parse_form_contract():
     """parse-форма: system+file первым+текст, plugins с engine, usage.include, max_tokens, auth."""
@@ -466,7 +477,7 @@ async def test_parse_form_contract():
     assert resp.finish_reason == "stop" and resp.content == "ответ"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 @respx.mock
 async def test_detect_form_contract():
     """detect-форма: без system, текст первым + image_url, БЕЗ plugins, max_tokens=200."""
@@ -484,7 +495,7 @@ async def test_detect_form_contract():
     assert parts[0]["type"] == "text" and parts[1]["type"] == "image_url"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 @respx.mock
 async def test_missing_key_is_permanent_error():
     """Без ключа — нерetryable ошибка с текущим текстом (поведение 1:1)."""
@@ -496,12 +507,13 @@ async def test_missing_key_is_permanent_error():
     assert ei.value.retryable is False and ei.value.paid_calls == 0
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 @respx.mock
 async def test_http_status_classification():
     """5xx/408/429 → retryable; прочие — нет (симметрично текущему parse_pdf)."""
+    route = respx.post(URL)  # один роут, мок меняется в цикле — без дублей паттерна
     for status, retryable in [(500, True), (429, True), (408, True), (403, False)]:
-        respx.post(URL).mock(return_value=httpx.Response(status, json={}))
+        route.mock(return_value=httpx.Response(status, json={}))
         p = _provider()
         with pytest.raises(llm.LLMProviderError, match=f"OpenRouter API ошибка: {status}") as ei:
             await p.vision_completion(system=None, user_text="x",
@@ -510,7 +522,7 @@ async def test_http_status_classification():
         assert ei.value.retryable is retryable and ei.value.paid_calls == 0
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 @respx.mock
 async def test_broken_envelope_keeps_billing():
     """HTTP 200 без choices → LLMProviderError(retryable=False, paid_calls=1, cost)."""
@@ -524,7 +536,7 @@ async def test_broken_envelope_keeps_billing():
     assert ei.value.retryable is False
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 @respx.mock
 async def test_non_json_body_keeps_billing_and_text():
     """HTTP 200 с не-JSON телом → «Не удалось разобрать ответ модели», paid=1 (тексты 1:1)."""
@@ -537,7 +549,7 @@ async def test_non_json_body_keeps_billing_and_text():
     assert ei.value.paid_calls == 1 and ei.value.retryable is False
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 @respx.mock
 async def test_cost_clamp_nan_negative():
     """NaN/отрицательный usage.cost клэмпится в 0 (FIX B, поведение 1:1)."""
@@ -551,7 +563,18 @@ async def test_cost_clamp_nan_negative():
     assert resp.cost_usd == Decimal(0) and resp.paid_calls == 1
 ```
 
-Примечание: если в юнит-тестах не настроен anyio-маркер, проверить `backend/pyproject.toml`/`conftest` — в репо уже есть async-тесты (`test_pdf_orientation.py`), использовать тот же механизм (например, существующий `pytest-asyncio`/`anyio` маркер; скопировать декоратор из соседнего файла).
+Примечания: (а) в репо `asyncio_mode = "auto"` и `--strict-markers` с единственным зарегистрированным маркером `integration` — маркер `anyio` уронит collection; используется `@pytest.mark.asyncio`, как в существующих async-тестах. (б) `env_files = [".env.test"]` в pyproject грузит незакоммиченный env в `os.environ`, а `Settings(_env_file=None)` отсекает только файл — в НАЧАЛО этого тест-файла добавить герметизирующую фикстуру (и переиспользовать её же в `test_config_llm.py`):
+
+```python
+@pytest.fixture(autouse=True)
+def _clean_llm_env(monkeypatch):
+    """Гермет: Settings в тестах не должен зависеть от env разработчика/.env.test."""
+    for var in ("LLM_PROVIDER", "OPENROUTER_MODEL", "OPENROUTER_PDF_ENGINE",
+                "OPENROUTER_MAX_TOKENS", "OPENROUTER_BASE_URL", "OPENROUTER_API_KEY",
+                "GATEWAY_BASE_URL", "GATEWAY_MODEL",
+                "AI_MODEL", "AI_MAX_TOKENS", "PDF_ENGINE"):
+        monkeypatch.delenv(var, raising=False)
+```
 
 - [ ] **Step 2: Прогнать — падают**
 
@@ -645,6 +668,9 @@ class OpenRouterProvider:
                 response = await client.post(self.completions_url,
                                              headers=headers, json=payload)
         except httpx.TimeoutException as exc:
+            # текст 1:1 для parse-пути; detect перекрывает своим доменным текстом,
+            # но в его логе warning может мелькнуть «180с» при 30с-бюджете —
+            # осознанная косметика ради стабильной parse-строки
             raise LLMProviderError("Таймаут запроса к OpenRouter (180с)",
                                    retryable=True) from exc
         except httpx.RequestError as exc:
@@ -842,7 +868,7 @@ import llm
 import main
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_lifespan_init_before_sweep_and_teardown(monkeypatch):
     """init_provider — ДО startup-sweep (fail-fast раньше мутаций БД); reset — в конце."""
     calls: list[str] = []
@@ -856,7 +882,7 @@ async def test_lifespan_init_before_sweep_and_teardown(monkeypatch):
     assert calls[-1] == "reset"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_lifespan_teardown_on_body_exception(monkeypatch):
     """reset_provider вызывается даже если тело контекста бросило исключение."""
     calls: list[str] = []
@@ -870,7 +896,7 @@ async def test_lifespan_teardown_on_body_exception(monkeypatch):
     assert calls == ["reset"]
 ```
 
-(Если `main.lifespan` недоступен как атрибут после декоратора — использовать фактическое имя из main.py; anyio-декоратор скопировать из соседних async-тестов.)
+(Если `main.lifespan` недоступен как атрибут после декоратора — использовать фактическое имя из main.py.)
 
 - [ ] **Step 4: Прогнать интеграционные тесты парсера — зелёные без правок**
 
@@ -909,9 +935,8 @@ git commit -m "refactor(parser): parse_pdf через LLM-локатор; lifesp
 В `tests/unit/test_pdf_orientation.py` найти тесты деградации на битом envelope при 200 (мокают 200 без `choices`/с кривым JSON и ждут нулевых поворотов). Их ожидание меняется на ошибку:
 
 ```python
-@respx.mock  # тот же стиль, что у существующих тестов файла
-@pytest.mark.anyio
-async def test_broken_envelope_raises_permanent():
+@pytest.mark.asyncio
+async def test_broken_envelope_raises_permanent(_allow_respx):
     """§2.5: битый envelope платного 200 → PermanentError с cost, НЕ тихие нули."""
     respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
         return_value=httpx.Response(200, json={"usage": {"cost": 0.01}}))
@@ -920,7 +945,7 @@ async def test_broken_envelope_raises_permanent():
     assert ei.value.cost_usd == Decimal("0.01")
 ```
 
-(Декоратор async-тестов скопировать из соседних тестов этого же файла — там уже есть работающая связка respx + async. Существующие `monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", ...)` в переписываемых тестах больше не нужны: ключ идёт из conftest-фикстуры локатора Task 4.)
+(Стиль файла: `@pytest.mark.asyncio` + фикстура `_allow_respx` — как у существующих тестов `test_pdf_orientation.py:150-179`; маркер `anyio` в репо не зарегистрирован и уронит collection на `--strict-markers`. Существующие `monkeypatch.setattr(po.settings, "OPENROUTER_API_KEY", ...)` в переписываемых тестах больше не нужны: ключ идёт из conftest-фикстуры локатора Task 4.)
 
 Тесты «контент не распарсился при ЦЕЛОМ envelope» (есть `choices`, но текст без массива) — остаются на нулях. Точечный разбор существующих тестов файла — по месту: какие мокают отсутствие `choices` → переписать на ошибку; какие мокают мусорный текст в `choices[0].message.content` → оставить нули.
 
@@ -1097,12 +1122,12 @@ Expected: FAIL новые тесты.
 ```python
 import os
 
-from dotenv import load_dotenv, set_key
+from dotenv import load_dotenv, set_key, unset_key
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import llm
-from config import Settings, settings
+from config import Settings, resolved_openrouter_model, settings
 
 router = APIRouter()
 
@@ -1136,9 +1161,10 @@ def get_settings():
         # gateway: ключ не нужен → true, чтобы UI не показывал призыв ввода (§5)
         "api_key_set": True if is_gateway
         else bool(os.getenv("OPENROUTER_API_KEY", "").startswith("sk-")),
+        # модель — через алиас-цепочку §1 (не ручной os.getenv — дрейф логики);
+        # свежий Settings() перечитывает environ, обновлённый _ensure_env()
         "model": settings.GATEWAY_MODEL if is_gateway
-        else (os.getenv("OPENROUTER_MODEL") or os.getenv("AI_MODEL")
-              or "anthropic/claude-sonnet-4.6"),
+        else resolved_openrouter_model(Settings()),
         "confidence_threshold": float(os.getenv("CONFIDENCE_THRESHOLD", "0.7")),
     }
 
@@ -1160,6 +1186,9 @@ def update_settings(data: SettingsUpdate):
         # OPENROUTER_MODEL из env (алиас-цепочка §1) — PUT молча не действовал бы
         set_key(ENV_PATH, "OPENROUTER_MODEL", data.model)
         os.environ["OPENROUTER_MODEL"] = data.model
+        # зачистка легаси-строки: не оставляем два источника модели в одном .env
+        unset_key(ENV_PATH, "AI_MODEL")
+        os.environ.pop("AI_MODEL", None)
         llm_changed = True
     if data.confidence_threshold is not None:
         set_key(ENV_PATH, "CONFIDENCE_THRESHOLD", str(data.confidence_threshold))
