@@ -47,6 +47,8 @@ e2e/playwright-report/
 # Всякое локальное
 /backend/scripts/check_prostoy.py
 /tasks
+/CLAUDE_CODE_GATEWAY_INSTRUCTION.md
+/temp
 
 # Прячем superpowers/
 .superpowers/
