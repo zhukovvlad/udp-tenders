@@ -101,8 +101,8 @@ class LLMProviderError(Exception):
   - конструктор принимает обычные параметры (base URL, token-конфиг, таймауты), **не** `config.settings`;
   - не импортирует `LLMResponse`, `LLMProviderError`, `PdfAttachment`, `ProcessingError` и любые другие модули UDP;
   - принимает готовый массив `messages` — сборка payload из PDF/изображений и рендер остаются в `GatewayProvider`/`pdf_render.py` (политика приложения, не обязанность универсального клиента);
-  - возвращает собственный нейтральный `GatewayCompletion`; бросает собственный `GatewayClientError` с `http_status`, `code`, `correlation_id` и безопасным сообщением;
-  - `GatewayProvider` (тонкий адаптер) преобразует `GatewayCompletion → LLMResponse` и `GatewayClientError → LLMProviderError`; `GatewayClientError.http_status == 200` (битый envelope платного ответа) позволяет адаптеру выставить `paid_calls=1` — UDP-биллинг в переиспользуемый пакет не попадает;
+  - возвращает собственный нейтральный `GatewayCompletion`; бросает собственный `GatewayClientError` с `retryable`, `http_status`, `code`, `correlation_id` и безопасным сообщением. **Таблица классификации §3 реализуется внутри пакета в его терминах** (`retryable` — знание о шлюзе, переиспользуемое любым потребителем); `LLMProviderError` при этом остаётся типом интерфейса §2.1 в `llm.py` — его бросают ОБА провайдера, и в пакет он не переезжает (иначе `OpenRouterProvider` импортировал бы тип из gateway-пакета, а UDP-биллинг утёк бы в переиспользуемый код);
+  - `GatewayProvider` (тонкий адаптер) преобразует `GatewayCompletion → LLMResponse` и `GatewayClientError → LLMProviderError` (retryable → Transient/Permanent-семантика §3, `paid_calls` — по определению §4); `GatewayClientError.http_status == 200` (битый envelope платного ответа) позволяет адаптеру выставить `paid_calls=1` — UDP-биллинг в переиспользуемый пакет не попадает;
   - README пакета документирует публичную поверхность, lifecycle токена и запрет логирования request body, bearer token и security mappings.
 
 ### 2.3 Шов инжекции — module-level service locator
