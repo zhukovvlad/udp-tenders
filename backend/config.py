@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     # OpenRouter
     OPENROUTER_API_KEY: str = ""
     AI_MODEL: str = "anthropic/claude-sonnet-4.6"
-    AI_MAX_TOKENS: int = 64000  # верхний предел вывода claude-sonnet-4.6 (~64K); prompt от mistral-ocr на 8-страничных СФ съедает ~24K, оставляя на ответ всё что есть
+    AI_MAX_TOKENS: int = 64000  # верхний предел вывода Claude Sonnet (~64K); при PDF_ENGINE=native prompt ~10K токенов, при устаревшем mistral-ocr — ~24K на 8-страничных СФ
     CONFIDENCE_THRESHOLD: float = 0.7
     PDF_ENGINE: str = "mistral-ocr"
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
