@@ -13,7 +13,7 @@
 - Спека — единственный источник требований: `docs/superpowers/specs/2026-07-23-llm-provider-toggle-design.md`; при расхождении план проигрывает спеке.
 - Ветка: `feature/llm-provider-gateway`. Коммиты — после каждой задачи.
 - Докстринги на каждую новую функцию/метод/тест (правило репо, порог ≥80%).
-- Тесты гонять готовыми рецептами: `just test-backend-unit`, `just test-int-local` (integration на локальном PG), `just test-frontend`; точечно — `cd backend && uv run pytest <path> -v`. Финально — `just lint` и `just test`.
+- Команды — ТОЛЬКО через `just` (правило AGENTS.md, `cd backend && ...` запрещён): наборы — `just test-backend-unit`, `just test-int-local`, `just test-frontend`, `just typecheck-frontend`; точечно — `just test-unit-k "<pattern>"`, `just test-int-local-k "<pattern>"`, `just test-frontend-file <file>`. Финально — `just lint` и `just test` (напрямую, без пайпов — Windows-грабля).
 - Тексты пользовательских ошибок НЕ меняются (стабильные строки: «Таймаут запроса к OpenRouter (180с)», «Сетевая ошибка запроса к сервису распознавания», «OpenRouter API ошибка: {code}», «Ответ модели без содержимого», «Сервис распознавания ориентации недоступен/отклонил запрос»).
 - Инвариант §2.3 (биллинг платного 200) сохраняется: любая ошибка после HTTP 200 несёт `cost_usd`/`paid_calls=1`.
 - `.env`/`.env.test` не трогать. Новые зависимости не добавлять.
@@ -28,7 +28,7 @@
 - Test: `backend/tests/unit/test_config_llm.py` (создать)
 
 **Interfaces:**
-- Produces: поля `Settings`: `LLM_PROVIDER: Literal["openrouter","gateway"]`, `OPENROUTER_MODEL: str`, `OPENROUTER_PDF_ENGINE: str`, `OPENROUTER_MAX_TOKENS: int | None`, `GATEWAY_BASE_URL: str`, `GATEWAY_MODEL: str`; функции `resolved_openrouter_model(s) -> str`, `resolved_openrouter_pdf_engine(s) -> str`, `resolved_openrouter_max_tokens(s) -> int`, `validate_llm_settings(s) -> None`.
+- Produces: поля `Settings`: `LLM_PROVIDER: Literal["openrouter","gateway"]`, `OPENROUTER_MODEL: str`, `OPENROUTER_PDF_ENGINE: str`, `OPENROUTER_MAX_TOKENS: int | None`, `GATEWAY_BASE_URL: str`, `GATEWAY_MODEL: str`; функции `resolved_openrouter_model(s) -> str`, `resolved_openrouter_pdf_engine(s) -> str`, `resolved_openrouter_max_tokens(s) -> int`, `resolved_llm_parse_max_tokens(s) -> int` (нейтральный — для доменного `pdf_parser`), `validate_llm_settings(s) -> None`.
 - Consumes: существующие deprecated-поля `AI_MODEL`, `PDF_ENGINE`, `AI_MAX_TOKENS`, `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY`.
 
 - [ ] **Step 1: Написать падающие тесты**
@@ -95,14 +95,25 @@ def test_validate_gateway_requires_base_url_and_model():
 
 
 def test_empty_base_url_is_absence():
-    """Пустая строка OPENROUTER_BASE_URL = отсутствие значения → дефолт (guard §1)."""
-    s = _mk(OPENROUTER_BASE_URL="")
-    validate_llm_settings(s)  # не бросает: пустота openrouter-URL лечится дефолтом
+    """Пустая/пробельная строка base URL = отсутствие значения (guard §1)."""
+    validate_llm_settings(_mk(OPENROUTER_BASE_URL=""))   # openrouter лечится дефолтом
+    with pytest.raises(RuntimeError, match="GATEWAY_BASE_URL"):
+        validate_llm_settings(_mk(LLM_PROVIDER="gateway",
+                                  GATEWAY_BASE_URL="   ", GATEWAY_MODEL="m"))
+
+
+def test_parse_max_tokens_neutral_resolver():
+    """Нейтральный резолвер: openrouter-цепочка; gateway до спайка — понятная ошибка."""
+    from config import resolved_llm_parse_max_tokens
+    assert resolved_llm_parse_max_tokens(_mk(AI_MAX_TOKENS=2000)) == 2000
+    with pytest.raises(RuntimeError, match="спайк"):
+        resolved_llm_parse_max_tokens(_mk(LLM_PROVIDER="gateway",
+                                          GATEWAY_BASE_URL="http://gw", GATEWAY_MODEL="m"))
 ```
 
 - [ ] **Step 2: Прогнать — убедиться, что падают**
 
-Run: `cd backend && uv run pytest tests/unit/test_config_llm.py -v`
+Run: `just test-unit-k "test_config_llm"`
 Expected: FAIL — `ImportError: cannot import name 'resolved_openrouter_model'`.
 
 - [ ] **Step 3: Реализация в `config.py`**
@@ -149,25 +160,40 @@ def resolved_openrouter_max_tokens(s: "Settings") -> int:
     return s.OPENROUTER_MAX_TOKENS if s.OPENROUTER_MAX_TOKENS is not None else s.AI_MAX_TOKENS
 
 
+def resolved_llm_parse_max_tokens(s: "Settings") -> int:
+    """Нейтральный лимит parse-вызова: домен (pdf_parser) не знает провайдера.
+
+    openrouter → цепочка OPENROUTER_MAX_TOKENS→AI_MAX_TOKENS→64000;
+    gateway → RuntimeError до спайка (там появится GATEWAY_MAX_TOKENS, §7 спеки).
+    """
+    if s.LLM_PROVIDER == "openrouter":
+        return resolved_openrouter_max_tokens(s)
+    raise RuntimeError("LLM_PROVIDER=gateway: лимит parse-вызова определяется после gateway-спайка")
+
+
 def validate_llm_settings(s: "Settings") -> None:
     """Fail-fast §1: обязательные поля ВЫБРАННОГО провайдера; openrouter-ключ НЕ проверяется.
 
-    Пустая строка base URL = отсутствие значения: openrouter лечится дефолтом,
-    gateway — обязан быть задан (дефолта нет).
+    Пустая/пробельная строка base URL = отсутствие значения: openrouter
+    лечится дефолтом, gateway — обязан быть задан (дефолта нет).
+    Резолвнутые model/pdf_engine у openrouter непусты по построению (дефолты).
     """
-    if s.LLM_PROVIDER == "gateway":
-        if not s.GATEWAY_BASE_URL:
-            raise RuntimeError("LLM_PROVIDER=gateway: не задан GATEWAY_BASE_URL")
-        if not s.GATEWAY_MODEL:
-            raise RuntimeError("LLM_PROVIDER=gateway: не задан GATEWAY_MODEL")
+    if s.LLM_PROVIDER == "openrouter":
+        if not resolved_openrouter_model(s).strip():
+            raise RuntimeError("openrouter: пустая модель после алиас-резолва")
+        return
+    if not s.GATEWAY_BASE_URL.strip():
+        raise RuntimeError("LLM_PROVIDER=gateway: не задан GATEWAY_BASE_URL")
+    if not s.GATEWAY_MODEL.strip():
+        raise RuntimeError("LLM_PROVIDER=gateway: не задан GATEWAY_MODEL")
 ```
 
 (`import logging` — в импорты config.py.)
 
 - [ ] **Step 4: Прогнать тесты**
 
-Run: `cd backend && uv run pytest tests/unit/test_config_llm.py -v`
-Expected: PASS (8 тестов). Затем smoke: `uv run pytest tests/unit -q` — без регрессий.
+Run: `just test-unit-k "test_config_llm"`
+Expected: PASS (9 тестов). Затем smoke: `just test-backend-unit` — без регрессий.
 
 - [ ] **Step 5: Commit**
 
@@ -246,7 +272,7 @@ def test_provider_error_carries_billing():
 
 - [ ] **Step 2: Прогнать — падают**
 
-Run: `cd backend && uv run pytest tests/unit/test_llm_locator.py -v`
+Run: `just test-unit-k "test_llm_locator"`
 Expected: FAIL — `ModuleNotFoundError: No module named 'llm'`.
 
 - [ ] **Step 3: Реализация `backend/llm.py`**
@@ -357,7 +383,7 @@ def reset_provider() -> None:
 
 - [ ] **Step 4: Прогнать тесты**
 
-Run: `cd backend && uv run pytest tests/unit/test_llm_locator.py tests/unit/test_config_llm.py -v`
+Run: `just test-unit-k "test_llm_locator or test_config_llm"`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -500,6 +526,19 @@ async def test_broken_envelope_keeps_billing():
 
 @pytest.mark.anyio
 @respx.mock
+async def test_non_json_body_keeps_billing_and_text():
+    """HTTP 200 с не-JSON телом → «Не удалось разобрать ответ модели», paid=1 (тексты 1:1)."""
+    respx.post(URL).mock(return_value=httpx.Response(200, content=b"<html>oops"))
+    p = _provider()
+    with pytest.raises(llm.LLMProviderError, match="Не удалось разобрать ответ модели") as ei:
+        await p.vision_completion(system=None, user_text="x",
+                                  attachment=llm.ImagesAttachment(images=(b"j",)),
+                                  max_tokens=200, timeout=httpx.Timeout(30))
+    assert ei.value.paid_calls == 1 and ei.value.retryable is False
+
+
+@pytest.mark.anyio
+@respx.mock
 async def test_cost_clamp_nan_negative():
     """NaN/отрицательный usage.cost клэмпится в 0 (FIX B, поведение 1:1)."""
     respx.post(URL).mock(return_value=httpx.Response(
@@ -516,7 +555,7 @@ async def test_cost_clamp_nan_negative():
 
 - [ ] **Step 2: Прогнать — падают**
 
-Run: `cd backend && uv run pytest tests/unit/test_openrouter_contract.py -v`
+Run: `just test-unit-k "test_openrouter_contract"`
 Expected: FAIL — `ModuleNotFoundError: No module named 'llm_openrouter'`.
 
 - [ ] **Step 3: Реализация `backend/llm_openrouter.py`**
@@ -619,10 +658,17 @@ class OpenRouterProvider:
             raise LLMProviderError(f"OpenRouter API ошибка: {response.status_code}",
                                    retryable=retryable)
 
-        # HTTP 200 ⇒ платный вызов состоялся: ВСЁ ниже несёт paid_calls=1 (§2.3)
-        cost = Decimal(0)
+        # HTTP 200 ⇒ платный вызов состоялся: ВСЁ ниже несёт paid_calls=1 (§2.3).
+        # Тексты ошибок — 1:1 с текущими: не-JSON/кривая форма → «Не удалось
+        # разобрать ответ модели»; нет choices/message/content → «Ответ модели
+        # без содержимого» (global constraint плана).
         try:
             data = response.json()
+        except ValueError as exc:  # тело не-JSON
+            raise LLMProviderError("Не удалось разобрать ответ модели", retryable=False,
+                                   cost_usd=Decimal(0), paid_calls=1) from exc
+        cost = Decimal(0)
+        try:
             raw_cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
             if raw_cost.is_finite() and raw_cost >= 0:
                 cost = raw_cost
@@ -632,10 +678,12 @@ class OpenRouterProvider:
             usage = data.get("usage") or {}
             completion_tokens = usage.get("completion_tokens")
             finish_reason = (data.get("choices") or [{}])[0].get("finish_reason")
+        except Exception as exc:  # noqa: BLE001 — кривая форма usage/choices (top-level array и т.п.)
+            raise LLMProviderError("Не удалось разобрать ответ модели", retryable=False,
+                                   cost_usd=cost, paid_calls=1) from exc
+        try:
             content_text = data["choices"][0]["message"]["content"]
-        except LLMProviderError:
-            raise
-        except Exception as exc:  # noqa: BLE001 — битый envelope платного 200
+        except (KeyError, IndexError, TypeError) as exc:
             raise LLMProviderError("Ответ модели без содержимого", retryable=False,
                                    cost_usd=cost, paid_calls=1) from exc
         return LLMResponse(content=content_text, finish_reason=finish_reason,
@@ -663,13 +711,13 @@ def test_init_openrouter_and_get():
 
 - [ ] **Step 4: Прогнать**
 
-Run: `cd backend && uv run pytest tests/unit/test_openrouter_contract.py tests/unit/test_llm_locator.py -v`
+Run: `just test-unit-k "test_openrouter_contract or test_llm_locator"`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/llm_openrouter.py backend/llm.py backend/tests/unit/
+git add backend/llm_openrouter.py backend/llm.py backend/tests/unit/test_openrouter_contract.py backend/tests/unit/test_llm_locator.py
 git commit -m "feat(llm): OpenRouterProvider + контрактные тесты обеих форм payload (AC-1)"
 ```
 
@@ -681,6 +729,7 @@ git commit -m "feat(llm): OpenRouterProvider + контрактные тесты
 - Modify: `backend/pdf_parser.py` (строки ~157-260: транспорт → провайдер; домен 262+ не трогать)
 - Modify: `backend/main.py` (lifespan: `init_provider` + teardown)
 - Modify: `backend/tests/conftest.py` (autouse-fixture инициализации локатора)
+- Create: `backend/tests/unit/test_lifespan.py` (порядок init/sweep и teardown)
 - Test: существующие `backend/tests/integration/test_pdf_parser_phase_a.py`, `test_process_document.py` — должны остаться зелёными БЕЗ правок.
 
 **Interfaces:**
@@ -693,30 +742,31 @@ git commit -m "feat(llm): OpenRouterProvider + контрактные тесты
 
 ```python
 @pytest.fixture(autouse=True)
-def _llm_provider_initialized():
-    """Инициализировать LLM-локатор на каждый тест (scoped reset, инвариант §2.3).
+def _llm_provider_initialized(monkeypatch):
+    """Инициализировать LLM-локатор на каждый тест (scoped override, инвариант §2.3).
 
     Ключ тестовый: unit/integration перехватывают HTTP respx-моками, наружу
-    запросы не уходят. reset в teardown — повторные TestClient корректны.
+    запросы не уходят. monkeypatch сам восстанавливает состояние в teardown —
+    повторные TestClient в одном процессе корректны.
     """
+    import dataclasses
+
     import llm
     from config import settings
     from llm_openrouter import OpenRouterProvider
-    llm._provider = OpenRouterProvider.from_settings(settings)
-    if not llm._provider.api_key:
-        llm._provider = dataclasses.replace(llm._provider, api_key="sk-test")
+    provider = OpenRouterProvider.from_settings(settings)
+    if not provider.api_key:
+        provider = dataclasses.replace(provider, api_key="sk-test")
+    monkeypatch.setattr(llm, "_provider", provider)
     yield
-    llm.reset_provider()
 ```
-
-(`import dataclasses` — в шапку conftest. Прямое присваивание `llm._provider` вместо `init_provider` — чтобы не зависеть от валидации env в тестовом окружении.)
 
 - [ ] **Step 2: Рефактор `parse_pdf`**
 
-В `pdf_parser.py`: импорты дополнить `import llm` и `from config import resolved_openrouter_max_tokens`; блок от `api_key = settings.OPENROUTER_API_KEY` до `response_text = data["choices"][0]["message"]["content"]` (строки ~175-260) заменить на:
+В `pdf_parser.py`: импорты дополнить `import llm` и `from config import resolved_llm_parse_max_tokens` (нейтральный резолвер — домен не знает провайдера); блок от `api_key = settings.OPENROUTER_API_KEY` до `response_text = data["choices"][0]["message"]["content"]` (строки ~175-260) заменить на:
 
 ```python
-    max_tokens = resolved_openrouter_max_tokens(settings)
+    max_tokens = resolved_llm_parse_max_tokens(settings)
     try:
         resp = await llm.get_provider().vision_completion(
             system=SYSTEM_PROMPT,
@@ -755,37 +805,88 @@ def _llm_provider_initialized():
 
 - [ ] **Step 3: lifespan в `main.py`**
 
-В `lifespan` после `_sweep_stuck_documents()` добавить:
+Тело `lifespan` перестроить: `init_provider` — ПЕРВЫМ (fail-fast §1 до стартовых мутаций: sweep меняет БД, падать на невалидной конфигурации надо раньше), teardown — в `finally` (гарантирован при исключении):
 
 ```python
-    # LLM-провайдер: fail-fast конфигурации выбранного провайдера (§1 спеки),
-    # инициализация локатора ДО приёма трафика. Позднее связывание модуля —
-    # тестовые monkeypatch-и llm должны действовать (паттерн как у s3 выше).
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Инициализация при старте приложения (не при импорте модуля)."""
+    # LLM-провайдер: fail-fast §1 ДО любых стартовых мутаций (sweep пишет в БД).
+    # Позднее связывание модуля llm — тестовые monkeypatch-и должны действовать
+    # (паттерн как у s3 ниже).
     llm.init_provider(settings)
     logger.info(f"LLM-провайдер инициализирован: {settings.LLM_PROVIDER}")
+    try:
+        try:
+            s3.ensure_bucket()
+            logger.info("MinIO bucket готов")
+        except Exception as e:
+            logger.warning(f"MinIO недоступен при старте: {e}")
 
-    yield
+        # (существующий комментарий про fail-fast sweep — без изменений)
+        swept = _sweep_stuck_documents()
+        logger.info(f"Startup-sweep выполнен: {swept} документ(ов)")
 
-    llm.reset_provider()
+        yield
+    finally:
+        llm.reset_provider()
 ```
 
-(`import llm` — в импорты main.py; `yield` существующий заменяется на `yield` + teardown.)
+(`import llm` — в импорты main.py.) Плюс юнит-тест порядка/teardown — файл `backend/tests/unit/test_lifespan.py`:
+
+```python
+"""Тесты lifespan: init провайдера до sweep, teardown в finally."""
+import pytest
+
+import llm
+import main
+
+
+@pytest.mark.anyio
+async def test_lifespan_init_before_sweep_and_teardown(monkeypatch):
+    """init_provider — ДО startup-sweep (fail-fast раньше мутаций БД); reset — в конце."""
+    calls: list[str] = []
+    monkeypatch.setattr(main, "_sweep_stuck_documents", lambda: calls.append("sweep") or 0)
+    monkeypatch.setattr(main.s3, "ensure_bucket", lambda: calls.append("s3"))
+    monkeypatch.setattr(llm, "init_provider", lambda s: calls.append("init"))
+    monkeypatch.setattr(llm, "reset_provider", lambda: calls.append("reset"))
+    async with main.lifespan(main.app):
+        pass
+    assert calls.index("init") < calls.index("sweep")
+    assert calls[-1] == "reset"
+
+
+@pytest.mark.anyio
+async def test_lifespan_teardown_on_body_exception(monkeypatch):
+    """reset_provider вызывается даже если тело контекста бросило исключение."""
+    calls: list[str] = []
+    monkeypatch.setattr(main, "_sweep_stuck_documents", lambda: 0)
+    monkeypatch.setattr(main.s3, "ensure_bucket", lambda: None)
+    monkeypatch.setattr(llm, "init_provider", lambda s: None)
+    monkeypatch.setattr(llm, "reset_provider", lambda: calls.append("reset"))
+    with pytest.raises(RuntimeError):
+        async with main.lifespan(main.app):
+            raise RuntimeError("boom")
+    assert calls == ["reset"]
+```
+
+(Если `main.lifespan` недоступен как атрибут после декоратора — использовать фактическое имя из main.py; anyio-декоратор скопировать из соседних async-тестов.)
 
 - [ ] **Step 4: Прогнать интеграционные тесты парсера — зелёные без правок**
 
-Run: `cd backend && uv run pytest tests/integration/test_pdf_parser_phase_a.py tests/integration/test_process_document.py -v` (через `just test-int-local`, если локальный PG поднят)
+Run: `just test-int-local-k "test_pdf_parser_phase_a or test_process_document"`
 Expected: PASS все — тексты ошибок и биллинг не изменились; MockAI из conftest перехватывает тот же URL.
 
 - [ ] **Step 5: Полный smoke юнитов**
 
-Run: `cd backend && uv run pytest tests/unit -q`
-Expected: PASS.
+Run: `just test-backend-unit`
+Expected: PASS (включая новый `test_lifespan.py`).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/pdf_parser.py backend/main.py backend/tests/conftest.py
-git commit -m "refactor(parser): parse_pdf через LLM-локатор; транспорт — в провайдере (§2.2)"
+git add backend/pdf_parser.py backend/main.py backend/tests/conftest.py backend/tests/unit/test_lifespan.py
+git commit -m "refactor(parser): parse_pdf через LLM-локатор; lifespan init до sweep (§2.2, §1)"
 ```
 
 ---
@@ -825,7 +926,7 @@ async def test_broken_envelope_raises_permanent():
 
 - [ ] **Step 2: Прогнать — новые ожидания падают**
 
-Run: `cd backend && uv run pytest tests/unit/test_pdf_orientation.py -v`
+Run: `just test-unit-k "test_pdf_orientation"`
 Expected: FAIL на обновлённых тестах (пока старое поведение).
 
 - [ ] **Step 3: Рефактор `detect_rotations`**
@@ -881,7 +982,14 @@ Expected: FAIL на обновлённых тестах (пока старое �
     OPENROUTER_URL = f"{base}/chat/completions"
 ```
 
-(Скрипт дев-only и остаётся OpenRouter-only — §8 спеки, YAGNI.)
+И там же перевести чтение модели/движка на алиас-цепочки §1 (иначе после namespacing `.env` скрипт молча откатится на старые дефолты, включая mistral-ocr):
+
+```python
+    model = os.getenv("OPENROUTER_MODEL") or os.getenv("AI_MODEL", "anthropic/claude-sonnet-4.6")
+    engine = os.getenv("OPENROUTER_PDF_ENGINE") or os.getenv("PDF_ENGINE", "mistral-ocr")
+```
+
+— и использовать `model`/`engine` в payload (строки ~70 и ~72 скрипта) вместо прямых `os.getenv("AI_MODEL", ...)`/`os.getenv("PDF_ENGINE", ...)`. (Скрипт дев-only и остаётся OpenRouter-only — §8 спеки, YAGNI.)
 
 - [ ] **Step 5: Обновить комментарий-инвариант в `processing.py` (§8)**
 
@@ -896,12 +1004,12 @@ Expected: FAIL на обновлённых тестах (пока старое �
 
 - [ ] **Step 6: Прогнать**
 
-Run: `cd backend && uv run pytest tests/unit/test_pdf_orientation.py tests/unit -q && uv run python -c "import scripts.snapshot_ai_responses"` (последнее — smoke импорта не обязателен, скрипт с sys.argv-guard: достаточно `uv run python scripts/snapshot_ai_responses.py` → Usage-сообщение)
-Expected: PASS; скрипт печатает Usage.
+Run: `just test-backend-unit`
+Expected: PASS. (Snapshot-скрипт — дев-only, в CI не гоняется; опционально проверить вручную из своего терминала, что запуск без аргументов печатает Usage.)
 
 - [ ] **Step 7: Интеграционный прогон deskew**
 
-Run: `just test-int-local` (или `uv run pytest tests/integration -q` при поднятом тестовом PG)
+Run: `just test-int-local`
 Expected: PASS (маршрут deskew-reparse жив; изменившиеся тесты — только unit ориентации).
 
 - [ ] **Step 8: Commit**
@@ -959,13 +1067,27 @@ def test_put_rebuilds_provider(client):
     import llm
     client.put("/api/settings", json={"model": "test/rebuilt"})
     assert llm.get_provider().model == "test/rebuilt"
+
+
+def test_put_model_wins_over_legacy_alias(client, monkeypatch):
+    """PUT пишет namespaced OPENROUTER_MODEL: легаси AI_MODEL в env не перекрывает.
+
+    Регресс на приоритет алиасов: если бы PUT писал AI_MODEL, заданный в env
+    OPENROUTER_MODEL победил бы по цепочке §1 и PUT молча не действовал бы.
+    """
+    import llm
+    monkeypatch.setenv("AI_MODEL", "legacy/model")
+    monkeypatch.setenv("OPENROUTER_MODEL", "before/model")
+    client.put("/api/settings", json={"model": "after/model"})
+    assert llm.get_provider().model == "after/model"
+    assert client.get("/api/settings").json()["model"] == "after/model"
 ```
 
 (Использовать существующий `client` из conftest; авторизация — как в соседних тестах файла `test_settings.py` — скопировать их подготовку пользователя. **ВАЖНО:** PUT пишет в `ENV_PATH` — проверить, как существующие тесты файла изолируют запись от реального `backend/.env` (monkeypatch `ENV_PATH` → tmp_path); новые тесты обязаны использовать тот же механизм, чтобы не мутировать дев-`.env`.)
 
 - [ ] **Step 2: Прогнать — падают**
 
-Run: `cd backend && uv run pytest tests/integration/test_settings.py -v` (нужен тестовый PG)
+Run: `just test-int-local-k "test_settings"`
 Expected: FAIL новые тесты.
 
 - [ ] **Step 3: Реализация `routers/settings.py`**
@@ -980,7 +1102,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import llm
-from config import Settings, resolved_openrouter_model, settings
+from config import Settings, settings
 
 router = APIRouter()
 
@@ -1034,8 +1156,10 @@ def update_settings(data: SettingsUpdate):
         os.environ["OPENROUTER_API_KEY"] = data.api_key
         llm_changed = True
     if data.model is not None:
-        set_key(ENV_PATH, "AI_MODEL", data.model)
-        os.environ["AI_MODEL"] = data.model
+        # namespaced-ключ: запись в легаси AI_MODEL перекрывалась бы приоритетом
+        # OPENROUTER_MODEL из env (алиас-цепочка §1) — PUT молча не действовал бы
+        set_key(ENV_PATH, "OPENROUTER_MODEL", data.model)
+        os.environ["OPENROUTER_MODEL"] = data.model
         llm_changed = True
     if data.confidence_threshold is not None:
         set_key(ENV_PATH, "CONFIDENCE_THRESHOLD", str(data.confidence_threshold))
@@ -1046,16 +1170,16 @@ def update_settings(data: SettingsUpdate):
         # Синглтон config.settings обновляем точечно, чтобы GET видел актуальный ключ.
         fresh = Settings()
         settings.OPENROUTER_API_KEY = fresh.OPENROUTER_API_KEY
-        settings.AI_MODEL = fresh.AI_MODEL
+        settings.OPENROUTER_MODEL = fresh.OPENROUTER_MODEL
         llm.init_provider(fresh)
     return {"message": "Настройки сохранены"}
 ```
 
-Примечание: `set_key(..., "AI_MODEL", ...)` сохраняется (существующие `.env` живут на `AI_MODEL`; писать новый ключ `OPENROUTER_MODEL` = два источника в одном файле). Резолвер Task 1 читает `AI_MODEL` алиасом — поведение корректно.
+Примечание: PUT пишет **namespaced** `OPENROUTER_MODEL`; легаси `AI_MODEL` остаётся deprecated-входом на чтение (алиас-цепочка §1), но новые записи идут в новый ключ — иначе заданный в env `OPENROUTER_MODEL` перекрывал бы записанное значение.
 
 - [ ] **Step 4: Прогнать**
 
-Run: `cd backend && uv run pytest tests/integration/test_settings.py -v`
+Run: `just test-int-local-k "test_settings"`
 Expected: PASS (новые + существующие).
 
 - [ ] **Step 5: Commit**
@@ -1092,9 +1216,16 @@ export interface AppSettings {
   confidence_threshold: number;
   [key: string]: unknown;
 }
+
+/** Частичный PUT: только редактируемые поля — response-only capabilities сюда не входят. */
+export interface SettingsUpdate {
+  api_key?: string;
+  model?: string;
+  confidence_threshold?: number;
+}
 ```
 
-(Метод `update` уже принимает `Partial<AppSettings>` — не трогать.)
+Метод `update` перевести на узкий тип: `async update(input: SettingsUpdate): Promise<{ message: string }>` (было `Partial<AppSettings>` — позволял слать capabilities).
 
 - [ ] **Step 2: Обновить дефолтный мок в `test/handlers.ts`**
 
@@ -1120,7 +1251,7 @@ it("показывает «стоимость недоступна» при cost
       })
     )
   );
-  renderReview(); // существующий хелпер файла
+  renderWithProviders(<Review />); // как в остальных тестах файла (Review.test.tsx:26)
   expect(await screen.findByText(/стоимость недоступна/i)).toBeInTheDocument();
   expect(screen.queryByText(/\$\d/)).not.toBeInTheDocument();
 });
@@ -1137,7 +1268,7 @@ it("отправляет только изменённые поля", async () =
       return HttpResponse.json({ message: "ok" });
     })
   );
-  renderSettingsPage();
+  renderWithProviders(<SettingsPage />); // хелпер — из существующего test-utils, как в соседних page-тестах
   await userEvent.click(screen.getByRole("button", { name: "Парсинг" }));
   const threshold = screen.getByRole("spinbutton");
   await userEvent.clear(threshold);
@@ -1155,7 +1286,7 @@ it("скрывает поле модели при can_edit_model=false", async (
       })
     )
   );
-  renderSettingsPage();
+  renderWithProviders(<SettingsPage />); // хелпер — из существующего test-utils, как в соседних page-тестах
   await userEvent.click(await screen.findByRole("button", { name: "Парсинг" }));
   expect(screen.queryByPlaceholderText(/anthropic/)).not.toBeInTheDocument();
 });
@@ -1204,7 +1335,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add frontend/src
+git add frontend/src/services/api/settings.ts frontend/src/pages/Settings.tsx frontend/src/pages/Settings.test.tsx frontend/src/pages/Review.tsx frontend/src/pages/Review.test.tsx frontend/src/test/handlers.ts frontend/src/types/invoice.ts
 git commit -m "feat(frontend): частичный PUT настроек, capabilities, «стоимость недоступна» (§5, AC-5/6)"
 ```
 
