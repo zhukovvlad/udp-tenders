@@ -1,6 +1,6 @@
 # Переключаемый LLM-провайдер: OpenRouter ↔ корпоративный gateway
 
-**Статус:** одобрен с открытыми preconditions — gateway-спайк (§7) и golden eval (§6). 2026-07-23, шесть раундов ревью двумя ревьюерами: [1] граница интерфейса — доменный парсинг не переезжает, токен-жизненный-цикл, спайк+eval как приёмка; [2] `LLMProviderError` с биллингом, `cost_usd` без `None`, DI-цепочка → module-level seam, capabilities в Settings, приоритет алиасов, RP-0 не существует; [3] `cost_available` из ответа убран, смена семантики битого envelope в detect зафиксирована, два контрактных теста, readiness — новый скоуп; [4] инварианты service locator, условное правило 401, нормализация URL, определение `paid_calls`, спайк-параметры модели, вопрос IT о source-level запрете URL; [5] 408 → Transient (противоречие таблицы и примечания), `timeout` в сигнатуре (свойство операции), guard пустой строки base URL, комментарий-инвариант processing.py:334; [6] fail-fast без OPENROUTER_API_KEY (иначе UI-сценарий невозможен), атомарная замена провайдера на PUT (чинит латентный баг os.environ vs settings-синглтон), приоритетный порядок матчинга ошибок, gateway убран из readiness (связывание доступности приложения с внешним LLM + YAGNI), `code` в `LLMProviderError`, рендер в независимый модуль против цикла импортов.
+**Статус:** одобрен с открытыми preconditions — gateway-спайк (§7) и golden eval (§6). 2026-07-23, шесть раундов ревью двумя ревьюерами: [1] граница интерфейса — доменный парсинг не переезжает, токен-жизненный-цикл, спайк+eval как приёмка; [2] `LLMProviderError` с биллингом, `cost_usd` без `None`, DI-цепочка → module-level seam, capabilities в Settings, приоритет алиасов, RP-0 не существует; [3] `cost_available` из ответа убран, смена семантики битого envelope в detect зафиксирована, два контрактных теста, readiness — новый скоуп; [4] инварианты service locator, условное правило 401, нормализация URL, определение `paid_calls`, спайк-параметры модели, вопрос IT о source-level запрете URL; [5] 408 → Transient (противоречие таблицы и примечания), `timeout` в сигнатуре (свойство операции), guard пустой строки base URL, комментарий-инвариант processing.py:334; [6] fail-fast без OPENROUTER_API_KEY (иначе UI-сценарий невозможен), атомарная замена провайдера на PUT (чинит латентный баг os.environ vs settings-синглтон), приоритетный порядок матчинга ошибок, gateway убран из readiness (связывание доступности приложения с внешним LLM + YAGNI), `code` в `LLMProviderError`, рендер в независимый модуль против цикла импортов; [7] реальность Settings UI (поля ключа во фронте нет — ключ через backend API, `can_edit_credentials` убран), частичный PUT (`SettingsUpdate`, только изменённые поля — `Settings.tsx:220` шлёт весь draft), `Review.tsx:332` и frontend-типы в blast radius, deployment-инвариант для смешанной истории стоимости, `OPENROUTER_MAX_TOKENS` (алиас `AI_MAX_TOKENS`), single-process ограничение locator swap (инвариант S1, justfile:26), фактический движок — `native` (mistral-ocr — устаревший код-дефолт; предпосылка раунда 1 о калибровке промпта под mistral-ocr неверна — промпт откалиброван под native-просмотр, что сближает контурный image_url-путь с текущим поведением).
 
 **Контекст:** корпоративная инструкция по LLM-gateway (файл в корне репо, gitignored — секреты не коммитим) требует: в контуре МР приложение ходит к внешним LLM только через внутренний OpenAI-совместимый gateway с Keycloak-авторизацией. Текущий код завязан на OpenRouter-проприетарные механизмы и напрямую несовместим с gateway.
 
@@ -10,7 +10,7 @@
 
 Deploy-time переключатель `LLM_PROVIDER`:
 
-- **`openrouter`** (дефолт) — поведение приложения идентично текущему: OpenRouter + Claude + серверный OCR (`plugins: file-parser`, engine mistral-ocr). «Как задумано».
+- **`openrouter`** (дефолт) — поведение приложения идентично текущему: OpenRouter + Claude + плагин `file-parser` (engine из конфига; **фактический деплой — `native`**: Claude читает страницы PDF нативно как изображения, ~10k токенов промпта — см. `docs/agent/pdf-parsing.md:245`; `mistral-ocr` — лишь устаревший код-дефолт `config.py:43`). «Как задумано».
 - **`gateway`** (контурный режим) — весь LLM-egress идёт через корпоративный gateway. Цель режима — **комплаенс** (политика «только через gateway»), не data-residency.
 
 ### Non-goals
@@ -30,7 +30,8 @@ LLM_PROVIDER=openrouter | gateway     # enum, дефолт openrouter
 OPENROUTER_API_KEY=
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1   # оканчивается на /api/v1
 OPENROUTER_MODEL=anthropic/claude-sonnet-4.6
-OPENROUTER_PDF_ENGINE=mistral-ocr
+OPENROUTER_PDF_ENGINE=mistral-ocr   # код-дефолт (1:1); рабочее значение в .env — native
+OPENROUTER_MAX_TOKENS=64000
 
 # namespace gateway
 GATEWAY_BASE_URL=                     # БЕЗ /v1 — код добавляет /v1 ровно один раз
@@ -38,11 +39,12 @@ GATEWAY_MODEL=
 # auth-переменные — финализируются по результату спайка (§7.6)
 ```
 
-- **Fail-fast на старте:** валидируются enum `LLM_PROVIDER`, base URL (после нормализации), модель и PDF engine выбранного провайдера; для gateway — также auth-переменные. **`OPENROUTER_API_KEY` на старте НЕ обязателен** — сохраняется текущее поведение (ошибка «API-ключ не настроен» при первом LLM-вызове, `pdf_parser.py:175-177`); иначе сценарий «запустить приложение и вставить ключ через UI» (§5) был бы невозможен.
+- **Fail-fast на старте:** валидируются enum `LLM_PROVIDER`, base URL (после нормализации), модель и PDF engine выбранного провайдера; для gateway — также auth-переменные. **`OPENROUTER_API_KEY` на старте НЕ обязателен** — сохраняется текущее поведение (ошибка «API-ключ не настроен» при первом LLM-вызове, `pdf_parser.py:175-177`); иначе сценарий «запустить приложение и установить ключ через Settings API» (§5) был бы невозможен.
 - **Алиасы (обратная совместимость), детерминированный приоритет:**
   `OPENROUTER_MODEL` → deprecated `AI_MODEL` (warning в лог, без вывода значений) → дефолт;
-  `OPENROUTER_PDF_ENGINE` → deprecated `PDF_ENGINE` → дефолт.
-  В gateway-режиме `AI_MODEL`/`PDF_ENGINE` не читаются вовсе.
+  `OPENROUTER_PDF_ENGINE` → deprecated `PDF_ENGINE` → дефолт;
+  `OPENROUTER_MAX_TOKENS` → deprecated `AI_MAX_TOKENS` (`config.py:41`, сейчас переопределяем) → `64000`.
+  В gateway-режиме `AI_MODEL`/`PDF_ENGINE`/`AI_MAX_TOKENS` не читаются вовсе; parse-лимит gateway финализируется после спайка (`GATEWAY_MAX_TOKENS` либо безопасный лимит выбранной модели), detect остаётся фиксированным `200`.
 - **Нормализация URL:** trailing slash безопасно срезается в обоих base URL; `/v1` для gateway добавляется ровно один раз; конструкция `/v1/v1/...` невозможна (закреплено тестом). **Пустая строка в base URL трактуется как отсутствие значения** (openrouter → дефолт, gateway → fail-fast) — сохраняет существующий guard `pdf_parser.py:157-160` («`OPENROUTER_BASE_URL=` в .env → relative URL → тихая поломка httpx»), который при переезде на namespaced-поля легко потерять молча.
 - Режим неизменяем из работающего приложения (только env/CI при деплое).
 
@@ -57,7 +59,7 @@ class LLMProvider(Protocol):
         system: str | None,          # detect_rotations работает без system
         user_text: str,
         attachment: PdfAttachment | ImagesAttachment,
-        max_tokens: int,             # парсер 64000, детект 200
+        max_tokens: int,             # парсер: OPENROUTER_MAX_TOKENS (дефолт 64000); детект: 200
         timeout: httpx.Timeout,      # свойство операции, задаёт call-site:
                                      # parse — Timeout(180), detect — Timeout(30, connect=5.0)
     ) -> LLMResponse: ...
@@ -99,7 +101,7 @@ class LLMProviderError(Exception):
 
 **Инварианты:**
 - фабрика не выполняет сетевых запросов (только конструирование);
-- **экземпляр** провайдера неизменяем после создания; **ссылка** локатора атомарно заменяема (нужно для PUT в openrouter-режиме, §5) — уже начатые вызовы дорабатывают на старом экземпляре;
+- **экземпляр** провайдера неизменяем после создания; **ссылка** локатора атомарно заменяема (нужно для PUT в openrouter-режиме, §5) — уже начатые вызовы дорабатывают на старом экземпляре. **Работает только при действующем single-process инварианте S1** (`workers=1, replicas=1`, `justfile:26`); при переходе к нескольким workers потребуется общий конфигурационный канал или рестарт всех workers;
 - `get_provider()` до lifespan → понятный `RuntimeError`;
 - lifespan teardown очищает состояние;
 - тесты получают scoped override/reset (fixture); повторные `TestClient` в одном процессе работают корректно.
@@ -138,7 +140,8 @@ Import-time константа `OPENROUTER_URL` удаляется (вместе
 
 - Gateway не возвращает `usage.cost` → `cost_usd = Decimal(0)`. Доменная арифметика (`processing.py:424`, слияние detect+parse §2.5 async-спеки) не меняется — `None` в неё не попадает.
 - **Определение `paid_calls`:** `1` за каждый полученный HTTP 200 от completion endpoint независимо от валидности envelope; транспортная ошибка и non-200 → `0`; `401`, предшествовавший успешному refresh-retry, платным вызовом не считается.
-- UI по `capabilities.cost_available=false` показывает «стоимость недоступна», а не `$0` (ноль означал бы «бесплатно», что неизвестно).
+- UI по `capabilities.cost_available=false` показывает «стоимость недоступна», а не `$0` (ноль означал бы «бесплатно», что неизвестно). Фактический потребитель — `Review.tsx:332`.
+- **Deployment-инвариант (смешанная история):** режим НЕ переключается на существующей БД — OpenRouter- и gateway-деплои имеют раздельные данные (соответствует реальности: dev на OpenRouter, контурный деплой в периметре МР — свежая БД). Без инварианта глобальный capability некорректен: переключение скрыло бы валидную старую стоимость или показало `$0.00` у gateway-документов. Пер-документное хранение доступности стоимости осознанно не делаем (YAGNI при действующем инварианте).
 
 ## 5. Settings API/UI
 
@@ -146,13 +149,15 @@ Import-time константа `OPENROUTER_URL` удаляется (вместе
 - **GET** отдаёт capabilities:
 
   ```json
-  { "provider": "gateway", "can_edit_credentials": false, "can_edit_model": false, "cost_available": false }
+  { "provider": "gateway", "can_edit_model": false, "cost_available": false }
   ```
 
   В gateway-режиме `api_key_set` не вычисляется по `sk-`-префиксу (иначе UI покажет ложный призыв «введите ключ»); `model` в GET читается через алиас-цепочку §1, не напрямую из `os.getenv("AI_MODEL")` (`routers/settings.py:30`).
 - Frontend скрывает поля по capabilities; backend enforce'ит запрет независимо от фронта. Gateway-токен на frontend не передаётся ни в каком виде.
-- **Семантика PUT в openrouter-режиме:** сохранение в `.env` (как сейчас) **плюс атомарная замена провайдера** — фабрика пересобирает `OpenRouterProvider` с новыми ключом/моделью и атомарно заменяет ссылку локатора; уже начатые вызовы дорабатывают на старом экземпляре. Это чинит существующий латентный баг: сейчас PUT пишет в `os.environ` (`routers/settings.py:40`), но парсер читает pydantic-синглтон `settings`, созданный при импорте (`pdf_parser.py:175`, `config.py:50`) — вставленный через UI ключ не действует до рестарта.
-- Дев-удобство «запустить без ключа и вставить через UI» сохраняется (см. §1: ключ не проверяется на старте).
+- **Семантика PUT в openrouter-режиме:** сохранение в `.env` (как сейчас) **плюс атомарная замена провайдера** — фабрика пересобирает `OpenRouterProvider` с новыми ключом/моделью и атомарно заменяет ссылку локатора; уже начатые вызовы дорабатывают на старом экземпляре. Это чинит существующий латентный баг: сейчас PUT пишет в `os.environ` (`routers/settings.py:40`), но парсер читает pydantic-синглтон `settings`, созданный при импорте (`pdf_parser.py:175`, `config.py:50`) — установленный через API ключ не действует до рестарта.
+- **Реальность UI (уточнение раунда 7):** поля ввода ключа во frontend НЕТ (`api_key` встречается только в типах/тест-хэндлерах как `api_key_set`) — ключ устанавливается через **backend Settings API**, и это остаётся так (поле не добавляем, YAGNI). Поэтому capability `can_edit_credentials` не вводится — у неё нет потребителя.
+- **Частичный PUT (обязательное изменение frontend):** сегодня `Settings.tsx:220` отправляет весь `draft` (всегда содержит `model`) — в gateway-режиме сохранение одного `confidence_threshold` словило бы 403. Требуется: `SettingsUpdate` DTO с опциональными полями; frontend отправляет **только изменённые разрешённые** поля.
+- Дев-удобство «запустить без ключа, установить через API» сохраняется (см. §1: ключ не проверяется на старте).
 
 ## 6. Golden eval — зависимость приёмки
 
@@ -183,7 +188,8 @@ Eval-артефакта в репозитории нет — он **строит
 - `pdf_orientation.py:19` — импорт `OPENROUTER_URL` умирает; `detect_rotations` → `get_provider()`; семантика битого envelope — §2.5.
 - `processing.py` — код не меняется (module-level seam сохраняет цепочку вызовов), но **комментарий-инвариант `:334-335` обновляется**: после §2.5 у `deskew_pdf` появляется третий случай — битый envelope при 200 → ошибка **с** оплаченным detect (`cost_usd`, `paid_calls=1`); учёт не задваивается (путь `exc.cost_usd` в `run_processing_attempt` его подхватывает, accounting и exc читаются взаимоисключающими путями), но комментарий обязан описывать полную картину.
 - `scripts/snapshot_ai_responses.py` — дев-only, остаётся OpenRouter-only; чинится только импорт.
-- `routers/settings.py` — §5 (PUT-запреты, capabilities, алиас модели в GET).
+- `routers/settings.py` — §5 (PUT-запреты, `SettingsUpdate` DTO, capabilities, алиас модели в GET, атомарная замена провайдера).
+- **Frontend:** `Settings.tsx` (частичный PUT — только изменённые поля; скрытие выбора модели по `can_edit_model`), `Review.tsx:332` («стоимость недоступна» по `cost_available`), типы `services/api/settings.ts` (capabilities), `types/invoice.ts` (OpenRouter-специфичные комментарии у `parse_cost_usd`/`parse_count`).
 - `config.py` — §1 (enum, namespacing, алиасы, fail-fast).
 - **Readiness-проверка gateway НЕ делается** (решение раунда 6, разворот раунда 3): она связала бы доступность всего приложения (отчёты, просмотр документов — не зависят от LLM) с внешним сервисом, а потребителя пробы нет (деплой — docker compose без оркестратора; `/api/health`, `main.py:177`, остаётся как есть). Недоступность gateway в рантайме = `TransientError` при вызове. Если IT потребует пробу — отдельный мини-дизайн (endpoint, какая ручка шлюза, timeout, статус при сбое, влияние на readiness приложения, нужен ли bearer).
 - `.gitignore` — добавить `.gateway.env`, `.access_token`, `.refresh_token`; запись `/CLAUDE_CODE_GATEWAY_INSTRUCTION.md` сохраняется.
@@ -198,8 +204,8 @@ Eval-артефакта в репозитории нет — он **строит
 2. `LLM_PROVIDER=gateway` → ни одного запроса к `openrouter.ai` или прямым LLM-провайдерам.
 3. Gateway-запрос: не содержит `plugins`, `usage:{include}`, `type:file`; содержит явный `stream: false`; не содержит `X-Security-*`; URL без `/v1/v1` (тест конструкции). *Критерий про `type:file` — временный до спайка: после него заменяется окончательным контрактом выбранной подачи PDF.*
 4. Ошибки — по таблице §3; `correlation_id` в логе; bearer/`_security`/masking-map в логах отсутствуют (тест).
-5. Учёт: `paid_calls` по определению §4 в обоих режимах; gateway → `cost_usd=0`, UI показывает «недоступна».
-6. Settings: PUT `api_key`/`model` в gateway-режиме → 403; GET отдаёт корректные capabilities; фронт скрывает поля.
+5. Учёт: `paid_calls` по определению §4 в обоих режимах; gateway → `cost_usd=0`; frontend-тест: `cost_available=false` → `Review.tsx` показывает «стоимость недоступна», не `$0`.
+6. Settings: gateway-режим — PUT только с `confidence_threshold` → успех; PUT с явным `api_key`/`model` → 403; GET отдаёт корректные capabilities (без `can_edit_credentials`); frontend отправляет только изменённые разрешённые поля и скрывает выбор модели по `can_edit_model`.
 7. Fail-fast по §1 (openrouter — без проверки ключа на старте; gateway — включая auth); доступность gateway не проверяется ни на startup, ни в readiness — её недоступность в рантайме классифицируется как `TransientError`.
 8. Инварианты service locator (§2.3): `RuntimeError` до init, teardown, scoped override в тестах.
 9. Eval §6 построен, baseline снят, метрики gateway-режима в допуске.
