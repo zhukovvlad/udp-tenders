@@ -54,18 +54,12 @@
   от mistral-ocr занимает ~24K токенов на 8-страничном бланке (повторяющиеся шапки/подвалы
   каждой страницы) — сжатие prompt-нагрузки оставило бы больше места для completion.
 
-- [x] **Parser: `usage: null` в ответе OpenRouter крашит разбор (строка ~212)**
-  `pdf_parser.parse_invoice_pdf` после HTTP 200 делает `usage = data.get("usage", {})` — дефолт
-  срабатывает только когда ключ *отсутствует*; явный JSON `null` вернёт `None`, и следующий
-  `usage.get("completion_tokens")` бросит `AttributeError` (перехватится общим `except`, документ
-  уйдёт в ошибку). Захват стоимости (строка захвата `cost`) уже устойчив к этому случаю
-  (`(data.get("usage") or {}).get("cost")`), поэтому платный вызов при `usage: null` всё равно
-  корректно биллится через `_with_cost`; но сам разбор падает. На практике OpenRouter при
-  `usage: {include: true}` всегда возвращает объект usage на 200 — низкий приоритет.
-  **Решение:** заменить `data.get("usage", {})` на `data.get("usage") or {}` в строке чтения usage
-  (и заодно проверить прочие `.get("usage", {})` в модуле). Отдельной задачей, не на feature-ветке.
-  **Закрыто Task 3 плана 2026-07-23:** провайдер использует `data.get("usage") or {}`, тест
-  `test_usage_null_returns_success`.
+- [x] **Parser: `usage: null` в ответе OpenRouter крашил разбор (закрыто)**
+  **Закрыто Task 3 плана 2026-07-23:** транспорт/envelope переехали в `OpenRouterProvider`
+  (`llm_openrouter.py`), который читает usage через `data.get("usage") or {}` — явный JSON
+  `null` больше не роняет разбор (раньше `usage.get("completion_tokens")` бросал `AttributeError`,
+  документ уходил в ошибку, хотя платный вызов уже биллился). Теперь `usage: null` → успех с
+  `cost=Decimal(0)`, `completion_tokens=None`. Зафиксировано тестом `test_usage_null_returns_success`.
 
 - [ ] **Parser: reparse удаляет данные до валидации**
   `routers/invoices.reparse_document` удаляет существующие Invoice-строки *до* запуска нового

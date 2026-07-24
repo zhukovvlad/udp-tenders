@@ -20,6 +20,7 @@ _REAL_SEND = httpx.AsyncClient.send
 
 @pytest.fixture
 def _allow_respx(monkeypatch):
+    """Восстанавливает настоящий AsyncClient.send, чтобы respx.mock мог перехватывать запросы."""
     monkeypatch.setattr(httpx.AsyncClient, "send", _REAL_SEND)
 
 

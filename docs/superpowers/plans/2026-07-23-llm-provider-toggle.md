@@ -1441,7 +1441,7 @@ git commit -m "feat(frontend): частичный PUT настроек, capabili
 
 После строки `/CLAUDE_CODE_GATEWAY_INSTRUCTION.md` добавить:
 
-```
+```gitignore
 .gateway.env
 .access_token
 .refresh_token
@@ -1451,7 +1451,7 @@ git commit -m "feat(frontend): частичный PUT настроек, capabili
 
 Заменить строки `AI_MODEL=...` и `PDF_ENGINE=native` на:
 
-```
+```dotenv
 # LLM-провайдер: openrouter (дефолт) | gateway (контур МР; после спайка)
 LLM_PROVIDER=openrouter
 OPENROUTER_MODEL=anthropic/claude-sonnet-4.6

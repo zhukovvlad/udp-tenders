@@ -48,6 +48,7 @@ def _sanitize_response(raw: dict) -> dict:
 
 
 async def _fetch(pdf_path: Path) -> dict:
+    """Отправить PDF в реальный OpenRouter и вернуть сырой JSON-ответ (дев-снапшот)."""
     import base64
     import os
 
