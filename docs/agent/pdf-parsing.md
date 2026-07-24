@@ -1,6 +1,9 @@
 # Парсинг УПД (PDF)
 
-Парсинг через OpenRouter API (`OPENROUTER_API_KEY`). Обработка документа разбита
+Парсинг через абстракцию LLM-провайдера (`backend/llm.py`, переключатель
+`LLM_PROVIDER`; дефолт — OpenRouter/Claude Vision). Как настраивать провайдера,
+менять ключ/модель и звать LLM из кода — `docs/instructions/llm-provider.md`.
+Обработка документа разбита
 на чистую фазу A (`pdf_parser.parse_pdf`) и транзакционную фазу B
 (`processing.persist_parse_result`) — см. «Обработка документа» ниже. Спека:
 `docs/superpowers/specs/2026-07-16-async-processing-design.md`; план:
@@ -40,9 +43,11 @@ Guard не захватил строку (документ уже обрабат
   успехе, и при ошибке парсинга, AC-S0-10). Это ядро, одинаковое для ступеней
   0/1/2 — меняется только `process_document`.
 - **`parse_pdf` (фаза A, `pdf_parser.py`)** — чистая функция, без обращения к
-  БД: вызывает OpenRouter, разбирает ответ, возвращает `ParseOutcome`
-  (`doc_type`, `invoices`, `cost_usd`, `paid_calls`). Материалы НЕ резолвятся
-  в id — это делает фаза B.
+  БД: зовёт `llm.get_provider().vision_completion(...)` (транспорт/envelope —
+  в `llm_openrouter.py` за интерфейсом `llm.py`), разбирает ответ, возвращает
+  `ParseOutcome` (`doc_type`, `invoices`, `cost_usd`, `paid_calls`). Ошибку
+  провайдера (`LLMProviderError`) маппит в `Transient`/`PermanentError` с
+  сохранением биллинга. Материалы НЕ резолвятся в id — это делает фаза B.
 - **`persist_parse_result` (фаза B, `processing.py`)** — одна транзакция:
   `SELECT ... FOR UPDATE` строки документа, повторная проверка verified-СФ
   (могла появиться после guard-перехода, пока шёл длинный LLM-вызов, S0-8),
@@ -214,10 +219,12 @@ at-least-once: запоздалый out-of-order ответ может дать 
 
 ## Трекинг стоимости разбора
 
-`parse_pdf` (фаза A) шлёт `usage: {include: true}` и захватывает реальную
-стоимость вызова (`paid_calls=1`/`cost` из `usage.cost`) сразу после проверки
-`status_code == 200` (до `response.json()`) — так даже 200 с непарсящимся
-телом учитывается как платный вызов. `ParseOutcome.cost_usd`/`paid_calls`
+`OpenRouterProvider` (за интерфейсом `llm.py`) шлёт `usage: {include: true}` и
+захватывает реальную стоимость (`paid_calls=1`/`cost` из `usage.cost`) по факту
+HTTP 200 — так даже 200 с непарсящимся телом учитывается как платный вызов;
+ошибка после 200 доходит до `parse_pdf` как `LLMProviderError` с накопленным
+`cost_usd`/`paid_calls` (домен маппит в `ProcessingError`). `usage: null` при
+этом больше не роняет разбор — успех с `cost=0` (закрытый пункт `docs/TECH_DEBT.md`). `ParseOutcome.cost_usd`/`paid_calls`
 (успех) или те же атрибуты на доменной ошибке (провал) доходят до
 `persist_parse_result`/`write_processing_error`, которые начисляют их
 **атомарным SQL-инкрементом** (`parse_cost_usd = parse_cost_usd + v`) —
@@ -238,11 +245,11 @@ at-least-once: запоздалый out-of-order ответ может дать 
 2. `_reconcile_totals` обнаруживает расхождение между `SUM(item.amount)` и извлечённым из документа `doc_total_without_vat` («Всего к оплате» без НДС) сверх допуска `max(1 ₽, 0.1%)`.
 3. Ноль разобранных СФ (пустой `invoices`, либо у всех СФ кривая дата) — раньше это давало артефакт «`parsed` с 0 СФ» (Q2, класс 2); фаза A исключает его на входе.
 
-Это предотвращает тихое сохранение неполного счёта (например 60 из 66 строк) под высоким confidence. Промпт содержит обязательный шаг самопроверки: модель сверяет `SUM(amount)` с `doc_total_without_vat` и ищет пропущенные строки перед закрытием JSON. `AI_MAX_TOKENS=64000` — верхний предел вывода claude-sonnet-4.6.
+Это предотвращает тихое сохранение неполного счёта (например 60 из 66 строк) под высоким confidence. Промпт содержит обязательный шаг самопроверки: модель сверяет `SUM(amount)` с `doc_total_without_vat` и ищет пропущенные строки перед закрытием JSON. `OPENROUTER_MAX_TOKENS=64000` (legacy-алиас `AI_MAX_TOKENS`) — верхний предел вывода claude-sonnet-4.6.
 
 ## Выбор движка
 
-- **`PDF_ENGINE=native` (рекомендуемое рабочее значение):** Claude смотрит на PDF как на изображения, промпт ~10k токенов — стабильнее на длинных СФ. Внимание: код-дефолт в `config.py` — `mistral-ocr` (устарел, см. `docs/TECH_DEBT.md`), поэтому значение задаётся в `.env` явно.
+- **`OPENROUTER_PDF_ENGINE=native` (рекомендуемое рабочее значение; legacy-алиас `PDF_ENGINE`):** Claude смотрит на PDF как на изображения, промпт ~10k токенов — стабильнее на длинных СФ. Внимание: код-дефолт в `config.py` — `mistral-ocr` (устарел, см. `docs/TECH_DEBT.md`), поэтому значение задаётся в `.env` явно.
 - **`mistral-ocr`:** ~24k токенов промпта (повторяющиеся шапки страниц), нестабилен на СФ с 60+ одинаковыми строками — пропускает или дублирует строки даже при `finish_reason=stop`.
 
 Ещё не реализовано: постраничный chunking для СФ на 100+ строк — см. `docs/TECH_DEBT.md`.
@@ -254,14 +261,15 @@ at-least-once: запоздалый out-of-order ответ может дать 
 `process_document(mode="deskew", reraise=True, ...)`; `_run_deskew` в
 `processing.py` координирует S3 (бэкап/перезапись) и `pdf_orientation.deskew_pdf`.
 
-- **Детект:** vision-предзапрос в OpenRouter (`detect_rotations`, `AI_MODEL`, `max_tokens≈200`,
-  `timeout≈30s`). Модель возвращает per-page **насколько страница ПОВЁРНУТА по часовой стрелке**
-  (0/90/180/270), а не «сколько докрутить». Транспортный сбой/таймаут/не-2xx →
-  `TransientError(http_status=502)` (детект не оплачен, `cost` не читается);
-  >20 страниц → `PermanentError(http_status=413)`. Непарсящееся СОДЕРЖИМОЕ при
-  HTTP 200 → нули (безопасная деградация на уровне контента), но `cost` из
-  `usage` возвращается в любом случае — вызов уже оплачен (**S0-9**: раньше эта
-  стоимость терялась молча, теперь учитывается — см. «Трекинг стоимости» выше).
+- **Детект:** vision-предзапрос через провайдер (`detect_rotations` → `llm.get_provider()`,
+  `ImagesAttachment`, `max_tokens≈200`, `timeout=Timeout(30, connect=5.0)`). Модель возвращает
+  per-page **насколько страница ПОВЁРНУТА по часовой стрелке** (0/90/180/270), а не «сколько
+  докрутить». Классификация исходов (**§2.5** спеки LLM-провайдера):
+  - >20 страниц → `PermanentError(http_status=413)` (детект не вызывается);
+  - транспорт/таймаут/5xx/408/429 → `TransientError(http_status=502)` (детект не оплачен, `cost` не читается);
+  - прочие не-2xx → `PermanentError(http_status=502)`;
+  - **битый envelope платного 200** (нет `choices` и т.п.) → `PermanentError(http_status=502)` **с** учётом стоимости (`cost`/`paid_calls=1`) — НЕ тихие нули (иначе переразобрали бы оригинал под видом исправленного);
+  - целый envelope, но непарсящийся МАССИВ поворотов → нули (безопасная деградация уровня контента), `cost` из `usage` возвращается — вызов оплачен (**S0-9**).
 - **Коррекция:** селективный raster (`apply_rotations`) — `pypdfium2` перерисовывает ТОЛЬКО
   повёрнутые страницы с ОТМЕНЯЮЩИМ поворотом `(360 − detected) % 360` (pypdfium2 `render(rotation=)`
   крутит по часовой, поэтому страницу, повёрнутую на R°, выпрямляет рендер на 360−R°; grayscale,
