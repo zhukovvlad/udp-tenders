@@ -1,6 +1,6 @@
 # Переключаемый LLM-провайдер — план реализации (фаза 1: без gateway-спайка)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. *(В окружениях без superpowers-скиллов — исполнять задачи последовательно как чек-лист, с коммитом после каждой.)*
+> **For agentic workers:** SUB-SKILL (при наличии): superpowers:subagent-driven-development (recommended) или superpowers:executing-plans — исполнять план task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. В окружениях без superpowers-скиллов — исполнять задачи последовательно как чек-лист, с коммитом после каждой.
 
 **Goal:** Ввести deploy-time переключатель `LLM_PROVIDER` с абстракцией провайдера так, что режим `openrouter` работает 1:1 как сейчас (закреплено контрактными тестами), а всё, что не зависит от gateway-спайка, готово к появлению `GatewayProvider`.
 
@@ -29,7 +29,7 @@
 - Test: `backend/tests/unit/test_config_llm.py` (создать)
 
 **Interfaces:**
-- Produces: поля `Settings`: `LLM_PROVIDER: Literal["openrouter","gateway"]`, `OPENROUTER_MODEL: str`, `OPENROUTER_PDF_ENGINE: str`, `OPENROUTER_MAX_TOKENS: int | None`, `GATEWAY_BASE_URL: str`, `GATEWAY_MODEL: str`; функции `resolved_openrouter_model(s) -> str`, `resolved_openrouter_pdf_engine(s) -> str`, `resolved_openrouter_max_tokens(s) -> int`, `resolved_llm_parse_max_tokens(s) -> int` (нейтральный — для доменного `pdf_parser`), `validate_llm_settings(s) -> None`.
+- Produces: поля `Settings`: `LLM_PROVIDER: Literal["openrouter","gateway"]`, `OPENROUTER_MODEL: str`, `OPENROUTER_PDF_ENGINE: str`, `OPENROUTER_MAX_TOKENS: int | None`, `GATEWAY_BASE_URL: str`, `GATEWAY_MODEL: str`; функции `resolved_openrouter_model(s) -> str`, `resolved_openrouter_pdf_engine(s) -> str`, `resolved_openrouter_max_tokens(s) -> int`, `resolved_llm_parse_max_tokens(s) -> int` (нейтральный — для доменного `pdf_parser`), `resolved_openrouter_base_url(s) -> str`, `validate_llm_settings(s) -> None`.
 - Consumes: существующие deprecated-поля `AI_MODEL`, `PDF_ENGINE`, `AI_MAX_TOKENS`, `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY`.
 
 - [ ] **Step 1: Написать падающие тесты**
@@ -77,6 +77,7 @@ def test_model_alias_priority():
     assert resolved_openrouter_model(_mk(OPENROUTER_MODEL="m1", AI_MODEL="m2")) == "m1"
     assert resolved_openrouter_model(_mk(AI_MODEL="m2")) == "m2"
     assert resolved_openrouter_model(_mk()) == "anthropic/claude-sonnet-4.6"
+    assert resolved_openrouter_model(_mk(AI_MODEL="   ")) == "anthropic/claude-sonnet-4.6"
 
 
 def test_pdf_engine_alias_priority():
@@ -85,6 +86,15 @@ def test_pdf_engine_alias_priority():
     assert resolved_openrouter_pdf_engine(_mk(PDF_ENGINE="native")) == "native"
     assert resolved_openrouter_pdf_engine(_mk()) == "mistral-ocr"
     assert resolved_openrouter_pdf_engine(_mk(OPENROUTER_PDF_ENGINE="   ")) == "mistral-ocr"
+    assert resolved_openrouter_pdf_engine(_mk(PDF_ENGINE="   ")) == "mistral-ocr"
+
+
+def test_base_url_resolver():
+    """OPENROUTER_BASE_URL: пробельная строка = отсутствие → дефолт (guard §1)."""
+    from config import resolved_openrouter_base_url
+    assert resolved_openrouter_base_url(_mk()) == "https://openrouter.ai/api/v1"
+    assert resolved_openrouter_base_url(_mk(OPENROUTER_BASE_URL="   ")) == "https://openrouter.ai/api/v1"
+    assert resolved_openrouter_base_url(_mk(OPENROUTER_BASE_URL="http://x/api/v1")) == "http://x/api/v1"
 
 
 def test_max_tokens_alias_priority():
@@ -151,24 +161,34 @@ Expected: FAIL — `ImportError: cannot import name 'resolved_openrouter_model'`
 def resolved_openrouter_model(s: "Settings") -> str:
     """OPENROUTER_MODEL → deprecated AI_MODEL (warning) → дефолт (§1 спеки).
 
-    Пробельные значения = отсутствие (guard §1 распространяется на все алиасы).
+    Пробельные значения = отсутствие — И у namespaced, И у legacy (guard §1).
     """
     if s.OPENROUTER_MODEL.strip():
         return s.OPENROUTER_MODEL.strip()
-    if s.AI_MODEL != "anthropic/claude-sonnet-4.6":
+    legacy = s.AI_MODEL.strip()
+    if legacy and legacy != "anthropic/claude-sonnet-4.6":
         logging.getLogger(__name__).warning(
             "AI_MODEL устарел — используйте OPENROUTER_MODEL")
-    return s.AI_MODEL
+    return legacy or "anthropic/claude-sonnet-4.6"
 
 
 def resolved_openrouter_pdf_engine(s: "Settings") -> str:
     """OPENROUTER_PDF_ENGINE → deprecated PDF_ENGINE → код-дефолт mistral-ocr."""
     if s.OPENROUTER_PDF_ENGINE.strip():
         return s.OPENROUTER_PDF_ENGINE.strip()
-    if s.PDF_ENGINE != "mistral-ocr":
+    legacy = s.PDF_ENGINE.strip()
+    if legacy and legacy != "mistral-ocr":
         logging.getLogger(__name__).warning(
             "PDF_ENGINE устарел — используйте OPENROUTER_PDF_ENGINE")
-    return s.PDF_ENGINE
+    return legacy or "mistral-ocr"
+
+
+def resolved_openrouter_base_url(s: "Settings") -> str:
+    """OPENROUTER_BASE_URL → дефолт; пробельная строка = отсутствие (guard §1).
+
+    Правило живёт в config, а не внутри провайдера — единый источник нормализации.
+    """
+    return s.OPENROUTER_BASE_URL.strip() or "https://openrouter.ai/api/v1"
 
 
 def resolved_openrouter_max_tokens(s: "Settings") -> int:
@@ -209,7 +229,7 @@ def validate_llm_settings(s: "Settings") -> None:
 - [ ] **Step 4: Прогнать тесты**
 
 Run: `just test-unit-k "test_config_llm"`
-Expected: PASS (8 тестов). Затем smoke: `just test-backend-unit` — без регрессий.
+Expected: PASS (9 тестов). Затем smoke: `just test-backend-unit` — без регрессий.
 
 - [ ] **Step 5: Commit**
 
@@ -621,15 +641,12 @@ from decimal import Decimal
 
 import httpx
 
-from config import (Settings, resolved_openrouter_model,
-                    resolved_openrouter_pdf_engine)
+from config import (Settings, resolved_openrouter_base_url,
+                    resolved_openrouter_model, resolved_openrouter_pdf_engine)
 from llm import (Attachment, ImagesAttachment, LLMProviderError, LLMResponse,
                  PdfAttachment)
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-
 
 @dataclass(frozen=True)
 class OpenRouterProvider:
@@ -642,8 +659,8 @@ class OpenRouterProvider:
 
     @classmethod
     def from_settings(cls, s: Settings) -> "OpenRouterProvider":
-        """Собрать из Settings; пустой base URL = отсутствие → дефолт (guard §1)."""
-        base = (s.OPENROUTER_BASE_URL or _DEFAULT_BASE_URL).rstrip("/")
+        """Собрать из Settings; нормализация base URL — в config (guard §1)."""
+        base = resolved_openrouter_base_url(s).rstrip("/")
         return cls(api_key=s.OPENROUTER_API_KEY,
                    completions_url=f"{base}/chat/completions",
                    model=resolved_openrouter_model(s),
@@ -767,7 +784,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/llm_openrouter.py backend/llm.py backend/tests/unit/test_openrouter_contract.py backend/tests/unit/test_llm_locator.py
+git add backend/llm_openrouter.py backend/llm.py backend/tests/unit/test_openrouter_contract.py backend/tests/unit/test_llm_locator.py docs/TECH_DEBT.md
 git commit -m "feat(llm): OpenRouterProvider + контрактные тесты обеих форм payload (AC-1)"
 ```
 
