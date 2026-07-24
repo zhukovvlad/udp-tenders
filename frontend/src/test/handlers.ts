@@ -102,6 +102,9 @@ export const handlers = [
 
   http.get("/api/settings", () =>
     HttpResponse.json({
+      provider: "openrouter",
+      can_edit_model: true,
+      cost_available: true,
       api_key_set: true,
       model: "anthropic/claude-sonnet-4.6",
       confidence_threshold: 0.7,

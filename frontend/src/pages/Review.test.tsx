@@ -406,6 +406,23 @@ describe("ReviewPage", () => {
     const costLabel = await screen.findByText(/ИИ-разбор:/);
     expect(costLabel).toHaveTextContent(/ИИ-разбор:\s*\$0\.00/);
   });
+
+  it("показывает «стоимость недоступна» при cost_available=false", async () => {
+    server.use(
+      http.get("/api/invoices/documents/:id", () =>
+        HttpResponse.json({ ...sampleDocument, parse_cost_usd: 0.05, parse_count: 1 })
+      ),
+      http.get("*/api/settings", () =>
+        HttpResponse.json({
+          provider: "gateway", can_edit_model: false, cost_available: false,
+          api_key_set: true, model: "m", confidence_threshold: 0.7,
+        })
+      )
+    );
+    renderWithProviders(<Review />);
+    expect(await screen.findByText(/стоимость недоступна/i)).toBeInTheDocument();
+    expect(screen.queryByText(/\$\d/)).not.toBeInTheDocument();
+  });
 });
 
 describe("Review — save warnings", () => {

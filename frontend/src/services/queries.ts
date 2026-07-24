@@ -25,7 +25,7 @@ import type { MaterialType, Unit } from "@/types/unit";
 import type { ReferencePriceCreateInput, ReferencePriceUpdateInput } from "@/types/referencePrice";
 import type { DocumentDetail, InvoiceUpdateInput } from "@/types/invoice";
 import type { DashboardSummary } from "@/types/dashboard";
-import type { AppSettings } from "./api/settings";
+import type { SettingsUpdate } from "./api/settings";
 import type {
   AdminUserCreateInput,
   AdminUserUpdateInput,
@@ -398,7 +398,7 @@ export function useSettings() {
 export function useUpdateSettings() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: Partial<AppSettings>) => settingsApi.update(input),
+    mutationFn: (input: SettingsUpdate) => settingsApi.update(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.settings.current });
       toast.success("Настройки сохранены");

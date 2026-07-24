@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui-domain/Skeleton";
 
 import { useSettings, useUpdateSettings } from "@/services/queries";
 import { useCurrentUser } from "@/hooks/useAuth";
-import type { AppSettings } from "@/services/api/settings";
+import type { AppSettings, SettingsUpdate } from "@/services/api/settings";
 import type { OrgRole } from "@/types/auth";
 
 type SectionKey = "profile" | "general" | "parsing" | "about";
@@ -148,20 +148,22 @@ export default function SettingsPage() {
             <Surface>
               <h3 className="text-md font-medium">Парсинг ИИ</h3>
               <div className="mt-4 space-y-4">
-                <div className="space-y-1.5">
-                  <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
-                    Модель
-                  </Label>
-                  <Input
-                    value={String(draft.model ?? "")}
-                    onChange={(e) => setOverrides({ ...draft, model: e.target.value })}
-                    placeholder="например, anthropic/claude-sonnet-4.6"
-                    className="max-w-md"
-                  />
-                  <p className="text-xs text-fg-tertiary">
-                    Модель ИИ для парсинга таблицы позиций из СФ.
-                  </p>
-                </div>
+                {draft.can_edit_model && (
+                  <div className="space-y-1.5">
+                    <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
+                      Модель
+                    </Label>
+                    <Input
+                      value={String(draft.model ?? "")}
+                      onChange={(e) => setOverrides({ ...draft, model: e.target.value })}
+                      placeholder="например, anthropic/claude-sonnet-4.6"
+                      className="max-w-md"
+                    />
+                    <p className="text-xs text-fg-tertiary">
+                      Модель ИИ для парсинга таблицы позиций из СФ.
+                    </p>
+                  </div>
+                )}
 
                 <div className="space-y-1.5">
                   <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
@@ -217,7 +219,18 @@ export default function SettingsPage() {
             </Button>
             <Button
               loading={update.isPending}
-              onClick={() => update.mutate(draft)}
+              onClick={() => {
+                if (!settingsQ.data) return;
+                // Частичный PUT (§5): только изменённые РАЗРЕШЁННЫЕ поля, типизировано узким DTO
+                const changed: SettingsUpdate = {};
+                if (draft.can_edit_model && draft.model !== settingsQ.data.model) {
+                  changed.model = String(draft.model);
+                }
+                if (draft.confidence_threshold !== settingsQ.data.confidence_threshold) {
+                  changed.confidence_threshold = Number(draft.confidence_threshold);
+                }
+                update.mutate(changed);
+              }}
             >
               Сохранить
             </Button>
