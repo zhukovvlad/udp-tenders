@@ -29,7 +29,10 @@ UDP/
 │   ├── auth.py           — FastAPI auth-зависимости (get_current_user, require_csrf,
 │   │                       require_superuser, require_org_admin*, ProjectAccess)
 │   ├── cli.py            — Click CLI: create-superuser, create-org, create-user
-│   ├── pdf_parser.py     — парсинг через OpenRouter API
+│   ├── llm.py            — абстракция LLM-провайдера: типы интерфейса + service locator
+│   │                       (get/init/reset_provider); переключатель LLM_PROVIDER
+│   ├── llm_openrouter.py — OpenRouterProvider: транспорт/envelope OpenRouter за интерфейсом llm.py
+│   ├── pdf_parser.py     — парсинг УПД (фаза A через llm.get_provider(); доменный разбор JSON)
 │   ├── s3.py             — MinIO-хелперы
 │   ├── utils.py          — get_client_ip, utcnow
 │   ├── routers/          — projects, invoices, dashboard, export, material_classes,

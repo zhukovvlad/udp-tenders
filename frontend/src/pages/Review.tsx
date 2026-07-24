@@ -329,7 +329,9 @@ export default function Review() {
             <span>{doc.filename}</span>
             {doc.parse_count > 0 && (
               <span title={`${doc.parse_count} разбор${pluralRu(doc.parse_count)}`}>
-                ИИ-разбор: {formatUsd(doc.parse_cost_usd)}
+                {settingsQ.data?.cost_available === true
+                  ? `ИИ-разбор: ${formatUsd(doc.parse_cost_usd)}`
+                  : "ИИ-разбор: стоимость недоступна"}
                 {doc.parse_count > 1 ? ` · ${doc.parse_count}×` : ""}
               </span>
             )}

@@ -332,7 +332,9 @@ async def _run_deskew(s3_key: str, *, accounting: dict | None = None) -> tuple[b
         has_backup = False
 
     # deskew_pdf бросает TransientError ДО чтения cost при транспортном сбое detect
-    # (тогда detect не оплачен); при сбое apply_rotations — уже С detect-cost (см. pdf_orientation).
+    # (тогда detect не оплачен); при битом envelope платного 200 — ошибку С detect-cost
+    # (§2.5 спеки LLM-провайдера: retryable=False, cost, paid_calls=1 — биллинг в exc);
+    # при сбое apply_rotations — уже С detect-cost (см. pdf_orientation).
     corrected, rotations, detect_cost = await pdf_orientation.deskew_pdf(source_bytes)
     detect_calls = 1
     if accounting is not None:

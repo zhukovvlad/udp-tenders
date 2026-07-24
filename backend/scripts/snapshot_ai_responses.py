@@ -48,6 +48,7 @@ def _sanitize_response(raw: dict) -> dict:
 
 
 async def _fetch(pdf_path: Path) -> dict:
+    """Отправить PDF в реальный OpenRouter и вернуть сырой JSON-ответ (дев-снапшот)."""
     import base64
     import os
 
@@ -65,11 +66,15 @@ async def _fetch(pdf_path: Path) -> dict:
 
     pdf_b64 = base64.b64encode(pdf_path.read_bytes()).decode()
 
-    from pdf_parser import OPENROUTER_URL, SYSTEM_PROMPT
+    from pdf_parser import SYSTEM_PROMPT
+    base = (os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1").rstrip("/")
+    OPENROUTER_URL = f"{base}/chat/completions"
+    model = os.getenv("OPENROUTER_MODEL") or os.getenv("AI_MODEL", "anthropic/claude-sonnet-4.6")
+    engine = os.getenv("OPENROUTER_PDF_ENGINE") or os.getenv("PDF_ENGINE", "mistral-ocr")
     payload = {
-        "model": os.getenv("AI_MODEL", "anthropic/claude-sonnet-4.6"),
+        "model": model,
         "max_tokens": 8192,
-        "plugins": [{"id": "file-parser", "pdf": {"engine": os.getenv("PDF_ENGINE", "mistral-ocr")}}],
+        "plugins": [{"id": "file-parser", "pdf": {"engine": engine}}],
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": [

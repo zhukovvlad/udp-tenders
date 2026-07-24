@@ -16,6 +16,7 @@ from logging_config import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
+import llm
 import s3
 from routers import admin as admin_router
 from routers import auth as auth_router
@@ -54,22 +55,30 @@ def _sweep_stuck_documents(session_factory=None) -> int:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Инициализация при старте приложения (не при импорте модуля)."""
+    # LLM-провайдер: fail-fast §1 ДО любых стартовых мутаций (sweep пишет в БД).
+    # Позднее связывание модуля llm — тестовые monkeypatch-и должны действовать
+    # (паттерн как у s3 ниже).
+    llm.init_provider(settings)
+    logger.info(f"LLM-провайдер инициализирован: {settings.LLM_PROVIDER}")
     try:
-        # Позднее связывание (s3.ensure_bucket, а не from-import): тестовые
-        # monkeypatch-и модуля s3 должны действовать и на lifespan.
-        s3.ensure_bucket()
-        logger.info("MinIO bucket готов")
-    except Exception as e:
-        logger.warning(f"MinIO недоступен при старте: {e}")
+        try:
+            # Позднее связывание (s3.ensure_bucket, а не from-import): тестовые
+            # monkeypatch-и модуля s3 должны действовать и на lifespan.
+            s3.ensure_bucket()
+            logger.info("MinIO bucket готов")
+        except Exception as e:
+            logger.warning(f"MinIO недоступен при старте: {e}")
 
-    # Fail-fast (ревью плана, P1): sweep обязан выполниться до приёма трафика.
-    # Проглотить ошибку нельзя — если БД оживёт позже, зомби-processing останутся
-    # навсегда и polling не завершится. БД недоступна → приложение не стартует
-    # (оно всё равно неработоспособно), рестарт повторит sweep.
-    swept = _sweep_stuck_documents()
-    logger.info(f"Startup-sweep выполнен: {swept} документ(ов)")
+        # Fail-fast (ревью плана, P1): sweep обязан выполниться до приёма трафика.
+        # Проглотить ошибку нельзя — если БД оживёт позже, зомби-processing останутся
+        # навсегда и polling не завершится. БД недоступна → приложение не стартует
+        # (оно всё равно неработоспособно), рестарт повторит sweep.
+        swept = _sweep_stuck_documents()
+        logger.info(f"Startup-sweep выполнен: {swept} документ(ов)")
 
-    yield
+        yield
+    finally:
+        llm.reset_provider()
 
 
 def _decimal_encoder(obj: Any) -> Any:

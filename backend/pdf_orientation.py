@@ -3,7 +3,6 @@
 Используется эндпоинтом deskew-reparse. См. спеку
 docs/superpowers/specs/2026-06-15-pdf-orientation-deskew-design.md.
 """
-import base64
 import io
 import json
 import logging
@@ -15,8 +14,7 @@ import httpx
 import pikepdf
 import pypdfium2 as pdfium
 
-from config import settings
-from pdf_parser import OPENROUTER_URL
+import llm
 from processing import PermanentError, TransientError
 
 logger = logging.getLogger(__name__)
@@ -123,73 +121,51 @@ def render_pages_for_detect(pdf_bytes: bytes, long_side: int = 768) -> list[byte
 
 
 async def detect_rotations(images: list[bytes]) -> tuple[list[int], Decimal]:
-    """Один vision-запрос: per-page поворот 0/90/180/270 и стоимость вызова.
+    """Один vision-запрос (через llm.get_provider()): per-page поворот 0/90/180/270 и стоимость вызова.
 
     Транспортный сбой/таймаут/не-2xx → TransientError (detect не оплачен, cost не читается);
-    слишком много страниц → PermanentError. Непарсящееся СОДЕРЖИМОЕ при 200 → нули
-    (безопасная деградация), но cost из usage возвращается (вызов был платным).
+    слишком много страниц → PermanentError. §2.5: битый envelope платного 200 (нет `choices`
+    и т.п.) → PermanentError с cost/paid_calls из провайдера (НЕ тихие нули). Envelope цел,
+    но СОДЕРЖИМОЕ не парсится → нули (безопасная деградация уровня контента), cost
+    из usage возвращается (вызов был платным).
     """
     n = len(images)
     if n > MAX_DESKEW_PAGES:
         # http_status=413 — прежний код эндпоинта; на S0 доходит до клиента (AC-S0-8).
         raise PermanentError(f"Слишком много страниц для коррекции (> {MAX_DESKEW_PAGES})",
                              http_status=413)
-    content = [{"type": "text", "text": _DETECT_PROMPT}]
-    for img in images:
-        b64 = base64.b64encode(img).decode()
-        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
-    payload = {
-        "model": settings.AI_MODEL,
-        "max_tokens": 200,
-        "usage": {"include": True},  # S0-9: detect — платный вызов, стоимость учитывается
-        "messages": [{"role": "user", "content": content}],
-    }
-    headers = {"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}", "Content-Type": "application/json"}
-    timeout = httpx.Timeout(DETECT_TIMEOUT, connect=5.0)  # быстрый фейл на коннекте, долгий read
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(OPENROUTER_URL, headers=headers, json=payload)
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as e:
-        # не-2xx → НЕ деградируем в нули (иначе переразберём оригинал под видом «исправлено»).
-        # 408/429/5xx — транзиентно (ретраебельно на S2); прочие 4xx — отказ upstream по
-        # содержимому запроса, ретраить бессмысленно → PermanentError (FIX F). http_status=502
-        # для обоих веток — прежний код эндпоинта, на S0 доходит до клиента (AC-S0-8).
+        resp = await llm.get_provider().vision_completion(
+            system=None, user_text=_DETECT_PROMPT,
+            attachment=llm.ImagesAttachment(images=tuple(images)),
+            max_tokens=200,
+            timeout=httpx.Timeout(DETECT_TIMEOUT, connect=5.0),
+        )
+    except llm.LLMProviderError as e:
+        # НЕ деградируем в нули (иначе переразберём оригинал под видом исправленного).
+        # §2.5: битый envelope платного 200 — тоже ошибка (retryable=False, cost, paid=1),
+        # а не тихие нули; биллинг доезжает через cost_usd/paid_calls исключения.
         logger.warning(f"detect_rotations: vision-запрос упал: {e}")
-        code = e.response.status_code
-        if code in (408, 429) or code >= 500:
-            raise TransientError("Сервис распознавания ориентации недоступен", http_status=502) from e
-        raise PermanentError("Сервис распознавания ориентации отклонил запрос", http_status=502) from e
-    except httpx.HTTPError as e:
-        # транспортный сбой / таймаут (без ответа сервера) → НЕ деградируем в нули, сигналим 502
-        logger.warning(f"detect_rotations: vision-запрос упал: {e}")
-        # http_status=502 — прежний код эндпоинта; на S0 доходит до клиента (AC-S0-8).
-        raise TransientError("Сервис распознавания ориентации недоступен", http_status=502) from e
+        if e.retryable:
+            raise TransientError("Сервис распознавания ориентации недоступен",
+                                 http_status=502, cost_usd=e.cost_usd,
+                                 paid_calls=e.paid_calls) from e
+        raise PermanentError("Сервис распознавания ориентации отклонил запрос",
+                             http_status=502, cost_usd=e.cost_usd,
+                             paid_calls=e.paid_calls) from e
 
-    # успешный 200: непарсящееся СОДЕРЖИМОЕ → нули (безопасная деградация на уровне контента),
-    # но cost из usage читаем в любом случае — вызов уже оплачен.
-    cost = Decimal(0)
-    text = ""
+    cost = resp.cost_usd
+    content_text = resp.content
+    # envelope цел: непарсящееся СОДЕРЖИМОЕ → нули (деградация уровня контента)
     try:
-        data = resp.json()
-        raw_cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
-        # Decimal молча принимает "NaN"/"Infinity"/отрицательные значения — такие бы
-        # испортили накопленный parse_cost_usd. Клэмпим в 0 с логом (FIX B).
-        if raw_cost.is_finite() and raw_cost >= 0:
-            cost = raw_cost
-        else:
-            logger.warning(f"detect_rotations: usage.cost вне допустимых значений "
-                           f"({raw_cost!r}) — клэмп в 0")
-            cost = Decimal(0)
-        text = data["choices"][0]["message"]["content"]
-        m = re.search(r"\[[\d,\s]*\]", text)          # берём именно JSON-массив, не любые числа
+        m = re.search(r"\[[\d,\s]*\]", content_text)
         nums = json.loads(m.group(0)) if m else []
         allowed = {0, 90, 180, 270}
         rots = [v % 360 if (v % 360) in allowed else 0 for v in nums[:n]]
     except Exception:  # noqa: BLE001 — кривое содержимое не должно ронять вызывающего
         rots = []
-    rots += [0] * (n - len(rots))   # добиваем до длины n
-    logger.info(f"detect_rotations: n={n}, rotations={rots}, cost=${cost}, raw={text[:300]!r}")
+    rots += [0] * (n - len(rots))
+    logger.info(f"detect_rotations: n={n}, rotations={rots}, cost=${cost}, raw={content_text[:300]!r}")
     return rots, cost
 
 

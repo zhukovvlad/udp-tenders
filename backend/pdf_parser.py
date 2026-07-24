@@ -1,4 +1,3 @@
-import base64
 import json
 import logging
 from dataclasses import dataclass, field
@@ -7,7 +6,8 @@ from decimal import Decimal
 
 import httpx
 
-from config import settings
+import llm
+from config import resolved_llm_parse_max_tokens, settings
 from processing import PermanentError, ProcessingError, TransientError
 
 logger = logging.getLogger(__name__)
@@ -154,12 +154,6 @@ SYSTEM_PROMPT = """Ты — парсер счетов-фактур и УПД (у
 - confidence_reason — кратко и по делу укажи, что именно вызывает неуверенность, либо "все поля читаются чётко"
 """
 
-# Если переменная окружения задана пустой строкой ("OPENROUTER_BASE_URL=" в .env),
-# settings вернёт "" — это даст relative URL "/chat/completions" и тихо сломает
-# httpx-вызовы. Используем "or", чтобы пустая строка считалась отсутствием значения.
-OPENROUTER_BASE_URL = settings.OPENROUTER_BASE_URL or "https://openrouter.ai/api/v1"
-OPENROUTER_URL = f"{OPENROUTER_BASE_URL.rstrip('/')}/chat/completions"
-
 
 async def parse_pdf(file_data: bytes, *, document_id: int) -> ParseOutcome:
     """Чистая фаза A: вызвать OpenRouter, разобрать ответ, вернуть ParseOutcome.
@@ -172,93 +166,37 @@ async def parse_pdf(file_data: bytes, *, document_id: int) -> ParseOutcome:
     paid_calls = 0
     logger.info(f"[doc={document_id}] Фаза A: старт парсинга, {len(file_data)} байт")
 
-    api_key = settings.OPENROUTER_API_KEY
-    if not api_key:
-        raise PermanentError("API-ключ OpenRouter не настроен")
-
-    pdf_base64 = base64.b64encode(file_data).decode("utf-8")
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    max_tokens = settings.AI_MAX_TOKENS
-    payload = {
-        "model": settings.AI_MODEL,
-        "max_tokens": max_tokens,
-        "usage": {"include": True},
-        "plugins": [{"id": "file-parser", "pdf": {"engine": settings.PDF_ENGINE}}],
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "file", "file": {"filename": "document.pdf",
-                     "file_data": f"data:application/pdf;base64,{pdf_base64}"}},
-                    {"type": "text", "text": (
-                        "Определи тип документа и извлеки данные. ВАЖНО: каждая строка "
-                        "из табличной части — это отдельная позиция в items. "
-                        "Не объединяй и не суммируй строки, даже если они выглядят одинаково."
-                    )},
-                ],
-            },
-        ],
-    }
-
+    max_tokens = resolved_llm_parse_max_tokens(settings)
     try:
-        async with httpx.AsyncClient(timeout=180) as client:
-            response = await client.post(OPENROUTER_URL, headers=headers, json=payload)
-    except httpx.TimeoutException as exc:
-        raise TransientError("Таймаут запроса к OpenRouter (180с)") from exc
-    except httpx.RequestError as exc:
-        # ConnectError / ReadError / RemoteProtocolError / DNS / TLS — транспортный сбой
-        # без ответа сервера → платного вызова не было (F12). Сообщение пользователю —
-        # стабильный текст без сырого exc (FIX 6); подробности — только в логе.
-        logger.warning(f"[doc={document_id}] Фаза A: сетевая ошибка запроса к OpenRouter: {exc!r}")
-        raise TransientError("Сетевая ошибка запроса к сервису распознавания") from exc
+        resp = await llm.get_provider().vision_completion(
+            system=SYSTEM_PROMPT,
+            user_text=("Определи тип документа и извлеки данные. ВАЖНО: каждая строка "
+                       "из табличной части — это отдельная позиция в items. "
+                       "Не объединяй и не суммируй строки, даже если они выглядят одинаково."),
+            attachment=llm.PdfAttachment(data=file_data),
+            max_tokens=max_tokens,
+            timeout=httpx.Timeout(180),
+        )
+    except llm.LLMProviderError as exc:
+        # Маппинг ошибки провайдера в доменную с сохранением биллинга (§2.3).
+        cls = TransientError if exc.retryable else PermanentError
+        raise cls(str(exc), cost_usd=exc.cost_usd, paid_calls=exc.paid_calls) from exc
 
-    if response.status_code != 200:
-        msg = f"OpenRouter API ошибка: {response.status_code}"
-        # 5xx (сервер), 429 (rate limit), 408 (request timeout) — транзиентно, ретраебельно на S2.
-        if response.status_code >= 500 or response.status_code in (408, 429):
-            raise TransientError(msg)
-        raise PermanentError(msg)
+    cost = resp.cost_usd
+    paid_calls = resp.paid_calls
+    logger.info(f"[doc={document_id}] Фаза A: cost=${cost}, finish_reason={resp.finish_reason}")
 
-    # HTTP 200 ⇒ платный вызов состоялся. Фиксируем факт биллинга ДО чтения тела — ВЕСЬ
-    # код ниже (envelope JSON, usage/cost, finish_reason, choices/content, JSON-парсинг
-    # контента, doc_type, цикл по СФ) обёрнут ОДНИМ guard'ом (FIX 3): недоверенное
-    # тело/контент LLM после платного 200 не должно улететь неклассифицированным
-    # исключением и обнулить cost/paid_calls в process_document (инвариант §2.3).
-    paid_calls = 1
-    cost = Decimal(0)
+    if resp.finish_reason == "length":
+        raise PermanentError(
+            "Ответ модели обрезан по лимиту токенов — часть позиций счёта потеряна. "
+            "Попробуйте повторить разбор.",
+            cost_usd=cost, paid_calls=paid_calls,
+        )
+    if resp.completion_tokens and resp.completion_tokens >= max_tokens:
+        logger.error(f"[doc={document_id}] completion_tokens={resp.completion_tokens} == max — ответ обрезан")
+
+    response_text = resp.content
     try:
-        data = response.json()
-        raw_cost = Decimal(str((data.get("usage") or {}).get("cost") or 0))
-        # Decimal молча принимает "NaN"/"Infinity"/отрицательные значения — такие бы
-        # испортили накопленный parse_cost_usd. Клэмпим в 0 с логом (FIX B).
-        if raw_cost.is_finite() and raw_cost >= 0:
-            cost = raw_cost
-        else:
-            logger.warning(f"[doc={document_id}] Фаза A: usage.cost вне допустимых значений "
-                           f"({raw_cost!r}) — клэмп в 0")
-            cost = Decimal(0)
-
-        usage = data.get("usage", {})
-        completion_tokens = usage.get("completion_tokens", 0)
-        finish_reason = (data.get("choices") or [{}])[0].get("finish_reason")
-        logger.info(f"[doc={document_id}] Фаза A: cost=${cost}, finish_reason={finish_reason}")
-
-        if finish_reason == "length":
-            raise PermanentError(
-                "Ответ модели обрезан по лимиту токенов — часть позиций счёта потеряна. "
-                "Попробуйте повторить разбор.",
-                cost_usd=cost, paid_calls=paid_calls,
-            )
-        if completion_tokens and completion_tokens >= max_tokens:
-            logger.error(f"[doc={document_id}] completion_tokens={completion_tokens} == max — ответ обрезан")
-
-        try:
-            response_text = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise PermanentError("Ответ модели без содержимого",
-                                 cost_usd=cost, paid_calls=paid_calls) from exc
-
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0]
         elif "```" in response_text:

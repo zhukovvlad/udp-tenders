@@ -38,22 +38,28 @@
   **Решение:** перейти на `asyncpg` DSN (`postgresql+asyncpg://`), `AsyncEngine`, `AsyncSession`,
   заменить `db.query()` на `await db.execute(select(...))` и все endpoint-функции сделать `async def`.
 
+- [ ] **`PDF_ENGINE`: код-дефолт расходится с документацией и рабочим значением**
+  `config.py:43` — дефолт `mistral-ocr`, но `docs/agent/pdf-parsing.md:245` называет дефолтом
+  `native`, и фактический `.env` использует `native` (mistral-ocr нестабилен на СФ с 60+ строками).
+  Кто запустит без `.env`-оверрайда — получит худший движок. Комментарий у `AI_MAX_TOKENS`
+  (`config.py:41`, «prompt от mistral-ocr съедает ~24K») — из той же устаревшей эпохи: при native
+  промпт ~10K. Обнаружено при написании спеки LLM-провайдера (2026-07-23).
+  **Решение:** сменить дефолт на `"native"` (+ обновить комментарий AI_MAX_TOKENS); учесть
+  алиас-цепочку `OPENROUTER_PDF_ENGINE → PDF_ENGINE → дефолт` из спеки
+  `2026-07-23-llm-provider-toggle-design.md` §1 — правку удобно совместить с её реализацией.
+
 - [ ] **Parser: chunking для очень длинных СФ**
   `_reconcile_totals` теперь *детектирует* потерянные строки, но восстановление для СФ с 100+
   позициями требует постраничного разбора с последующей склейкой. Не реализовано. Также: prompt
   от mistral-ocr занимает ~24K токенов на 8-страничном бланке (повторяющиеся шапки/подвалы
   каждой страницы) — сжатие prompt-нагрузки оставило бы больше места для completion.
 
-- [ ] **Parser: `usage: null` в ответе OpenRouter крашит разбор (строка ~212)**
-  `pdf_parser.parse_invoice_pdf` после HTTP 200 делает `usage = data.get("usage", {})` — дефолт
-  срабатывает только когда ключ *отсутствует*; явный JSON `null` вернёт `None`, и следующий
-  `usage.get("completion_tokens")` бросит `AttributeError` (перехватится общим `except`, документ
-  уйдёт в ошибку). Захват стоимости (строка захвата `cost`) уже устойчив к этому случаю
-  (`(data.get("usage") or {}).get("cost")`), поэтому платный вызов при `usage: null` всё равно
-  корректно биллится через `_with_cost`; но сам разбор падает. На практике OpenRouter при
-  `usage: {include: true}` всегда возвращает объект usage на 200 — низкий приоритет.
-  **Решение:** заменить `data.get("usage", {})` на `data.get("usage") or {}` в строке чтения usage
-  (и заодно проверить прочие `.get("usage", {})` в модуле). Отдельной задачей, не на feature-ветке.
+- [x] **Parser: `usage: null` в ответе OpenRouter крашил разбор (закрыто)**
+  **Закрыто Task 3 плана 2026-07-23:** транспорт/envelope переехали в `OpenRouterProvider`
+  (`llm_openrouter.py`), который читает usage через `data.get("usage") or {}` — явный JSON
+  `null` больше не роняет разбор (раньше `usage.get("completion_tokens")` бросал `AttributeError`,
+  документ уходил в ошибку, хотя платный вызов уже биллился). Теперь `usage: null` → успех с
+  `cost=Decimal(0)`, `completion_tokens=None`. Зафиксировано тестом `test_usage_null_returns_success`.
 
 - [ ] **Parser: reparse удаляет данные до валидации**
   `routers/invoices.reparse_document` удаляет существующие Invoice-строки *до* запуска нового
