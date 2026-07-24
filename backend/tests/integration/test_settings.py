@@ -12,6 +12,40 @@ def _tmp_env_path(tmp_path, monkeypatch):
     monkeypatch.setattr(settings_router, "ENV_PATH", str(env_file))
 
 
+@pytest.fixture(autouse=True)
+def _restore_process_globals():
+    """Откатить process-global мутации update_settings после каждого теста.
+
+    update_settings (routers/settings.py) намеренно пишет напрямую в
+    os.environ и в синглтон config.settings (атомарная пересборка провайдера,
+    §5 спеки) — это НЕ идёт через monkeypatch, поэтому pytest не откатывает
+    эти изменения сам. Без этой fixture test_put_rebuilds_provider и
+    test_put_model_wins_over_legacy_alias оставляют config.settings.OPENROUTER_MODEL
+    (и/или OPENROUTER_API_KEY) и os.environ["OPENROUTER_MODEL"] испачканными
+    на весь остаток pytest-сессии — autouse-фикстура _llm_provider_initialized
+    в conftest.py восстанавливает только llm._provider, но не эти источники,
+    из которых он пересобирается для последующих тестов.
+    """
+    from config import settings as cfg
+
+    settings_snapshot = {
+        "OPENROUTER_API_KEY": cfg.OPENROUTER_API_KEY,
+        "OPENROUTER_MODEL": cfg.OPENROUTER_MODEL,
+    }
+    env_keys = ("OPENROUTER_MODEL", "OPENROUTER_API_KEY", "AI_MODEL", "CONFIDENCE_THRESHOLD")
+    env_snapshot = {key: os.environ.get(key) for key in env_keys}
+
+    yield
+
+    cfg.OPENROUTER_API_KEY = settings_snapshot["OPENROUTER_API_KEY"]
+    cfg.OPENROUTER_MODEL = settings_snapshot["OPENROUTER_MODEL"]
+    for key, value in env_snapshot.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
 def test_get_settings(client, monkeypatch, tmp_path):
     """Smoke — settings возвращает текущие значения env."""
     # ВАЖНО: settings._ensure_env() делает load_dotenv(ENV_PATH, override=True),

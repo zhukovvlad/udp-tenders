@@ -149,7 +149,7 @@ def _openrouter_reply(text: str, cost: str | None = None) -> httpx.Response:
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_detect_rotations_parses_list(monkeypatch, _allow_respx):
+async def test_detect_rotations_parses_list(_allow_respx):
     """Разбор корректного JSON-массива поворотов + чтение cost из usage (S0-9)."""
     respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
         return_value=_openrouter_reply("Вот повороты: [0, 90, 270]", cost="0.0012")
@@ -161,7 +161,7 @@ async def test_detect_rotations_parses_list(monkeypatch, _allow_respx):
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_detect_rotations_nan_cost_clamped_to_zero(monkeypatch, _allow_respx):
+async def test_detect_rotations_nan_cost_clamped_to_zero(_allow_respx):
     """FIX B: `usage.cost = "NaN"` парсится Decimal-ом без ошибки, но неклэмпленный
     NaN испортил бы накопленный parse_cost_usd — клэмп в 0."""
     respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
@@ -185,7 +185,7 @@ async def test_broken_envelope_raises_permanent(_allow_respx):
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_detect_rotations_garbage_to_zeros(monkeypatch, _allow_respx):
+async def test_detect_rotations_garbage_to_zeros(_allow_respx):
     """Непарсящееся содержимое → нули, но cost из usage всё равно возвращается (вызов оплачен)."""
     respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
         return_value=_openrouter_reply("не смог", cost="0.0005")
@@ -238,7 +238,7 @@ async def test_detect_rotations_too_many_pages():
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_detect_rotations_upstream_500_raises_502(monkeypatch, _allow_respx):
+async def test_detect_rotations_upstream_500_raises_502(_allow_respx):
     """Транспортный сбой/не-2xx → TransientError с http_status=502 (detect не оплачен)."""
     respx.post("https://openrouter.ai/api/v1/chat/completions").mock(return_value=httpx.Response(500))
     with pytest.raises(TransientError) as ei:
@@ -249,7 +249,7 @@ async def test_detect_rotations_upstream_500_raises_502(monkeypatch, _allow_resp
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_detect_rotations_upstream_503_raises_transient(monkeypatch, _allow_respx):
+async def test_detect_rotations_upstream_503_raises_transient(_allow_respx):
     """FIX F: 503 (>=500) остаётся транзиентной (ретраебельно на S2), http_status=502 наружу."""
     respx.post("https://openrouter.ai/api/v1/chat/completions").mock(return_value=httpx.Response(503))
     with pytest.raises(TransientError) as ei:
@@ -259,7 +259,7 @@ async def test_detect_rotations_upstream_503_raises_transient(monkeypatch, _allo
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_detect_rotations_upstream_400_raises_permanent(monkeypatch, _allow_respx):
+async def test_detect_rotations_upstream_400_raises_permanent(_allow_respx):
     """FIX F: не-retriable 4xx (не 408/429) — upstream отклонил запрос по содержимому,
     ретраить бессмысленно → PermanentError, а не TransientError (S2 retry policy).
     http_status=502 наружу не меняется (S0 контракт эндпоинта)."""
@@ -271,7 +271,7 @@ async def test_detect_rotations_upstream_400_raises_permanent(monkeypatch, _allo
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_detect_rotations_upstream_429_still_transient(monkeypatch, _allow_respx):
+async def test_detect_rotations_upstream_429_still_transient(_allow_respx):
     """FIX F: 429 (rate limit) остаётся транзиентной, несмотря на то что это 4xx."""
     respx.post("https://openrouter.ai/api/v1/chat/completions").mock(return_value=httpx.Response(429))
     with pytest.raises(TransientError) as ei:
@@ -281,7 +281,7 @@ async def test_detect_rotations_upstream_429_still_transient(monkeypatch, _allow
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_detect_rotations_prose_around_array(monkeypatch, _allow_respx):
+async def test_detect_rotations_prose_around_array(_allow_respx):
     """Число-подобная проза вокруг JSON-массива не путает парсер."""
     respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
         return_value=_openrouter_reply("Страница 1 и 2: ответ [90, 0]")
