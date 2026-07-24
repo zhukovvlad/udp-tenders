@@ -4,6 +4,9 @@
 settings, а не через os.getenv() напрямую. Для инфраструктурных модулей
 (alembic/env.py, tooling-скрипты) допустимы исключения.
 """
+import logging
+from typing import Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -43,8 +46,84 @@ class Settings(BaseSettings):
     PDF_ENGINE: str = "mistral-ocr"
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 
+    # LLM-провайдер (спека 2026-07-23): deploy-time enum + namespaced-настройки.
+    LLM_PROVIDER: Literal["openrouter", "gateway"] = "openrouter"
+    # namespaced openrouter; пустое значение → алиас-цепочка (resolved_* ниже)
+    OPENROUTER_MODEL: str = ""
+    OPENROUTER_PDF_ENGINE: str = ""
+    OPENROUTER_MAX_TOKENS: int | None = None
+    # namespaced gateway; auth-переменные финализируются после спайка (§7 спеки)
+    GATEWAY_BASE_URL: str = ""
+    GATEWAY_MODEL: str = ""
+
     # Логирование
     LOG_LEVEL: str = "INFO"
+
+
+def resolved_openrouter_model(s: "Settings") -> str:
+    """OPENROUTER_MODEL → deprecated AI_MODEL (warning) → дефолт (§1 спеки).
+
+    Пробельные значения = отсутствие — И у namespaced, И у legacy (guard §1).
+    """
+    if s.OPENROUTER_MODEL.strip():
+        return s.OPENROUTER_MODEL.strip()
+    legacy = s.AI_MODEL.strip()
+    if legacy and legacy != "anthropic/claude-sonnet-4.6":
+        logging.getLogger(__name__).warning(
+            "AI_MODEL устарел — используйте OPENROUTER_MODEL")
+    return legacy or "anthropic/claude-sonnet-4.6"
+
+
+def resolved_openrouter_pdf_engine(s: "Settings") -> str:
+    """OPENROUTER_PDF_ENGINE → deprecated PDF_ENGINE → код-дефолт mistral-ocr."""
+    if s.OPENROUTER_PDF_ENGINE.strip():
+        return s.OPENROUTER_PDF_ENGINE.strip()
+    legacy = s.PDF_ENGINE.strip()
+    if legacy and legacy != "mistral-ocr":
+        logging.getLogger(__name__).warning(
+            "PDF_ENGINE устарел — используйте OPENROUTER_PDF_ENGINE")
+    return legacy or "mistral-ocr"
+
+
+def resolved_openrouter_base_url(s: "Settings") -> str:
+    """OPENROUTER_BASE_URL → дефолт; пробельная строка = отсутствие (guard §1).
+
+    Правило живёт в config, а не внутри провайдера — единый источник нормализации.
+    """
+    return s.OPENROUTER_BASE_URL.strip() or "https://openrouter.ai/api/v1"
+
+
+def resolved_openrouter_max_tokens(s: "Settings") -> int:
+    """OPENROUTER_MAX_TOKENS → deprecated AI_MAX_TOKENS → 64000 (AC-1)."""
+    return s.OPENROUTER_MAX_TOKENS if s.OPENROUTER_MAX_TOKENS is not None else s.AI_MAX_TOKENS
+
+
+def resolved_llm_parse_max_tokens(s: "Settings") -> int:
+    """Нейтральный лимит parse-вызова: домен (pdf_parser) не знает провайдера.
+
+    openrouter → цепочка OPENROUTER_MAX_TOKENS→AI_MAX_TOKENS→64000;
+    gateway → RuntimeError до спайка (там появится GATEWAY_MAX_TOKENS, §7 спеки).
+    """
+    if s.LLM_PROVIDER == "openrouter":
+        return resolved_openrouter_max_tokens(s)
+    raise RuntimeError("LLM_PROVIDER=gateway: лимит parse-вызова определяется после gateway-спайка")
+
+
+def validate_llm_settings(s: "Settings") -> None:
+    """Fail-fast §1: обязательные поля ВЫБРАННОГО провайдера; openrouter-ключ НЕ проверяется.
+
+    Пустая/пробельная строка base URL = отсутствие значения: openrouter
+    лечится дефолтом, gateway — обязан быть задан (дефолта нет).
+    Резолвнутые model/pdf_engine у openrouter непусты по построению (дефолты).
+    """
+    if s.LLM_PROVIDER == "openrouter":
+        if not resolved_openrouter_model(s).strip():
+            raise RuntimeError("openrouter: пустая модель после алиас-резолва")
+        return
+    if not s.GATEWAY_BASE_URL.strip():
+        raise RuntimeError("LLM_PROVIDER=gateway: не задан GATEWAY_BASE_URL")
+    if not s.GATEWAY_MODEL.strip():
+        raise RuntimeError("LLM_PROVIDER=gateway: не задан GATEWAY_MODEL")
 
 
 settings = Settings()
