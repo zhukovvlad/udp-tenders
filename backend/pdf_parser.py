@@ -154,12 +154,6 @@ SYSTEM_PROMPT = """Ты — парсер счетов-фактур и УПД (у
 - confidence_reason — кратко и по делу укажи, что именно вызывает неуверенность, либо "все поля читаются чётко"
 """
 
-# Если переменная окружения задана пустой строкой ("OPENROUTER_BASE_URL=" в .env),
-# settings вернёт "" — это даст relative URL "/chat/completions" и тихо сломает
-# httpx-вызовы. Используем "or", чтобы пустая строка считалась отсутствием значения.
-OPENROUTER_BASE_URL = settings.OPENROUTER_BASE_URL or "https://openrouter.ai/api/v1"
-OPENROUTER_URL = f"{OPENROUTER_BASE_URL.rstrip('/')}/chat/completions"
-
 
 async def parse_pdf(file_data: bytes, *, document_id: int) -> ParseOutcome:
     """Чистая фаза A: вызвать OpenRouter, разобрать ответ, вернуть ParseOutcome.
