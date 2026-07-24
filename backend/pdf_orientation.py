@@ -134,7 +134,6 @@ async def detect_rotations(images: list[bytes]) -> tuple[list[int], Decimal]:
         # http_status=413 — прежний код эндпоинта; на S0 доходит до клиента (AC-S0-8).
         raise PermanentError(f"Слишком много страниц для коррекции (> {MAX_DESKEW_PAGES})",
                              http_status=413)
-    content_text: str = ""
     try:
         resp = await llm.get_provider().vision_completion(
             system=None, user_text=_DETECT_PROMPT,

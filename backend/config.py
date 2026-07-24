@@ -60,6 +60,19 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
 
+# Deprecation-предупреждения об алиасах логируем один раз на процесс: резолверы
+# дёргаются часто (GET /api/settings собирает свежий Settings() на каждый запрос,
+# parse-путь — на каждый разбор), спамить лог одинаковой строкой не нужно.
+_warned_deprecated_aliases: set[str] = set()
+
+
+def _warn_deprecated_alias_once(key: str, message: str) -> None:
+    """Залогировать предупреждение об устаревшем алиасе не более одного раза за процесс."""
+    if key not in _warned_deprecated_aliases:
+        _warned_deprecated_aliases.add(key)
+        logging.getLogger(__name__).warning(message)
+
+
 def resolved_openrouter_model(s: "Settings") -> str:
     """OPENROUTER_MODEL → deprecated AI_MODEL (warning) → дефолт (§1 спеки).
 
@@ -69,8 +82,8 @@ def resolved_openrouter_model(s: "Settings") -> str:
         return s.OPENROUTER_MODEL.strip()
     legacy = s.AI_MODEL.strip()
     if legacy and legacy != "anthropic/claude-sonnet-4.6":
-        logging.getLogger(__name__).warning(
-            "AI_MODEL устарел — используйте OPENROUTER_MODEL")
+        _warn_deprecated_alias_once(
+            "AI_MODEL", "AI_MODEL устарел — используйте OPENROUTER_MODEL")
     return legacy or "anthropic/claude-sonnet-4.6"
 
 
@@ -80,8 +93,8 @@ def resolved_openrouter_pdf_engine(s: "Settings") -> str:
         return s.OPENROUTER_PDF_ENGINE.strip()
     legacy = s.PDF_ENGINE.strip()
     if legacy and legacy != "mistral-ocr":
-        logging.getLogger(__name__).warning(
-            "PDF_ENGINE устарел — используйте OPENROUTER_PDF_ENGINE")
+        _warn_deprecated_alias_once(
+            "PDF_ENGINE", "PDF_ENGINE устарел — используйте OPENROUTER_PDF_ENGINE")
     return legacy or "mistral-ocr"
 
 
