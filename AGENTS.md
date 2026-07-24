@@ -31,7 +31,7 @@ CI: GitHub Actions (`.github/workflows/backend-tests.yml`) гоняет ruff + �
 - Модели БД и связи → `docs/agent/database.md`
 - Расчёты (avg_price, направления/direction, разноска, коридор, Decimal, экспорт) → `docs/agent/calculations.md`
 - Парсинг УПД, выбор движка, коррекция ориентации (deskew-reparse) → `docs/agent/pdf-parsing.md`
-- LLM-провайдер (переключатель `LLM_PROVIDER`, абстракция `llm.py`, инварианты биллинга/ошибок) → `docs/superpowers/specs/2026-07-23-llm-provider-toggle-design.md`
+- LLM-провайдер (переключатель `LLM_PROVIDER`, настройка, Settings API, вызов из кода) → `docs/instructions/llm-provider.md` (дизайн — спека `docs/superpowers/specs/2026-07-23-llm-provider-toggle-design.md`)
 - Аутентификация и роли → `docs/agent/auth.md`
 - Поставщики: исключения и ограничения MVP → `docs/agent/suppliers.md`
 - Тестирование → `docs/testing.md`
