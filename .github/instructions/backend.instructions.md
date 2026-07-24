@@ -13,5 +13,8 @@ applyTo: "backend/**"
 - Pydantic-модели запросов/ответов — в файлах роутеров. Логирование — `logging.getLogger(__name__)`.
 - ruff line-length 120, target py3.12, правила E/F/I/B/UP/SIM. `Depends()` в аргументах — ок (B008 игнорится).
 - Все эндпоинты требуют `get_current_user`. Org-level изоляция данных ещё не включена — см. `docs/TECH_DEBT.md`.
+- **LLM-вызовы — только через абстракцию `llm.py`**, не прямой httpx к OpenRouter: `await llm.get_provider().vision_completion(system=..., user_text=..., attachment=llm.PdfAttachment|ImagesAttachment, max_tokens=..., timeout=...)`. Транспорт/envelope — в `llm_openrouter.py` (`OpenRouterProvider`), закреплены контрактными тестами; доменный парсинг туда НЕ переезжает. `llm.py` не импортирует `pdf_orientation` (цикл).
+- Конфиг LLM: enum `LLM_PROVIDER` + namespaced `OPENROUTER_*`/`GATEWAY_*`; читать модель/движок/лимиты только через `resolved_*` из `config.py` (алиас-цепочки к legacy `AI_MODEL`/`PDF_ENGINE`/`AI_MAX_TOKENS`), не `os.getenv`/`settings.AI_MODEL` напрямую. Провайдер инициализируется в `main.lifespan` (`init_provider`), PUT `/api/settings` пересобирает его атомарно.
+- Ошибки провайдера — `LLMProviderError(retryable, cost_usd, paid_calls, ...)`; домен маппит в `TransientError`/`PermanentError`, сохраняя биллинг. **Инвариант §2.3:** любая ошибка ПОСЛЕ HTTP 200 несёт `cost_usd`+`paid_calls=1`; транспорт/не-200 → `paid_calls=0`. Тексты пользовательских ошибок — стабильные строки, не менять.
 
 Глубже: методология расчётов — `docs/agent/calculations.md`; модели БД — `docs/agent/database.md`; auth — `docs/agent/auth.md`; парсинг УПД и коррекция ориентации (deskew: detect отдаёт поворот страницы, apply отменяет через `(360−R)`) — `docs/agent/pdf-parsing.md`.
