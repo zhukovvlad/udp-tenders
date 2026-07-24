@@ -1,6 +1,6 @@
 # Переключаемый LLM-провайдер — план реализации (фаза 1: без gateway-спайка)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. *(В окружениях без superpowers-скиллов — исполнять задачи последовательно как чек-лист, с коммитом после каждой.)*
 
 **Goal:** Ввести deploy-time переключатель `LLM_PROVIDER` с абстракцией провайдера так, что режим `openrouter` работает 1:1 как сейчас (закреплено контрактными тестами), а всё, что не зависит от gateway-спайка, готово к появлению `GatewayProvider`.
 
@@ -16,6 +16,7 @@
 - Команды — ТОЛЬКО через `just` (правило AGENTS.md, `cd backend && ...` запрещён): наборы — `just test-backend-unit`, `just test-int-local`, `just test-frontend`, `just typecheck-frontend`; точечно — `just test-unit-k "<pattern>"`, `just test-int-local-k "<pattern>"`, `just test-frontend-file <file>`. Финально — `just lint` и `just test` (напрямую, без пайпов — Windows-грабля).
 - Тексты пользовательских ошибок НЕ меняются (стабильные строки: «Таймаут запроса к OpenRouter (180с)», «Сетевая ошибка запроса к сервису распознавания», «OpenRouter API ошибка: {code}», «Ответ модели без содержимого», «Сервис распознавания ориентации недоступен/отклонил запрос»).
 - Инвариант §2.3 (биллинг платного 200) сохраняется: любая ошибка после HTTP 200 несёт `cost_usd`/`paid_calls=1`.
+- **Единственное осознанное отступление от «1:1»:** `usage: null` в ответе OpenRouter больше НЕ роняет разбор (сейчас — AttributeError → «Не удалось разобрать ответ модели»; после — успех с `cost=0`, `completion_tokens=None`). Это закрытие существующего пункта TECH_DEBT («usage: null крашит разбор»), включено в Task 3 с тестом и обновлением `docs/TECH_DEBT.md`.
 - `.env`/`.env.test` не трогать. Новые зависимости не добавлять.
 - `LLM_PROVIDER=gateway` в этой фазе валиден в конфиге, но фабрика даёт понятный `RuntimeError` («после спайка»).
 
@@ -83,6 +84,7 @@ def test_pdf_engine_alias_priority():
     assert resolved_openrouter_pdf_engine(_mk(OPENROUTER_PDF_ENGINE="native")) == "native"
     assert resolved_openrouter_pdf_engine(_mk(PDF_ENGINE="native")) == "native"
     assert resolved_openrouter_pdf_engine(_mk()) == "mistral-ocr"
+    assert resolved_openrouter_pdf_engine(_mk(OPENROUTER_PDF_ENGINE="   ")) == "mistral-ocr"
 
 
 def test_max_tokens_alias_priority():
@@ -147,9 +149,12 @@ Expected: FAIL — `ImportError: cannot import name 'resolved_openrouter_model'`
 
 ```python
 def resolved_openrouter_model(s: "Settings") -> str:
-    """OPENROUTER_MODEL → deprecated AI_MODEL (warning) → дефолт (§1 спеки)."""
-    if s.OPENROUTER_MODEL:
-        return s.OPENROUTER_MODEL
+    """OPENROUTER_MODEL → deprecated AI_MODEL (warning) → дефолт (§1 спеки).
+
+    Пробельные значения = отсутствие (guard §1 распространяется на все алиасы).
+    """
+    if s.OPENROUTER_MODEL.strip():
+        return s.OPENROUTER_MODEL.strip()
     if s.AI_MODEL != "anthropic/claude-sonnet-4.6":
         logging.getLogger(__name__).warning(
             "AI_MODEL устарел — используйте OPENROUTER_MODEL")
@@ -158,8 +163,8 @@ def resolved_openrouter_model(s: "Settings") -> str:
 
 def resolved_openrouter_pdf_engine(s: "Settings") -> str:
     """OPENROUTER_PDF_ENGINE → deprecated PDF_ENGINE → код-дефолт mistral-ocr."""
-    if s.OPENROUTER_PDF_ENGINE:
-        return s.OPENROUTER_PDF_ENGINE
+    if s.OPENROUTER_PDF_ENGINE.strip():
+        return s.OPENROUTER_PDF_ENGINE.strip()
     if s.PDF_ENGINE != "mistral-ocr":
         logging.getLogger(__name__).warning(
             "PDF_ENGINE устарел — используйте OPENROUTER_PDF_ENGINE")
@@ -204,7 +209,7 @@ def validate_llm_settings(s: "Settings") -> None:
 - [ ] **Step 4: Прогнать тесты**
 
 Run: `just test-unit-k "test_config_llm"`
-Expected: PASS (9 тестов). Затем smoke: `just test-backend-unit` — без регрессий.
+Expected: PASS (8 тестов). Затем smoke: `just test-backend-unit` — без регрессий.
 
 - [ ] **Step 5: Commit**
 
@@ -411,6 +416,7 @@ git commit -m "feat(llm): типы интерфейса провайдера и 
 **Files:**
 - Create: `backend/llm_openrouter.py`
 - Modify: `backend/llm.py` (ветка openrouter в `_build`)
+- Modify: `docs/TECH_DEBT.md` (пункт «usage: null … крашит разбор» — пометить закрытым этим таском: `- [x]` + строка «закрыто Task 3 плана 2026-07-23: провайдер использует `data.get("usage") or {}`, тест `test_usage_null_returns_success`»)
 - Test: `backend/tests/unit/test_openrouter_contract.py` (создать); обновить один тест в `backend/tests/unit/test_llm_locator.py`
 
 **Interfaces:**
@@ -552,15 +558,33 @@ async def test_non_json_body_keeps_billing_and_text():
 @pytest.mark.asyncio
 @respx.mock
 async def test_cost_clamp_nan_negative():
-    """NaN/отрицательный usage.cost клэмпится в 0 (FIX B, поведение 1:1)."""
+    """NaN и отрицательный usage.cost клэмпятся в 0 (FIX B, поведение 1:1)."""
+    route = respx.post(URL)
+    for bad_cost in (-5, "NaN"):
+        route.mock(return_value=httpx.Response(
+            200, json={"choices": [{"message": {"content": "t"}, "finish_reason": "stop"}],
+                       "usage": {"cost": bad_cost}}))
+        p = _provider()
+        resp = await p.vision_completion(system=None, user_text="x",
+                                         attachment=llm.ImagesAttachment(images=(b"j",)),
+                                         max_tokens=200, timeout=httpx.Timeout(30))
+        assert resp.cost_usd == Decimal(0) and resp.paid_calls == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_usage_null_returns_success():
+    """Осознанный фикс TECH_DEBT (см. Global Constraints): usage:null не роняет разбор."""
     respx.post(URL).mock(return_value=httpx.Response(
         200, json={"choices": [{"message": {"content": "t"}, "finish_reason": "stop"}],
-                   "usage": {"cost": -5}}))
+                   "usage": None}))
     p = _provider()
     resp = await p.vision_completion(system=None, user_text="x",
                                      attachment=llm.ImagesAttachment(images=(b"j",)),
                                      max_tokens=200, timeout=httpx.Timeout(30))
-    assert resp.cost_usd == Decimal(0) and resp.paid_calls == 1
+    assert resp.cost_usd == Decimal(0)
+    assert resp.completion_tokens is None
+    assert resp.content == "t"
 ```
 
 Примечания: (а) в репо `asyncio_mode = "auto"` и `--strict-markers` с единственным зарегистрированным маркером `integration` — маркер `anyio` уронит collection; используется `@pytest.mark.asyncio`, как в существующих async-тестах. (б) `env_files = [".env.test"]` в pyproject грузит незакоммиченный env в `os.environ`, а `Settings(_env_file=None)` отсекает только файл — в НАЧАЛО этого тест-файла добавить герметизирующую фикстуру (и переиспользовать её же в `test_config_llm.py`):
@@ -597,8 +621,8 @@ from decimal import Decimal
 
 import httpx
 
-from config import (Settings, resolved_openrouter_max_tokens,
-                    resolved_openrouter_model, resolved_openrouter_pdf_engine)
+from config import (Settings, resolved_openrouter_model,
+                    resolved_openrouter_pdf_engine)
 from llm import (Attachment, ImagesAttachment, LLMProviderError, LLMResponse,
                  PdfAttachment)
 
@@ -759,7 +783,7 @@ git commit -m "feat(llm): OpenRouterProvider + контрактные тесты
 - Test: существующие `backend/tests/integration/test_pdf_parser_phase_a.py`, `test_process_document.py` — должны остаться зелёными БЕЗ правок.
 
 **Interfaces:**
-- Consumes: `llm.get_provider()`, `llm.LLMProviderError`, `llm.PdfAttachment`, `resolved_openrouter_max_tokens`.
+- Consumes: `llm.get_provider()`, `llm.LLMProviderError`, `llm.PdfAttachment`, `resolved_llm_parse_max_tokens`.
 - Produces: `parse_pdf` с прежней сигнатурой и прежним поведением/текстами ошибок; `OPENROUTER_URL` в `pdf_parser` пока ОСТАЁТСЯ (его импортирует `pdf_orientation` — удаление в Task 5).
 
 - [ ] **Step 1: Заготовить фикстуру локатора в `tests/conftest.py`**
@@ -1108,7 +1132,17 @@ def test_put_model_wins_over_legacy_alias(client, monkeypatch):
     assert client.get("/api/settings").json()["model"] == "after/model"
 ```
 
-(Использовать существующий `client` из conftest; авторизация — как в соседних тестах файла `test_settings.py` — скопировать их подготовку пользователя. **ВАЖНО:** PUT пишет в `ENV_PATH` — проверить, как существующие тесты файла изолируют запись от реального `backend/.env` (monkeypatch `ENV_PATH` → tmp_path); новые тесты обязаны использовать тот же механизм, чтобы не мутировать дев-`.env`.)
+(Использовать существующий `client` из conftest; авторизация — как в соседних тестах файла `test_settings.py` — скопировать их подготовку пользователя.) **PUT пишет в `ENV_PATH` — чтобы тесты не мутировали реальный `backend/.env`, в файл добавляется явная autouse-фикстура** (если эквивалентной ещё нет — сверить с существующими тестами файла и не дублировать):
+
+```python
+@pytest.fixture(autouse=True)
+def _tmp_env_path(tmp_path, monkeypatch):
+    """Подменить ENV_PATH на временный .env: PUT-тесты не трогают backend/.env."""
+    import routers.settings as settings_router
+    env_file = tmp_path / ".env"
+    env_file.write_text("")
+    monkeypatch.setattr(settings_router, "ENV_PATH", str(env_file))
+```
 
 - [ ] **Step 2: Прогнать — падают**
 
@@ -1224,6 +1258,7 @@ git commit -m "feat(settings): capabilities, запреты PUT в контур�
 
 **Files:**
 - Modify: `frontend/src/services/api/settings.ts`
+- Modify: `frontend/src/services/queries.ts` (строка ~398-401: типизация mutation)
 - Modify: `frontend/src/pages/Settings.tsx`
 - Modify: `frontend/src/pages/Review.tsx` (строка ~330-335)
 - Modify: `frontend/src/test/handlers.ts` (дефолтный мок `/settings`)
@@ -1254,7 +1289,13 @@ export interface SettingsUpdate {
 }
 ```
 
-Метод `update` перевести на узкий тип: `async update(input: SettingsUpdate): Promise<{ message: string }>` (было `Partial<AppSettings>` — позволял слать capabilities).
+Метод `update` перевести на узкий тип: `async update(input: SettingsUpdate): Promise<{ message: string }>` (было `Partial<AppSettings>` — позволял слать capabilities). **И протянуть тип через query-слой** — `frontend/src/services/queries.ts:~401`, `useUpdateSettings`:
+
+```typescript
+    mutationFn: (input: SettingsUpdate) => settingsApi.update(input),
+```
+
+(с импортом `import type { SettingsUpdate } from "@/services/api/settings"`) — иначе response-only capabilities по-прежнему можно отправить через hook.
 
 - [ ] **Step 2: Обновить дефолтный мок в `test/handlers.ts`**
 
@@ -1324,18 +1365,20 @@ it("скрывает поле модели при can_edit_model=false", async (
 - [ ] **Step 4: Реализация**
 
 `Settings.tsx`:
+- импорт типов расширить: `import type { AppSettings, SettingsUpdate } from "@/services/api/settings";`
 - обёртку поля «Модель» (строки ~151-164) обернуть в `{draft.can_edit_model && ( ... )}`;
 - кнопку «Сохранить» (строка ~220): вместо `update.mutate(draft)`:
 
 ```typescript
 onClick={() => {
   if (!settingsQ.data) return;
-  const changed: Record<string, unknown> = {};
-  const editable: Array<keyof AppSettings> = draft.can_edit_model
-    ? ["model", "confidence_threshold"]
-    : ["confidence_threshold"];
-  for (const k of editable) {
-    if (draft[k] !== settingsQ.data[k]) changed[k as string] = draft[k];
+  // Частичный PUT (§5): только изменённые РАЗРЕШЁННЫЕ поля, типизировано узким DTO
+  const changed: SettingsUpdate = {};
+  if (draft.can_edit_model && draft.model !== settingsQ.data.model) {
+    changed.model = String(draft.model);
+  }
+  if (draft.confidence_threshold !== settingsQ.data.confidence_threshold) {
+    changed.confidence_threshold = Number(draft.confidence_threshold);
   }
   update.mutate(changed);
 }}
@@ -1364,7 +1407,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add frontend/src/services/api/settings.ts frontend/src/pages/Settings.tsx frontend/src/pages/Settings.test.tsx frontend/src/pages/Review.tsx frontend/src/pages/Review.test.tsx frontend/src/test/handlers.ts frontend/src/types/invoice.ts
+git add frontend/src/services/api/settings.ts frontend/src/services/queries.ts frontend/src/pages/Settings.tsx frontend/src/pages/Settings.test.tsx frontend/src/pages/Review.tsx frontend/src/pages/Review.test.tsx frontend/src/test/handlers.ts frontend/src/types/invoice.ts
 git commit -m "feat(frontend): частичный PUT настроек, capabilities, «стоимость недоступна» (§5, AC-5/6)"
 ```
 
