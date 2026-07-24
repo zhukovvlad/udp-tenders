@@ -54,7 +54,7 @@
   от mistral-ocr занимает ~24K токенов на 8-страничном бланке (повторяющиеся шапки/подвалы
   каждой страницы) — сжатие prompt-нагрузки оставило бы больше места для completion.
 
-- [ ] **Parser: `usage: null` в ответе OpenRouter крашит разбор (строка ~212)**
+- [x] **Parser: `usage: null` в ответе OpenRouter крашит разбор (строка ~212)**
   `pdf_parser.parse_invoice_pdf` после HTTP 200 делает `usage = data.get("usage", {})` — дефолт
   срабатывает только когда ключ *отсутствует*; явный JSON `null` вернёт `None`, и следующий
   `usage.get("completion_tokens")` бросит `AttributeError` (перехватится общим `except`, документ
@@ -64,6 +64,8 @@
   `usage: {include: true}` всегда возвращает объект usage на 200 — низкий приоритет.
   **Решение:** заменить `data.get("usage", {})` на `data.get("usage") or {}` в строке чтения usage
   (и заодно проверить прочие `.get("usage", {})` в модуле). Отдельной задачей, не на feature-ветке.
+  **Закрыто Task 3 плана 2026-07-23:** провайдер использует `data.get("usage") or {}`, тест
+  `test_usage_null_returns_success`.
 
 - [ ] **Parser: reparse удаляет данные до валидации**
   `routers/invoices.reparse_document` удаляет существующие Invoice-строки *до* запуска нового

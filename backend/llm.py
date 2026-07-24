@@ -76,7 +76,8 @@ def _build(settings: Settings) -> LLMProvider:
     """Собрать провайдер по LLM_PROVIDER. Без сетевых запросов (инвариант §2.3)."""
     validate_llm_settings(settings)
     if settings.LLM_PROVIDER == "openrouter":
-        raise RuntimeError("OpenRouterProvider появится в Task 3 этого плана")
+        from llm_openrouter import OpenRouterProvider  # локальный импорт против цикла
+        return OpenRouterProvider.from_settings(settings)
     raise RuntimeError(
         "LLM_PROVIDER=gateway: GatewayProvider будет реализован после gateway-спайка (спека §7)")
 

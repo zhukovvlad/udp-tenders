@@ -40,6 +40,13 @@ def test_reset_clears_provider():
         llm.get_provider()
 
 
+def test_init_openrouter_and_get():
+    """init_provider(openrouter) устанавливает OpenRouterProvider."""
+    llm.init_provider(_settings(OPENROUTER_API_KEY="sk-t"))
+    from llm_openrouter import OpenRouterProvider
+    assert isinstance(llm.get_provider(), OpenRouterProvider)
+
+
 def test_provider_error_carries_billing():
     """LLMProviderError несёт cost/paid/code/correlation_id (инвариант §2.3)."""
     from decimal import Decimal
