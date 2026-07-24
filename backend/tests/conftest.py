@@ -355,3 +355,23 @@ def mock_openrouter(openrouter_fixtures_dir, monkeypatch):
 
     with _Mock() as m:
         yield m
+
+
+@pytest.fixture(autouse=True)
+def _llm_provider_initialized(monkeypatch):
+    """Инициализировать LLM-локатор на каждый тест (scoped override, инвариант §2.3).
+
+    Ключ тестовый: unit/integration перехватывают HTTP respx-моками, наружу
+    запросы не уходят. monkeypatch сам восстанавливает состояние в teardown —
+    повторные TestClient в одном процессе корректны.
+    """
+    import dataclasses
+
+    import llm
+    from config import settings
+    from llm_openrouter import OpenRouterProvider
+    provider = OpenRouterProvider.from_settings(settings)
+    if not provider.api_key:
+        provider = dataclasses.replace(provider, api_key="sk-test")
+    monkeypatch.setattr(llm, "_provider", provider)
+    yield
