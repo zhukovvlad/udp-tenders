@@ -56,13 +56,14 @@ def test_get_settings(client, monkeypatch, tmp_path):
     fake_env.write_text("")
     monkeypatch.setattr("routers.settings.ENV_PATH", str(fake_env))
 
-    # Подмены ENV_PATH недостаточно: роутер собирает свежий Settings(), а у того
-    # свой model_config(env_file=".env") — реальный backend/.env читается в обход
-    # нашего fake_env. Если разработчик задал там OPENROUTER_MODEL (а .env.example
-    # это предписывает), namespaced-значение выигрывает алиас-цепочку §1 и тест
-    # падает на чужом значении. В CI файла .env нет, поэтому там было зелено.
-    # Тест проверяет ветку legacy AI_MODEL → namespaced гасим явно (пустое
-    # значение = отсутствие по guard §1), переменная окружения бьёт dotenv.
+    # Пин сохранён (не снят вопреки Task-1-брифу, см. task-1-report.md): корень
+    # CWD-относительного env_file закрыт (config.py + Settings(_env_file=ENV_PATH)
+    # в роутере), но остаётся ОТДЕЛЬНАЯ утечка — alembic/env.py делает модульный
+    # `load_dotenv(ROOT / ".env")` при миграции тестовой БД (session-scope,
+    # override=False), и на машине с реальным `OPENROUTER_MODEL` в backend/.env
+    # это значение оседает в настоящем os.environ на весь процесс pytest —
+    # dotenv-подмена ENV_PATH тут не помогает, os.environ всегда выигрывает
+    # у dotenv-источника в pydantic-settings. Гасим явно, как раньше.
     monkeypatch.setenv("OPENROUTER_MODEL", "")
     monkeypatch.setenv("AI_MODEL", "anthropic/claude-sonnet-4.6")
     monkeypatch.setenv("CONFIDENCE_THRESHOLD", "0.7")

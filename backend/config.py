@@ -5,6 +5,7 @@ settings, а не через os.getenv() напрямую. Для инфраст
 (alembic/env.py, tooling-скрипты) допустимы исключения.
 """
 import logging
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
@@ -12,7 +13,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # env_file абсолютным: относительный путь делал значения зависимыми от CWD
+    # процесса (закрыто по docs/TECH_DEBT.md). Роутер настроек передаёт свой
+    # ENV_PATH через Settings(_env_file=...).
+    model_config = SettingsConfigDict(
+        env_file=Path(__file__).parent / ".env", extra="ignore"
+    )
 
     # JWT / безопасность
     SECRET_KEY: str = Field(min_length=32)  # обязательное поле — при отсутствии в .env запуск упадёт
@@ -48,6 +54,16 @@ class Settings(BaseSettings):
 
     # LLM-провайдер (спека 2026-07-23): deploy-time enum + namespaced-настройки.
     LLM_PROVIDER: Literal["openrouter", "gateway"] = "openrouter"
+
+    # Роль окружения. ИНВАРИАНТ: единственный потребитель APP_ENV — db_guard.
+    # Новый потребитель обязан пересмотреть деплойную таблицу спеки: при
+    # DATABASE_URL на loopback забытый APP_ENV=prod НЕ роняет старт — guard
+    # разрешает loopback безусловно, и процесс молча работает в dev-режиме.
+    APP_ENV: Literal["dev", "prod"] = "dev"
+    # Дополнительные цели, мутируемые при APP_ENV=dev: host:port/dbname через
+    # запятую. Loopback разрешён и без этого списка; каждая запись — полная
+    # тройка (без порта или dbname — ошибка валидации в db_guard).
+    DB_EXTRA_TARGETS: str = ""
     # namespaced openrouter; пустое значение → алиас-цепочка (resolved_* ниже)
     OPENROUTER_MODEL: str = ""
     OPENROUTER_PDF_ENGINE: str = ""

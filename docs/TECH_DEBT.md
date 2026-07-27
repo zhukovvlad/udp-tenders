@@ -435,7 +435,7 @@
 
 ## Конфигурация
 
-- [ ] **`Settings.model_config` читает `.env` по CWD-относительному пути, а роутер настроек — по абсолютному**
+- [x] **`Settings.model_config` читает `.env` по CWD-относительному пути, а роутер настроек — по абсолютному**
   `config.py`: `SettingsConfigDict(env_file=".env")` — путь относительный, то есть значения
   зависят от рабочего каталога процесса. При этом `routers/settings.py` держит абсолютный
   `ENV_PATH` для записи (`set_key`/`unset_key`) и подгрузки через `load_dotenv`, а `get_settings`
@@ -446,3 +446,30 @@
   на ту же мину.
   **Решение:** `env_file=Path(__file__).parent / ".env"` в `config.py` + `Settings(_env_file=ENV_PATH)`
   в роутере. После этого пин `OPENROUTER_MODEL=""` в тесте становится ненужным и его надо снять.
+
+  **Закрыто 2026-07-27** (спека `2026-07-27-deploy-env-contract-design.md`, AC-0): `env_file`
+  абсолютный, роутер передаёт `Settings(_env_file=ENV_PATH)`. Пин `OPENROUTER_MODEL=""` в
+  `test_get_settings` **не снят** (расхождение с планом Task 1, см. `task-1-report.md`): при
+  прогоне обнаружилась ОТДЕЛЬНАЯ утечка в реальный `os.environ`, не связанная с
+  CWD-относительностью — `alembic/env.py` делает модульный `load_dotenv(ROOT / ".env")`
+  (override=False) при миграции тестовой БД, и на машине с непустым `OPENROUTER_MODEL` в
+  боевом `backend/.env` это значение необратимо оседает в `os.environ` на весь процесс
+  pytest. `Settings(_env_file=...)` тут бессилен: env-источник pydantic-settings всегда
+  выигрывает у dotenv-источника. Заведена новая запись ниже.
+
+- [ ] **`alembic/env.py` грузит реальный `backend/.env` в `os.environ` при каждом прогоне миграций**
+  `load_dotenv(ROOT / ".env")` (без `override`, т.е. `override=False`) выполняется на импорте
+  модуля — при подготовке тестовой БД (integration-тесты мигрируют её через alembic) это
+  подтягивает значения из боевого `backend/.env` разработчика в НАСТОЯЩИЙ `os.environ`
+  процесса pytest, а не в изолированный dotenv-источник. На машине, где в `backend/.env` уже
+  задан `OPENROUTER_MODEL` (для локальной работы с реальным OpenRouter), это значение
+  переживает monkeypatch/`Settings(_env_file=...)` подмены (env-переменные окружения всегда
+  побеждают dotenv в pydantic-settings) и утекает в любой тест текущего процесса, читающий
+  `OPENROUTER_MODEL` через свежий `Settings()`. Обнаружено при закрытии Task 1 плана
+  `2026-07-27-deploy-env-contract` (см. `task-1-report.md`) — попытка снять пин
+  `OPENROUTER_MODEL=""` в `test_get_settings` привела к падению именно по этой причине.
+  **Решение (не реализовано):** либо `alembic/env.py` не грузит `.env` при тестовом прогоне
+  (например, детект `TEST_DATABASE_URL`), либо conftest.py явно чистит опасные переменные
+  перед session-scope миграцией, либо `load_dotenv` заменяется на локальный dict без записи
+  в `os.environ`. Пин `OPENROUTER_MODEL=""` в `test_get_settings` остаётся необходимым, пока
+  это не закрыто.
