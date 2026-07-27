@@ -10,14 +10,16 @@ PostgreSQL: dev — локальный кластер (`udp_dev` на :5459), п
 ## Команды — только через `just`, никогда `cd backend && ...`
 `install` · `dev-backend` · `dev-frontend` · `test` · `test-backend-unit` · `test-backend-integration` · `test-int-local` (integration на локальном Postgres, ~6.5x быстрее — см. `docs/testing.md`) · `test-backend-local` · `test-frontend` · `lint` · `typecheck-frontend` · `db-migrate` · `db-dev-init` (создать локальную `udp_dev`) · `db-web` (веб-просмотр таблиц) · `create-superuser` · `create-org` · `create-user`
 
-Рецепты с данными (`dev-backend`, `db-migrate`, `create-*`) идут в **локальную** `udp_dev`. Источник строки из `.env` — `just db_target=env <рецепт>`; запись в Neon требует ещё и `ALLOW_NEON_WRITES=1`. Голый `uv run alembic upgrade head` / `uvicorn main:app` в Neon упадёт на guard — это by design.
+Рецепты с данными (`dev-backend`, `db-migrate`, `create-*`) идут в **локальную** `udp_dev`. Источник строки из `.env` — `just db_target=env <рецепт>`. Мутация не-loopback цели при `APP_ENV=dev` падает на guard (`backend/db_guard.py`) — это by design.
+
+**Прод-цель в `DB_EXTRA_TARGETS` не вносить.** Список — для долгоживущих dev-целей (Neon test-ветка, докерный `db`). Осознанная миграция прода с дев-машины — one-shot-декларацией роли: `APP_ENV=prod just db_target=env db-migrate`.
 
 Shell (Windows): `& "C:\Program Files\Git\bin\bash.exe" -c "cd /c/Users/zhukov_v/Projects/UDP && just <cmd> 2>&1"`
 
 CI: GitHub Actions (`.github/workflows/backend-tests.yml`) гоняет ruff + полный pytest на каждый push/PR (~1 мин, Postgres+pgvector service-container).
 
 ## Жёсткие правила
-- Миграции: исторические файлы в `backend/alembic/versions/` не редактировать. Новые ревизии создавать через `just db-revision "..."` (позиционный аргумент — `message="..."` НЕ работает, just примет его как буквальное значение вместе с `message=`; это `alembic revision` без autogenerate — создание нового файла); тело новой ревизии (`upgrade`/`downgrade`) заполнять вручную допустимо. Применять — `just db-migrate` (локальная `udp_dev`) / `just db-test-migrate` (тестовая БД) / `ALLOW_NEON_WRITES=1 just db_target=env db-migrate` (Neon, осознанно).
+- Миграции: исторические файлы в `backend/alembic/versions/` не редактировать. Новые ревизии создавать через `just db-revision "..."` (позиционный аргумент — `message="..."` НЕ работает, just примет его как буквальное значение вместе с `message=`; это `alembic revision` без autogenerate — создание нового файла); тело новой ревизии (`upgrade`/`downgrade`) заполнять вручную допустимо. Применять — `just db-migrate` (локальная `udp_dev`) / `just db-test-migrate` (тестовая БД) / `APP_ENV=prod just db_target=env db-migrate` (прод, осознанно и разово).
 - `.env` / `.env.test` не трогать; секреты — через переменные окружения.
 - Перед завершением задачи — `just lint` и `just test`.
 - Новые зависимости — только по явному запросу.

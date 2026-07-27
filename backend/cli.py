@@ -8,7 +8,7 @@ import click
 
 from config import settings
 from database import SessionLocal
-from db_guard import ensure_write_allowed
+from db_guard import ensure_mutation_allowed
 from models import Organization, OrgRole, User
 from security import hash_password
 
@@ -20,8 +20,8 @@ def cli():
 
 
 def _guard(action: str) -> None:
-    """Отказаться создавать записи в Neon без явного разрешения."""
-    ensure_write_allowed(settings.DATABASE_URL, f"cli {action}")
+    """Отказаться мутировать БД, если цель не разрешена для текущего APP_ENV."""
+    ensure_mutation_allowed(settings.DATABASE_URL, f"cli {action}")
 
 
 @cli.command("create-superuser")

@@ -2,7 +2,7 @@
 
 Отдельно от test_db_guard.py, который проверяет сам модуль. Смысл именно в
 обвязке: удалить вызов `_guard(...)` из команды cli или переставить
-`ensure_write_allowed` ниже создания движка в alembic/env.py — и все тесты
+`ensure_mutation_allowed` ниже создания движка в alembic/env.py — и все тесты
 чистого модуля останутся зелёными. Здесь ловится ровно это.
 """
 from pathlib import Path
@@ -12,19 +12,24 @@ from click.testing import CliRunner
 
 import cli
 import main
-from db_guard import ALLOW_ENV
 
-NEON_URL = (
+REMOTE_URL = (
     "postgresql+psycopg://test_owner:secret-pw@"
     "ep-example-0000.c-3.eu-central-1.aws.neon.tech/neondb"
 )
 
 
 @pytest.fixture(autouse=True)
-def _neon_target_without_permission(monkeypatch):
-    """Цель — Neon, разрешения нет: базовое состояние для всех тестов файла."""
-    monkeypatch.delenv(ALLOW_ENV, raising=False)
-    monkeypatch.setattr(cli.settings, "DATABASE_URL", NEON_URL, raising=False)
+def _unlisted_target_in_dev(monkeypatch):
+    """Цель не разрешена: APP_ENV=dev, пустой allowlist, удалённый хост.
+
+    DB_EXTRA_TARGETS пиним явно: env_file абсолютный, и в реальном backend/.env
+    список может быть непустым — иначе тест был бы зелёным в CI и красным на
+    машине разработчика.
+    """
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DB_EXTRA_TARGETS", "")
+    monkeypatch.setattr(cli.settings, "DATABASE_URL", REMOTE_URL, raising=False)
 
 
 @pytest.fixture
@@ -48,12 +53,12 @@ def no_db_session(monkeypatch):
         ("create-user", ["--email", "a@b.c", "--org-id", "1", "--password", "pw"]),
     ],
 )
-def test_cli_commands_refuse_neon_target(command, args, no_db_session):
-    """Каждая мутирующая cli-команда отказывается писать в Neon."""
+def test_cli_commands_refuse_unlisted_target(command, args, no_db_session):
+    """Каждая мутирующая cli-команда отказывается мутировать неразрешённую цель."""
     result = CliRunner().invoke(cli.cli, [command, *args])
     assert result.exit_code != 0
     assert isinstance(result.exception, RuntimeError)
-    assert "Neon" in str(result.exception)
+    assert "APP_ENV=dev" in str(result.exception)
 
 
 @pytest.mark.parametrize(
@@ -64,12 +69,12 @@ def test_cli_commands_refuse_neon_target(command, args, no_db_session):
         ("create-user", ["--email", "a@b.c", "--org-id", "1", "--password", "pw"]),
     ],
 )
-def test_cli_commands_pass_guard_when_allowed(command, args, monkeypatch):
-    """С ALLOW_NEON_WRITES=1 guard пропускает — падение уже на уровне БД.
+def test_cli_commands_pass_guard_when_prod(command, args, monkeypatch):
+    """При APP_ENV=prod guard пропускает — падение уже на уровне БД.
 
     Проверяем именно, что барьер снят: до SessionLocal команда доходит.
     """
-    monkeypatch.setenv(ALLOW_ENV, "1")
+    monkeypatch.setenv("APP_ENV", "prod")
     reached = []
 
     def _record():
@@ -81,10 +86,11 @@ def test_cli_commands_pass_guard_when_allowed(command, args, monkeypatch):
     assert reached, "guard не пустил дальше, хотя запись разрешена"
 
 
-def test_startup_sweep_refuses_neon_target(monkeypatch):
-    """Sweep на старте приложения не идёт в Neon без разрешения."""
-    monkeypatch.delenv(ALLOW_ENV, raising=False)
-    monkeypatch.setattr(main.settings, "DATABASE_URL", NEON_URL, raising=False)
+def test_startup_sweep_refuses_unlisted_target(monkeypatch):
+    """Sweep на старте не идёт в неразрешённую цель."""
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DB_EXTRA_TARGETS", "")
+    monkeypatch.setattr(main.settings, "DATABASE_URL", REMOTE_URL, raising=False)
     with pytest.raises(RuntimeError, match="startup-sweep"):
         main._sweep_stuck_documents()
 
@@ -93,7 +99,7 @@ def test_startup_sweep_skips_guard_for_injected_factory():
     """С инжектированной фабрикой guard не при чём — цель заведомо тестовая.
 
     Иначе интеграционные тесты (они подменяют фабрику) требовали бы
-    ALLOW_NEON_WRITES только из-за прод-строки в backend/.env.
+    APP_ENV=prod только из-за незнакомого хоста в backend/.env.
     """
     class _Result:
         rowcount = 0
@@ -122,6 +128,23 @@ def test_alembic_env_guards_before_engine():
     """
     source = Path(main.__file__).parent / "alembic" / "env.py"
     text = source.read_text(encoding="utf-8")
-    guard_at = text.index("ensure_write_allowed(")
+    guard_at = text.index("ensure_mutation_allowed(")
     engine_at = text.index("engine_from_config(")
     assert guard_at < engine_at, "guard оказался ниже создания движка"
+
+
+def test_alembic_env_loads_dotenv_without_override():
+    """load_dotenv в alembic/env.py не перетирает process env.
+
+    От этого зависит корректность just db-test-migrate: рецепт подаёт
+    DATABASE_URL=$TEST_DATABASE_URL через process env, а backend/.env содержит
+    прод-DSN. Станет override=True — рецепт начнёт мигрировать ПРОД.
+    Проверка по исходнику: рантайм-запуск env.py потребовал бы живой БД.
+    """
+    source = Path(main.__file__).parent / "alembic" / "env.py"
+    text = source.read_text(encoding="utf-8")
+    call_at = text.index("load_dotenv(")
+    call = text[call_at : text.index(")", call_at) + 1]
+    assert "override" not in call, (
+        f"load_dotenv вызван с override — это ломает db-test-migrate: {call}"
+    )

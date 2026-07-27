@@ -149,31 +149,27 @@ def db_engine() -> Iterator:
     # DATABASE_URL нет, поэтому os.getenv локально вернул бы None и проверка была бы
     # мёртвой. Settings читает backend/.env — там прод-строка и лежит.
     from config import Settings
+    from db_guard import normalize_target
 
     prod_url = Settings().DATABASE_URL
-    if prod_url and test_url == prod_url:
+    if prod_url and normalize_target(test_url) == normalize_target(prod_url):
         pytest.skip(
-            "TEST_DATABASE_URL совпадает с DATABASE_URL — отказ от DROP SCHEMA на проде"
+            "TEST_DATABASE_URL и DATABASE_URL — одна цель после нормализации "
+            "(host:port/dbname); отказ от DROP SCHEMA на проде"
         )
 
     # Второй рубеж: udp_dev и udp_test различаются четырьмя символами, а цена
     # опечатки — DROP SCHEMA на dev-базе. Требуем, чтобы имя БД было тестовым.
+    # НЕ ПОГЛОЩАЕТСЯ allowlist'ом guard'а: udp_dev — легитимная цель для
+    # миграций и приложения, то есть она В списке, но DROP SCHEMA на ней
+    # катастрофа. Членство в allowlist выражает «можно мутировать», а не
+    # «можно разрушить схему». Это разные права.
     db_name = (urlsplit(test_url).path or "").lstrip("/")
     if not db_name.endswith("_test"):
         pytest.skip(
             f"TEST_DATABASE_URL указывает на базу '{db_name}' — ожидается имя, "
             "оканчивающееся на '_test'; отказ от DROP SCHEMA"
         )
-
-    # db_guard: Neon test-ветка — легитимная цель для миграций (так работает
-    # test-backend-integration, когда локального кластера нет). Разрешаем точечно
-    # и только когда цель действительно Neon, с откатом на teardown — иначе
-    # process-global переменная протекала бы в тесты самого guard'а.
-    from db_guard import is_neon_url
-
-    allow_patch = pytest.MonkeyPatch()
-    if is_neon_url(test_url):
-        allow_patch.setenv("ALLOW_NEON_WRITES", "1")
 
     # Накатываем миграции через Alembic
     from alembic import command
@@ -186,11 +182,26 @@ def db_engine() -> Iterator:
     # Сбрасываем схему перед накатом — гарантируем чистый старт
     with engine.begin() as conn:
         conn.exec_driver_sql("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
-    command.upgrade(cfg, "head")
+
+    # command.upgrade() исполняет alembic/env.py В ЭТОМ ЖЕ процессе (in-process,
+    # не подпроцесс), а тот модуль-уровнево делает load_dotenv(ROOT / ".env")
+    # (без override, но это не спасает пустые ключи процесса) — реальный
+    # backend/.env разработчика записывается в настоящий os.environ на весь
+    # остаток pytest-сессии. В pydantic-settings process env выигрывает у
+    # dotenv-источника, поэтому дальнейшие Settings(_env_file=...) в тестах
+    # ничем не защищены от этой утечки. Закрываем здесь, а не в alembic/env.py:
+    # там load_dotenv нужен для реальной работы (db-test-migrate передаёт
+    # TEST_DATABASE_URL через process env поверх .env), поэтому сам вызов
+    # трогать нельзя (AC-7) — снимаем только побочный эффект на тестовый процесс.
+    _environ_snapshot = dict(os.environ)
+    try:
+        command.upgrade(cfg, "head")
+    finally:
+        os.environ.clear()
+        os.environ.update(_environ_snapshot)
 
     yield engine
     engine.dispose()
-    allow_patch.undo()
 
 
 @pytest.fixture

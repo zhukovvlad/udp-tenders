@@ -45,9 +45,9 @@ def _sweep_stuck_documents(session_factory=None) -> int:
         # (тесты) сюда не попадает — там цель заведомо тестовая.
         from config import settings
         from database import SessionLocal
-        from db_guard import ensure_write_allowed
+        from db_guard import ensure_mutation_allowed
 
-        ensure_write_allowed(settings.DATABASE_URL, "startup-sweep")
+        ensure_mutation_allowed(settings.DATABASE_URL, "startup-sweep")
         session_factory = SessionLocal
     with session_factory() as db:
         result = db.execute(text(

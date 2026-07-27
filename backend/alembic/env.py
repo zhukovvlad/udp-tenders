@@ -17,7 +17,7 @@ load_dotenv(ROOT / ".env")
 
 import models  # noqa: F401,E402  -- регистрируем модели в Base.metadata
 from database import Base  # noqa: E402
-from db_guard import ensure_write_allowed  # noqa: E402
+from db_guard import ensure_mutation_allowed  # noqa: E402
 
 config = context.config
 _db_url = config.get_main_option("sqlalchemy.url") or os.environ.get("DATABASE_URL")
@@ -28,11 +28,10 @@ if not _db_url:
     )
 config.set_main_option("sqlalchemy.url", _db_url)
 
-# Fail-fast до любого DDL: миграция в прод-Neon по привычке — самая дорогая
-# ошибка этого проекта, а DATABASE_URL в .env всё ещё указывает туда. Стоит
-# выше engine_from_config/fileConfig — коннекта к этому моменту ещё не было.
-# Покрывает и online-, и offline-режим: модуль исполняется до ветвления.
-ensure_write_allowed(_db_url, "alembic")
+# Fail-fast до любого DDL. Стоит выше engine_from_config/fileConfig — коннекта
+# к этому моменту ещё не было. Покрывает и online-, и offline-режим: модуль
+# исполняется до ветвления.
+ensure_mutation_allowed(_db_url, "alembic")
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

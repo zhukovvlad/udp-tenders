@@ -56,15 +56,6 @@ def test_get_settings(client, monkeypatch, tmp_path):
     fake_env.write_text("")
     monkeypatch.setattr("routers.settings.ENV_PATH", str(fake_env))
 
-    # Пин сохранён (не снят вопреки Task-1-брифу, см. task-1-report.md): корень
-    # CWD-относительного env_file закрыт (config.py + Settings(_env_file=ENV_PATH)
-    # в роутере), но остаётся ОТДЕЛЬНАЯ утечка — alembic/env.py делает модульный
-    # `load_dotenv(ROOT / ".env")` при миграции тестовой БД (session-scope,
-    # override=False), и на машине с реальным `OPENROUTER_MODEL` в backend/.env
-    # это значение оседает в настоящем os.environ на весь процесс pytest —
-    # dotenv-подмена ENV_PATH тут не помогает, os.environ всегда выигрывает
-    # у dotenv-источника в pydantic-settings. Гасим явно, как раньше.
-    monkeypatch.setenv("OPENROUTER_MODEL", "")
     monkeypatch.setenv("AI_MODEL", "anthropic/claude-sonnet-4.6")
     monkeypatch.setenv("CONFIDENCE_THRESHOLD", "0.7")
     # OPENROUTER_API_KEY в .env.test = "mock-key-not-used" (не начинается на "sk-"),

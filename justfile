@@ -20,9 +20,9 @@ default:
 #
 # Значение называется `env`, а не `neon`, потому что описывает источник строки,
 # а не её содержимое: у контрибьютора в .env может стоять свой Postgres, и ему
-# нужен путь мимо жёстко прошитого local-кластера. Разрешение на запись в Neon
-# из этого НЕ следует — оно отдельное, через ALLOW_NEON_WRITES=1 (db_guard).
-# Иначе `db_target=env` тихо снимал бы защиту тому, кто Neon вообще не трогает.
+# нужен путь мимо жёстко прошитого local-кластера. Разрешение мутировать цель
+# из этого НЕ следует — оно отдельное, через APP_ENV/DB_EXTRA_TARGETS (db_guard).
+# Иначе `db_target=env` тихо снимал бы защиту тому, чья цель guard'ом не разрешена.
 #
 # Переопределение: just db_target=env <рецепт> либо UDP_DB_TARGET=env в окружении.
 # Имя переменной с префиксом: DB_TARGET слишком общее для машины, где живёт
@@ -187,12 +187,9 @@ db-migrate: pg-ensure
     @echo "==> БД: {{db_target}}"
     cd backend && {{db_env}} uv run alembic upgrade head
 
-# ALLOW_NEON_WRITES: TEST_DATABASE_URL указывает на Neon test-ветку, и накат
-# миграций туда легитимен — db_guard надо снять явно.
-#
 # Накатить миграции на тестовую БД (TEST_DATABASE_URL)
 db-test-migrate:
-    cd backend && ALLOW_NEON_WRITES=1 DATABASE_URL=$TEST_DATABASE_URL uv run alembic upgrade head
+    cd backend && DATABASE_URL=$TEST_DATABASE_URL uv run alembic upgrade head
 
 # Проверка дрейфа ORM/БД: локальная тест-БД до head + alembic check.
 # Нулевой код = моделей и схемы совпадают (нет pending upgrade ops).
