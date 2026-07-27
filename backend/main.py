@@ -38,7 +38,16 @@ def _sweep_stuck_documents(session_factory=None) -> int:
     from sqlalchemy import text
 
     if session_factory is None:
+        # Guard только на этой ветке — она и есть «приложение поднимается по-
+        # настоящему». Sweep пишет в БД безусловно на каждый старт, поэтому
+        # `uv run uvicorn main:app`, набранный вместо `just dev-backend`,
+        # перевёл бы живые прод-документы в error. Инжектированная фабрика
+        # (тесты) сюда не попадает — там цель заведомо тестовая.
+        from config import settings
         from database import SessionLocal
+        from db_guard import ensure_write_allowed
+
+        ensure_write_allowed(settings.DATABASE_URL, "startup-sweep")
         session_factory = SessionLocal
     with session_factory() as db:
         result = db.execute(text(

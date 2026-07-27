@@ -5,17 +5,19 @@
 ## Стек
 Backend: Python 3.12, FastAPI, SQLAlchemy (sync), Alembic, pydantic-settings; auth — pyjwt HS256 + argon2, httpOnly cookies, CSRF. Зависимости — uv (pyproject.toml + uv.lock).
 Frontend: React 19, TS (strict), Vite, shadcn/ui, Tailwind v4, Recharts, TanStack Query v5.
-PostgreSQL (Neon) · MinIO (S3) · LLM через абстракцию провайдера (`backend/llm.py`): deploy-time `LLM_PROVIDER` (дефолт `openrouter` — Claude Vision, движок `native`); домен зовёт `llm.get_provider().vision_completion(...)`, транспорт живёт в `llm_openrouter.py`. pypdfium2 + pikepdf + Pillow — raster-коррекция ориентации страниц (deskew).
+PostgreSQL: dev — локальный кластер (`udp_dev` на :5459), прод — Neon; цель переключается `db_target` (дефолт `local`), запись в Neon защищена `backend/db_guard.py`. MinIO (S3) · LLM через абстракцию провайдера (`backend/llm.py`): deploy-time `LLM_PROVIDER` (дефолт `openrouter` — Claude Vision, движок `native`); домен зовёт `llm.get_provider().vision_completion(...)`, транспорт живёт в `llm_openrouter.py`. pypdfium2 + pikepdf + Pillow — raster-коррекция ориентации страниц (deskew).
 
 ## Команды — только через `just`, никогда `cd backend && ...`
-`install` · `dev-backend` · `dev-frontend` · `test` · `test-backend-unit` · `test-backend-integration` · `test-int-local` (integration на локальном Postgres, ~6.5x быстрее — см. `docs/testing.md`) · `test-backend-local` · `test-frontend` · `lint` · `typecheck-frontend` · `db-migrate` · `create-superuser` · `create-org`
+`install` · `dev-backend` · `dev-frontend` · `test` · `test-backend-unit` · `test-backend-integration` · `test-int-local` (integration на локальном Postgres, ~6.5x быстрее — см. `docs/testing.md`) · `test-backend-local` · `test-frontend` · `lint` · `typecheck-frontend` · `db-migrate` · `db-dev-init` (создать локальную `udp_dev`) · `db-web` (веб-просмотр таблиц) · `create-superuser` · `create-org` · `create-user`
+
+Рецепты с данными (`dev-backend`, `db-migrate`, `create-*`) идут в **локальную** `udp_dev`. Источник строки из `.env` — `just db_target=env <рецепт>`; запись в Neon требует ещё и `ALLOW_NEON_WRITES=1`. Голый `uv run alembic upgrade head` / `uvicorn main:app` в Neon упадёт на guard — это by design.
 
 Shell (Windows): `& "C:\Program Files\Git\bin\bash.exe" -c "cd /c/Users/zhukov_v/Projects/UDP && just <cmd> 2>&1"`
 
 CI: GitHub Actions (`.github/workflows/backend-tests.yml`) гоняет ruff + полный pytest на каждый push/PR (~1 мин, Postgres+pgvector service-container).
 
 ## Жёсткие правила
-- Миграции: исторические файлы в `backend/alembic/versions/` не редактировать. Новые ревизии создавать через `just db-revision "..."` (позиционный аргумент — `message="..."` НЕ работает, just примет его как буквальное значение вместе с `message=`; это `alembic revision` без autogenerate — создание нового файла); тело новой ревизии (`upgrade`/`downgrade`) заполнять вручную допустимо. Применять — `just db-migrate` (dev) / `just db-test-migrate` (тестовая БД).
+- Миграции: исторические файлы в `backend/alembic/versions/` не редактировать. Новые ревизии создавать через `just db-revision "..."` (позиционный аргумент — `message="..."` НЕ работает, just примет его как буквальное значение вместе с `message=`; это `alembic revision` без autogenerate — создание нового файла); тело новой ревизии (`upgrade`/`downgrade`) заполнять вручную допустимо. Применять — `just db-migrate` (локальная `udp_dev`) / `just db-test-migrate` (тестовая БД) / `ALLOW_NEON_WRITES=1 just db_target=env db-migrate` (Neon, осознанно).
 - `.env` / `.env.test` не трогать; секреты — через переменные окружения.
 - Перед завершением задачи — `just lint` и `just test`.
 - Новые зависимости — только по явному запросу.

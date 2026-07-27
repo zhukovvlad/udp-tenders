@@ -12,6 +12,7 @@ import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx as _httpx_module
 import pytest
@@ -142,13 +143,37 @@ def db_engine() -> Iterator:
 
     engine = create_engine(test_url, pool_pre_ping=True)
 
-    # Безопасность: отказываемся работать, если TEST_DATABASE_URL совпадает с прод DATABASE_URL.
-    # DROP SCHEMA — деструктивная операция; ошибка конфигурации = катастрофа.
-    prod_url = os.getenv("DATABASE_URL", "")
+    # Безопасность: отказываемся работать, если TEST_DATABASE_URL совпадает с прод
+    # DATABASE_URL. DROP SCHEMA — деструктивная операция; ошибка конфигурации = катастрофа.
+    # Читаем через Settings, а не os.getenv: pytest-dotenv грузит только .env.test, где
+    # DATABASE_URL нет, поэтому os.getenv локально вернул бы None и проверка была бы
+    # мёртвой. Settings читает backend/.env — там прод-строка и лежит.
+    from config import Settings
+
+    prod_url = Settings().DATABASE_URL
     if prod_url and test_url == prod_url:
         pytest.skip(
             "TEST_DATABASE_URL совпадает с DATABASE_URL — отказ от DROP SCHEMA на проде"
         )
+
+    # Второй рубеж: udp_dev и udp_test различаются четырьмя символами, а цена
+    # опечатки — DROP SCHEMA на dev-базе. Требуем, чтобы имя БД было тестовым.
+    db_name = (urlsplit(test_url).path or "").lstrip("/")
+    if not db_name.endswith("_test"):
+        pytest.skip(
+            f"TEST_DATABASE_URL указывает на базу '{db_name}' — ожидается имя, "
+            "оканчивающееся на '_test'; отказ от DROP SCHEMA"
+        )
+
+    # db_guard: Neon test-ветка — легитимная цель для миграций (так работает
+    # test-backend-integration, когда локального кластера нет). Разрешаем точечно
+    # и только когда цель действительно Neon, с откатом на teardown — иначе
+    # process-global переменная протекала бы в тесты самого guard'а.
+    from db_guard import is_neon_url
+
+    allow_patch = pytest.MonkeyPatch()
+    if is_neon_url(test_url):
+        allow_patch.setenv("ALLOW_NEON_WRITES", "1")
 
     # Накатываем миграции через Alembic
     from alembic import command
@@ -165,6 +190,7 @@ def db_engine() -> Iterator:
 
     yield engine
     engine.dispose()
+    allow_patch.undo()
 
 
 @pytest.fixture
