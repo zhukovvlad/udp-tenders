@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # OpenRouter
     OPENROUTER_API_KEY: str = ""
-    AI_MODEL: str = "anthropic/claude-sonnet-4.6"
+    AI_MODEL: str = "anthropic/claude-sonnet-5"
     AI_MAX_TOKENS: int = 64000  # верхний предел вывода Claude Sonnet (~64K); при PDF_ENGINE=native prompt ~10K токенов, при устаревшем mistral-ocr — ~24K на 8-страничных СФ
     CONFIDENCE_THRESHOLD: float = 0.7
     PDF_ENGINE: str = "mistral-ocr"
@@ -81,10 +81,10 @@ def resolved_openrouter_model(s: "Settings") -> str:
     if s.OPENROUTER_MODEL.strip():
         return s.OPENROUTER_MODEL.strip()
     legacy = s.AI_MODEL.strip()
-    if legacy and legacy != "anthropic/claude-sonnet-4.6":
+    if legacy and legacy != "anthropic/claude-sonnet-5":
         _warn_deprecated_alias_once(
             "AI_MODEL", "AI_MODEL устарел — используйте OPENROUTER_MODEL")
-    return legacy or "anthropic/claude-sonnet-4.6"
+    return legacy or "anthropic/claude-sonnet-5"
 
 
 def resolved_openrouter_pdf_engine(s: "Settings") -> str:

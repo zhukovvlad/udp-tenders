@@ -37,8 +37,8 @@ def test_model_alias_priority():
     """OPENROUTER_MODEL побеждает deprecated AI_MODEL; пустой — падаем на алиас, затем дефолт."""
     assert resolved_openrouter_model(_mk(OPENROUTER_MODEL="m1", AI_MODEL="m2")) == "m1"
     assert resolved_openrouter_model(_mk(AI_MODEL="m2")) == "m2"
-    assert resolved_openrouter_model(_mk()) == "anthropic/claude-sonnet-4.6"
-    assert resolved_openrouter_model(_mk(AI_MODEL="   ")) == "anthropic/claude-sonnet-4.6"
+    assert resolved_openrouter_model(_mk()) == "anthropic/claude-sonnet-5"
+    assert resolved_openrouter_model(_mk(AI_MODEL="   ")) == "anthropic/claude-sonnet-5"
 
 
 def test_pdf_engine_alias_priority():

@@ -18,7 +18,7 @@ LLM_PROVIDER=openrouter
 
 # --- namespace openrouter ---
 OPENROUTER_API_KEY=sk-...                      # можно пусто → задать позже через UI/API
-OPENROUTER_MODEL=anthropic/claude-sonnet-4.6
+OPENROUTER_MODEL=anthropic/claude-sonnet-5
 OPENROUTER_PDF_ENGINE=native                   # рабочее значение
 OPENROUTER_MAX_TOKENS=64000
 # OPENROUTER_BASE_URL=                          # пусто → https://openrouter.ai/api/v1
@@ -59,14 +59,14 @@ legacy-переменной в лог один раз пишется преду�
   "can_edit_model": true,
   "cost_available": true,
   "api_key_set": true,
-  "model": "anthropic/claude-sonnet-4.6",
+  "model": "anthropic/claude-sonnet-5",
   "confidence_threshold": 0.7
 }
 ```
 
 **`PUT /api/settings`** — присылать ТОЛЬКО изменённые поля:
 ```json
-{ "api_key": "sk-...", "model": "anthropic/claude-sonnet-4.6", "confidence_threshold": 0.8 }
+{ "api_key": "sk-...", "model": "anthropic/claude-sonnet-5", "confidence_threshold": 0.8 }
 ```
 
 - В `openrouter`-режиме смена `api_key`/`model` **сразу атомарно пересобирает провайдер** —
