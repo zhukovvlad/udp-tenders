@@ -50,6 +50,9 @@
 """Тесты резолва env_file в Settings (независимость от CWD)."""
 from pathlib import Path
 
+import pydantic
+import pytest
+
 from config import Settings
 
 
@@ -75,27 +78,18 @@ def test_app_env_defaults_to_dev(monkeypatch):
 
 def test_app_env_rejects_invalid_value(monkeypatch):
     """Невалидное значение APP_ENV падает на валидации, а не молча."""
-    import pydantic
-
     monkeypatch.setenv("APP_ENV", "staging")
     with pytest.raises(pydantic.ValidationError):
         Settings()
 
 
-def test_db_extra_targets_defaults_empty(monkeypatch):
-    """DB_EXTRA_TARGETS по умолчанию пуст."""
-    monkeypatch.delenv("DB_EXTRA_TARGETS", raising=False)
-    monkeypatch.setenv("APP_ENV", "dev")
-    assert Settings().DB_EXTRA_TARGETS == ""
-```
+def test_db_extra_targets_empty_env_means_empty_list(monkeypatch):
+    """Пустое значение в окружении означает «список пуст».
 
-Добавить в начало файла `import pytest` (используется в `test_app_env_rejects_invalid_value`).
-
-**Про герметичность:** `test_db_extra_targets_defaults_empty` делает `delenv`, но `Settings()` всё равно прочитает `backend/.env`, где после MANUAL-задачи (Task 2) будет непустой `DB_EXTRA_TARGETS`. Поэтому тест обязан пинить значение через process env, а не полагаться на отсутствие. Заменить тело на:
-
-```python
-def test_db_extra_targets_defaults_empty(monkeypatch):
-    """Пустое значение в окружении означает «список пуст» (не подтягивает .env)."""
+    Пиним через setenv, а не delenv: env_file абсолютный, и Settings() прочитал бы
+    backend/.env, где после MANUAL-задачи (Task 2) лежит непустой список. Тогда
+    тест был бы зелёным в CI (файла нет) и красным на машине разработчика.
+    """
     monkeypatch.setenv("APP_ENV", "dev")
     monkeypatch.setenv("DB_EXTRA_TARGETS", "")
     assert Settings().DB_EXTRA_TARGETS == ""
@@ -405,6 +399,22 @@ def test_parse_extra_targets_rejects_partial_entry(entry):
         parse_extra_targets(entry)
 
 
+def test_normalize_target_handles_ipv6_literal():
+    """IPv6-литерал в скобках даёт хост без скобок."""
+    assert normalize_target("postgresql://u@[::1]:5459/db") == "::1:5459/db"
+
+
+def test_ipv6_loopback_allowed_without_list():
+    """IPv6-loopback разрешён через LOOPBACK_HOSTS, а не через allowlist.
+
+    В DB_EXTRA_TARGETS IPv6 выразить нельзя: разбор записи режет по первому
+    двоеточию, и `::1:5459/db` не разбирается. Это осознанный YAGNI — единственная
+    нужная IPv6-цель это loopback, а он покрыт LOOPBACK_HOSTS. Появится реальная
+    не-loopback IPv6-цель — разбор придётся усложнить.
+    """
+    assert is_target_allowed("postgresql://u@[::1]:5459/db", frozenset()) is True
+
+
 def test_loopback_allowed_without_list():
     """Loopback разрешён безусловно — любая база, без DB_EXTRA_TARGETS."""
     assert is_target_allowed(LOCAL_URL, frozenset()) is True
@@ -597,7 +607,7 @@ def ensure_mutation_allowed(url: str, action: str) -> None:
 - [ ] **Step 4: Запустить — убедиться, что проходит**
 
 Run: `just test-unit-k "test_db_guard and not wiring"`
-Expected: PASS, 20 тестов.
+Expected: PASS, **22 item'а** — 20 тест-функций, из которых `test_parse_extra_targets_rejects_partial_entry` параметризована ×3 (19 непараметризованных + 3).
 
 - [ ] **Step 5: Перевести три call-site на новое имя**
 
@@ -669,15 +679,19 @@ REMOTE_URL = (
 )
 ```
 
-4. В `test_cli_commands_pass_guard_when_allowed` заменить снятие барьера с `monkeypatch.setenv(ALLOW_ENV, "1")` на:
+4. **Переименовать оба cli-теста и заменить вендорную ассерцию.** `test_cli_commands_refuse_neon_target` → `test_cli_commands_refuse_unlisted_target`; `test_cli_commands_pass_guard_when_allowed` → `test_cli_commands_pass_guard_when_prod`. В первом заменить ассерцию — **новый текст ошибки слова «Neon» не содержит, без этой правки три теста красные**:
 
 ```python
-    monkeypatch.setenv("APP_ENV", "prod")
+    assert result.exit_code != 0
+    assert isinstance(result.exception, RuntimeError)
+    assert "APP_ENV=dev" in str(result.exception)
 ```
 
-и обновить докстринг: «При APP_ENV=prod guard пропускает — падение уже на уровне БД».
+Докстринг первого: «Каждая мутирующая cli-команда отказывается мутировать неразрешённую цель». Во втором заменить снятие барьера с `monkeypatch.setenv(ALLOW_ENV, "1")` на `monkeypatch.setenv("APP_ENV", "prod")`, докстринг — «При APP_ENV=prod guard пропускает — падение уже на уровне БД».
 
-5. В `test_startup_sweep_refuses_neon_target` переименовать в `test_startup_sweep_refuses_unlisted_target`, заменить `monkeypatch.delenv(ALLOW_ENV, ...)` на `monkeypatch.setenv("APP_ENV", "dev")` и `monkeypatch.setenv("DB_EXTRA_TARGETS", "")`, оставить `pytest.raises(RuntimeError, match="startup-sweep")`.
+5. В `test_startup_sweep_refuses_neon_target` переименовать в `test_startup_sweep_refuses_unlisted_target`, заменить `monkeypatch.delenv(ALLOW_ENV, ...)` на `monkeypatch.setenv("APP_ENV", "dev")` и `monkeypatch.setenv("DB_EXTRA_TARGETS", "")`, оставить `pytest.raises(RuntimeError, match="startup-sweep")`. Докстринг — «Sweep на старте не идёт в неразрешённую цель».
+
+Пройти по файлу и снять оставшиеся вендорные упоминания в докстрингах (фикстура, тела тестов) — слово «Neon» в этом файле не должно остаться нигде: ось больше не про вендора.
 
 6. **Литерал в source-check.** В `test_alembic_env_guards_before_engine` заменить:
 
@@ -718,12 +732,12 @@ def test_alembic_env_loads_dotenv_without_override():
 - [ ] **Step 8: Запустить тесты обвязки**
 
 Run: `just test-unit-k "wiring"`
-Expected: PASS, 13 тестов.
+Expected: PASS, **10 item'ов** — два параметризованных cli-теста по ×3, плюс два sweep-теста, source-check порядка и новый source-check `override`.
 
 - [ ] **Step 9: Проверить обвязку мутацией**
 
 Удалить строку `_guard("create-org")` из `backend/cli.py`, запустить `just test-unit-k "wiring"`.
-Expected: FAIL на `test_cli_commands_refuse_neon_target[create-org-args1]` с сообщением «SessionLocal() вызван — guard сработал слишком поздно».
+Expected: FAIL на `test_cli_commands_refuse_unlisted_target[create-org-args1]` (имя после переименования из Step 6) с сообщением «SessionLocal() вызван — guard сработал слишком поздно».
 Вернуть строку, перезапустить — PASS. Тесты, которые нельзя сломать, ничего не проверяют.
 
 - [ ] **Step 10: Снять грант и `is_neon_url` из conftest**
@@ -744,11 +758,32 @@ Expected: FAIL на `test_cli_commands_refuse_neon_target[create-org-args1]` с 
 
 и строку `allow_patch.undo()` в конце фикстуры `db_engine`. Разрешение теперь приходит из конфига (`DB_EXTRA_TARGETS`), а не из рантайм-мутации.
 
-**Сохранить без изменений** два барьера перед `DROP SCHEMA`:
-- равенство `test_url == prod_url` через `Settings()`;
-- требование имени БД на `_test`.
+**Барьер (a) — перевести на нормализованное сравнение.** Это и есть поглощение, заявленное спекой §5: сырое строковое равенство пропускает цели, различающиеся только query-параметрами. Заменить:
 
-К барьеру `_test` дописать комментарий:
+```python
+    prod_url = Settings().DATABASE_URL
+    if prod_url and test_url == prod_url:
+        pytest.skip(
+            "TEST_DATABASE_URL совпадает с DATABASE_URL — отказ от DROP SCHEMA на проде"
+        )
+```
+
+на:
+
+```python
+    from db_guard import normalize_target
+
+    prod_url = Settings().DATABASE_URL
+    if prod_url and normalize_target(test_url) == normalize_target(prod_url):
+        pytest.skip(
+            "TEST_DATABASE_URL и DATABASE_URL — одна цель после нормализации "
+            "(host:port/dbname); отказ от DROP SCHEMA на проде"
+        )
+```
+
+Сырое равенство пропускало бы `...\/neondb?sslmode=require` против `...\/neondb` как разные цели.
+
+**Барьер (b) — сохранить без изменений** и дописать комментарий:
 
 ```python
     # НЕ ПОГЛОЩАЕТСЯ allowlist'ом guard'а: udp_dev — легитимная цель для
@@ -774,14 +809,18 @@ db-test-migrate:
 Заменить в `AGENTS.md` строку про Neon на:
 
 ```markdown
-Рецепты с данными (`dev-backend`, `db-migrate`, `create-*`) идут в **локальную** `udp_dev`. Источник строки из `.env` — `just db_target=env <рецепт>`. Мутация не-loopback цели при `APP_ENV=dev` падает на guard (`backend/db_guard.py`) — это by design; разрешается через `DB_EXTRA_TARGETS` либо `APP_ENV=prod`.
+Рецепты с данными (`dev-backend`, `db-migrate`, `create-*`) идут в **локальную** `udp_dev`. Источник строки из `.env` — `just db_target=env <рецепт>`. Мутация не-loopback цели при `APP_ENV=dev` падает на guard (`backend/db_guard.py`) — это by design.
+
+**Прод-цель в `DB_EXTRA_TARGETS` не вносить.** Список — для долгоживущих dev-целей (Neon test-ветка, докерный `db`). Осознанная миграция прода с дев-машины — one-shot-декларацией роли: `APP_ENV=prod just db_target=env db-migrate`.
 ```
 
 и строку про миграции:
 
 ```markdown
-Применять — `just db-migrate` (локальная `udp_dev`) / `just db-test-migrate` (тестовая БД) / `just db_target=env db-migrate` (цель из `.env`, требует `DB_EXTRA_TARGETS` или `APP_ENV=prod`).
+Применять — `just db-migrate` (локальная `udp_dev`) / `just db-test-migrate` (тестовая БД) / `APP_ENV=prod just db_target=env db-migrate` (прод, осознанно и разово).
 ```
+
+**Почему именно так, а не «`DB_EXTRA_TARGETS` либо `APP_ENV=prod`»:** внесение прод-DSN в постоянный allowlist дев-машины навсегда глушит guard про прод — воспроизводится до-guard'овое состояние, ради ухода от которого вся задача и делается. One-shot-переменная действует только на одну команду.
 
 В `docs/testing.md` — заменить упоминания `ALLOW_NEON_WRITES` в разделе «Guard от записи в Neon» на новую механику. Полное переписывание раздела — Task 6; здесь достаточно снять мёртвую переменную, чтобы AC-10 закрылся.
 
@@ -922,14 +961,43 @@ def resolved_openrouter_pdf_engine(s: "Settings") -> str:
 
 - [ ] **Step 4: Добавить предупреждение в `resolved_openrouter_max_tokens`**
 
+Сделать `AI_MAX_TOKENS` опциональным — **иначе предупреждение станет ложным для каждой чистой установки.** Сейчас поле объявлено `int = 64000`, то есть fallback-ветка это дефолтный путь любого, кто не задавал ни одной из двух переменных: безусловный warning сообщал бы про переменную, которой пользователь не касался. Глушить по `!= 64000` нельзя — это в точности бага `PDF_ENGINE`, которую чинит Step 3. Правильно — зеркалировать паттерн `OPENROUTER_MAX_TOKENS`:
+
+```python
+    AI_MAX_TOKENS: int | None = None  # deprecated-алиас OPENROUTER_MAX_TOKENS; None = не задан
+```
+
 ```python
 def resolved_openrouter_max_tokens(s: "Settings") -> int:
-    """OPENROUTER_MAX_TOKENS → deprecated AI_MAX_TOKENS (warning) → 64000 (AC-1)."""
+    """OPENROUTER_MAX_TOKENS → deprecated AI_MAX_TOKENS (warning) → 64000 (AC-1).
+
+    Оба поля опциональны, поэтому «не задано» отличимо от «задано значением,
+    равным дефолту» — и предупреждение выдаётся только при реальном
+    использовании legacy-переменной, а не на чистой установке.
+    """
     if s.OPENROUTER_MAX_TOKENS is not None:
         return s.OPENROUTER_MAX_TOKENS
-    _warn_deprecated_alias_once(
-        "AI_MAX_TOKENS", "AI_MAX_TOKENS устарел — используйте OPENROUTER_MAX_TOKENS")
-    return s.AI_MAX_TOKENS
+    if s.AI_MAX_TOKENS is not None:
+        _warn_deprecated_alias_once(
+            "AI_MAX_TOKENS", "AI_MAX_TOKENS устарел — используйте OPENROUTER_MAX_TOKENS")
+        return s.AI_MAX_TOKENS
+    return 64000
+```
+
+Проверить `resolved_llm_parse_max_tokens` — он читает цепочку через `resolved_openrouter_max_tokens`, тип возврата `int` сохраняется. Существующие тесты (`test_config_llm.py`, строки с `_mk(AI_MAX_TOKENS=2000)` и `_mk(AI_MAX_TOKENS=64000)`) передают значение явно и остаются валидными.
+
+Добавить парный тест в `backend/tests/unit/test_config_llm.py`:
+
+```python
+def test_max_tokens_no_warning_when_unset(caplog):
+    """Чистая установка не предупреждает: ни одна из двух переменных не задана."""
+    import config
+
+    config._warned_deprecated_aliases.clear()
+    s = Settings(OPENROUTER_MAX_TOKENS=None, AI_MAX_TOKENS=None, SECRET_KEY="x" * 32)
+    with caplog.at_level("WARNING"):
+        assert resolved_openrouter_max_tokens(s) == 64000
+    assert "AI_MAX_TOKENS" not in caplog.text
 ```
 
 - [ ] **Step 5: Обновить устаревший комментарий у `AI_MAX_TOKENS`**
@@ -1230,11 +1298,13 @@ Expected: lint чист; `just test` зелёный со `6 skipped` (baseline `
 
 - [ ] **Step 2: Проверить fail-closed вживую**
 
+> **Сознательное исключение из Global Constraint «только `just`».** Шагу нужны три env-оверрайда на одну разовую проверку; рецепта под это нет и заводить его ради одного ручного прогона не стоит. Это единственное место в плане, где `cd backend &&` допустим.
+
 ```bash
 cd backend && APP_ENV=dev DB_EXTRA_TARGETS= DATABASE_URL="postgresql+psycopg://u:p@db.example.com:5432/prod" uv run python -m cli create-org --name "Проверка"
 ```
 
-Expected: `RuntimeError` с целью `db.example.com:5432/prod` в тексте, обоими выходами и без пароля `p` в сообщении.
+Expected: `RuntimeError` с целью `db.example.com:5432/prod` в тексте, обоими выходами и без пароля `p` в сообщении. Обратите внимание: цель не-loopback и списка нет, поэтому падение произойдёт до попытки коннекта к `db.example.com` — сети не будет вовсе.
 
 - [ ] **Step 3: Push и снятие черновика**
 
@@ -1269,7 +1339,7 @@ Expected: чеки `backend-tests` и `frontend-tests` зелёные; CodeRabbi
 | §5 текст ошибки: три требования | Task 3 (Step 1 — три теста, Step 3 — реализация) |
 | §5 инвариант единственного потребителя | Task 1 (Step 6) |
 | §5 инварианты `db-test-migrate` | Task 3 (Step 7 — регрессионный тест) |
-| §5 что поглощается, что нет | Task 3 (Step 10) |
+| §5 что поглощается (рубеж (a) → нормализованное сравнение), что нет (рубеж `_test`) | Task 3 (Step 10) |
 | §6 герметичность | Task 1 (Step 2), Task 3 (Step 1, Step 6) |
 | §6 CI без новой конфигурации | Task 7 (Step 1) |
 | §7 деплойный контракт | Task 6 (Step 1-2) |
@@ -1277,7 +1347,18 @@ Expected: чеки `backend-tests` и `frontend-tests` зелёные; CodeRabbi
 | §9 порядок работ, manual-шаг на позиции | Task 2 (между Task 1 и Task 3) |
 | AC-0…AC-12 | Task 1 (AC-0), Task 3 (AC-1…AC-8, AC-10), Task 4 (AC-9), Task 7 (AC-11, AC-12) |
 
-Пробелов не найдено.
+**Первая редакция плана заявляла «пробелов не найдено» при трёх блокирующих расхождениях** — таблица покрытия отмечала галочки по номерам секций, не сверяя содержание задачи с текстом спеки. Исправлено по ревью:
+
+| Что было не так | Правка |
+|---|---|
+| §5 обещала поглощение рубежа (a), Task 3 Step 10 предписывал «сохранить без изменений» — сырое строковое равенство и query-param-дырка оставались | Step 10 переводит рубеж на `normalize_target(...) == normalize_target(...)` |
+| Task 4 выдавал безусловный warning на fallback-ветке `AI_MAX_TOKENS`, а поле объявлено `int = 64000` — то есть предупреждал бы каждую чистую установку про переменную, которой пользователь не касался | Поле становится `int \| None = None`, warning только при `is not None`, добавлен парный тест на молчание |
+| Task 3 Step 6 не трогал `assert "Neon" in str(result.exception)` и вендорные имена cli-тестов → три красных теста, а node-id в Step 9 ломался при переименовании «по духу» | Step 6 предписывает переименование обоих тестов и замену ассерцции на `"APP_ENV=dev"`, Step 9 использует новое имя |
+| §6 требовала тест на IPv6-литерал, в плане его не было | Добавлены два теста плюс явный YAGNI-вывод: IPv6 в `DB_EXTRA_TARGETS` не выразим (разбор режет по первому двоеточию), нужный случай — только loopback |
+| AGENTS.md-текст допускал «`DB_EXTRA_TARGETS` **либо** `APP_ENV=prod`», то есть внесение прод-DSN в постоянный allowlist — это навсегда глушит guard про прод | Оставлен только one-shot путь `APP_ENV=prod just db_target=env db-migrate` плюс прямой запрет вносить прод-цель в список |
+| Счётчики ожидаемых тестов: 20 вместо 22 и 13 вместо 10 | Пересчитаны с учётом параметризации |
+| Task 1 Step 2 нёс черновую версию теста и «заменить тело на» финальную | Оставлена только финальная, `import pytest`/`pydantic` внесены в блок файла |
+| Task 7 Step 2 нарушал Global Constraint «только `just`» без оговорки | Добавлено явное «сознательное исключение» с обоснованием |
 
 **2. Placeholder scan.** Проверено: нет «TBD», «TODO», «add appropriate error handling», «similar to Task N», нет шагов без кода там, где код нужен. Все команды `just` — реальные рецепты из justfile.
 
