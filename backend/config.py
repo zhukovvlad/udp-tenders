@@ -47,9 +47,9 @@ class Settings(BaseSettings):
     # OpenRouter
     OPENROUTER_API_KEY: str = ""
     AI_MODEL: str = "anthropic/claude-sonnet-5"
-    AI_MAX_TOKENS: int = 64000  # верхний предел вывода Claude Sonnet (~64K); при PDF_ENGINE=native prompt ~10K токенов, при устаревшем mistral-ocr — ~24K на 8-страничных СФ
+    AI_MAX_TOKENS: int | None = None  # deprecated-алиас OPENROUTER_MAX_TOKENS; None = не задан
     CONFIDENCE_THRESHOLD: float = 0.7
-    PDF_ENGINE: str = "mistral-ocr"
+    PDF_ENGINE: str = "native"
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 
     # LLM-провайдер (спека 2026-07-23): deploy-time enum + namespaced-настройки.
@@ -104,14 +104,22 @@ def resolved_openrouter_model(s: "Settings") -> str:
 
 
 def resolved_openrouter_pdf_engine(s: "Settings") -> str:
-    """OPENROUTER_PDF_ENGINE → deprecated PDF_ENGINE → код-дефолт mistral-ocr."""
+    """OPENROUTER_PDF_ENGINE → deprecated PDF_ENGINE (warning) → код-дефолт native.
+
+    Дефолт native, а не mistral-ocr: последний нестабилен на СФ с 60+ строками,
+    и фактические .env давно используют native (docs/TECH_DEBT.md).
+    Предупреждение выдаётся при ЛЮБОМ использовании legacy-переменной. Прежнее
+    условие `legacy != "mistral-ocr"` глушило его ровно для значения из
+    легаси-.env, из-за чего переменная не имела пути к удалению; снятие условия
+    и смена дефолта — одно неделимое изменение, порознь они друг друга ломают.
+    """
     if s.OPENROUTER_PDF_ENGINE.strip():
         return s.OPENROUTER_PDF_ENGINE.strip()
     legacy = s.PDF_ENGINE.strip()
-    if legacy and legacy != "mistral-ocr":
+    if legacy:
         _warn_deprecated_alias_once(
             "PDF_ENGINE", "PDF_ENGINE устарел — используйте OPENROUTER_PDF_ENGINE")
-    return legacy or "mistral-ocr"
+    return legacy or "native"
 
 
 def resolved_openrouter_base_url(s: "Settings") -> str:
@@ -123,8 +131,19 @@ def resolved_openrouter_base_url(s: "Settings") -> str:
 
 
 def resolved_openrouter_max_tokens(s: "Settings") -> int:
-    """OPENROUTER_MAX_TOKENS → deprecated AI_MAX_TOKENS → 64000 (AC-1)."""
-    return s.OPENROUTER_MAX_TOKENS if s.OPENROUTER_MAX_TOKENS is not None else s.AI_MAX_TOKENS
+    """OPENROUTER_MAX_TOKENS → deprecated AI_MAX_TOKENS (warning) → 64000 (AC-1).
+
+    Оба поля опциональны, поэтому «не задано» отличимо от «задано значением,
+    равным дефолту» — и предупреждение выдаётся только при реальном
+    использовании legacy-переменной, а не на чистой установке.
+    """
+    if s.OPENROUTER_MAX_TOKENS is not None:
+        return s.OPENROUTER_MAX_TOKENS
+    if s.AI_MAX_TOKENS is not None:
+        _warn_deprecated_alias_once(
+            "AI_MAX_TOKENS", "AI_MAX_TOKENS устарел — используйте OPENROUTER_MAX_TOKENS")
+        return s.AI_MAX_TOKENS
+    return 64000
 
 
 def resolved_llm_parse_max_tokens(s: "Settings") -> int:

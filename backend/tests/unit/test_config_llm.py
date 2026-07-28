@@ -42,12 +42,33 @@ def test_model_alias_priority():
 
 
 def test_pdf_engine_alias_priority():
-    """OPENROUTER_PDF_ENGINE → PDF_ENGINE → 'mistral-ocr' (код-дефолт, §1)."""
+    """OPENROUTER_PDF_ENGINE → PDF_ENGINE → 'native' (код-дефолт, AC-9)."""
     assert resolved_openrouter_pdf_engine(_mk(OPENROUTER_PDF_ENGINE="native")) == "native"
     assert resolved_openrouter_pdf_engine(_mk(PDF_ENGINE="native")) == "native"
-    assert resolved_openrouter_pdf_engine(_mk()) == "mistral-ocr"
-    assert resolved_openrouter_pdf_engine(_mk(OPENROUTER_PDF_ENGINE="   ")) == "mistral-ocr"
-    assert resolved_openrouter_pdf_engine(_mk(PDF_ENGINE="   ")) == "mistral-ocr"
+    assert resolved_openrouter_pdf_engine(_mk()) == "native"
+    assert resolved_openrouter_pdf_engine(_mk(OPENROUTER_PDF_ENGINE="   ")) == "native"
+    assert resolved_openrouter_pdf_engine(_mk(PDF_ENGINE="   ")) == "native"
+
+
+def test_pdf_engine_default_is_native():
+    """Код-дефолт движка — native: mistral-ocr нестабилен на СФ с 60+ строками."""
+    s = Settings(OPENROUTER_PDF_ENGINE="", PDF_ENGINE="", SECRET_KEY="x" * 32)
+    assert resolved_openrouter_pdf_engine(s) == "native"
+
+
+def test_pdf_engine_legacy_warns_even_when_equal_to_default(caplog):
+    """Legacy PDF_ENGINE предупреждает всегда, даже если совпал с код-дефолтом.
+
+    Раньше условие != "mistral-ocr" глушило warning ровно для значения из
+    легаси-.env, из-за чего переменная не имела пути к удалению.
+    """
+    import config
+
+    config._warned_deprecated_aliases.clear()
+    s = Settings(OPENROUTER_PDF_ENGINE="", PDF_ENGINE="native", SECRET_KEY="x" * 32)
+    with caplog.at_level("WARNING"):
+        assert resolved_openrouter_pdf_engine(s) == "native"
+    assert "PDF_ENGINE устарел" in caplog.text
 
 
 def test_base_url_resolver():
@@ -63,6 +84,28 @@ def test_max_tokens_alias_priority():
     assert resolved_openrouter_max_tokens(_mk(OPENROUTER_MAX_TOKENS=1000)) == 1000
     assert resolved_openrouter_max_tokens(_mk(AI_MAX_TOKENS=2000)) == 2000
     assert resolved_openrouter_max_tokens(_mk(AI_MAX_TOKENS=64000)) == 64000
+
+
+def test_max_tokens_legacy_warns(caplog):
+    """Legacy AI_MAX_TOKENS предупреждает — раньше fallback был молчаливым."""
+    import config
+
+    config._warned_deprecated_aliases.clear()
+    s = Settings(OPENROUTER_MAX_TOKENS=None, AI_MAX_TOKENS=32000, SECRET_KEY="x" * 32)
+    with caplog.at_level("WARNING"):
+        assert resolved_openrouter_max_tokens(s) == 32000
+    assert "AI_MAX_TOKENS устарел" in caplog.text
+
+
+def test_max_tokens_no_warning_when_unset(caplog):
+    """Чистая установка не предупреждает: ни одна из двух переменных не задана."""
+    import config
+
+    config._warned_deprecated_aliases.clear()
+    s = Settings(OPENROUTER_MAX_TOKENS=None, AI_MAX_TOKENS=None, SECRET_KEY="x" * 32)
+    with caplog.at_level("WARNING"):
+        assert resolved_openrouter_max_tokens(s) == 64000
+    assert "AI_MAX_TOKENS" not in caplog.text
 
 
 def test_validate_openrouter_without_key_ok():
