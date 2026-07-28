@@ -144,7 +144,12 @@ def test_alembic_env_loads_dotenv_without_override():
     source = Path(main.__file__).parent / "alembic" / "env.py"
     text = source.read_text(encoding="utf-8")
     call_at = text.index("load_dotenv(")
-    call = text[call_at : text.index(")", call_at) + 1]
+    # Срез до конца строки, а не до первой ")": вызов вида
+    # load_dotenv(find_dotenv(), override=True) содержит закрывающую скобку
+    # раньше "override", и срез по первой ")" пропустил бы регресс, который
+    # тест обязан ловить.
+    line_end = text.index("\n", call_at)
+    call = text[call_at:line_end]
     assert "override" not in call, (
         f"load_dotenv вызван с override — это ломает db-test-migrate: {call}"
     )

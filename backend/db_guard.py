@@ -8,11 +8,20 @@
 записи `DB_EXTRA_TARGETS`. При `APP_ENV=prod` цели не проверяются: декларация роли
 и есть разрешение — цель прода и есть его `DATABASE_URL`.
 
+ВАЖНО про loopback: правило «любая база на loopback мутируема без allowlist»
+держится, только пока loopback — действительно локальный процесс. SSH-туннель
+или `kubectl port-forward`, пробрасывающие удалённую БД на локальный порт,
+делают её неотличимой от настоящего localhost — guard её пропустит без
+объявления в DB_EXTRA_TARGETS. Осознанный компромисс дизайна (loopback как
+источник доверия), а не дыра в проверке; при таком паттерне работы это стоит
+держать в уме на ревью операций.
+
 Спека: docs/superpowers/specs/2026-07-27-deploy-env-contract-design.md
 """
 from urllib.parse import urlsplit
 
 DEFAULT_PG_PORT = 5432
+MAX_PG_PORT = 65535
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 UNKNOWN_HOST = "<нераспознанный хост>"
 
@@ -40,6 +49,10 @@ def normalize_target(url: str) -> str:
         parts = urlsplit(url or "")
         host = (parts.hostname or "").lower().rstrip(".") or UNKNOWN_HOST
         port = parts.port or DEFAULT_PG_PORT
+        # dbname сравнивается литералом: без unquote() и без lower() —
+        # "/db%2Dname" и "/db-name" считаются разными целями. Это fail-closed
+        # в безопасную сторону: лишняя запись в allowlist не совпадёт с
+        # настоящей целью, а не наоборот.
         dbname = (parts.path or "").lstrip("/")
     except ValueError:
         return f"{UNKNOWN_HOST}:{DEFAULT_PG_PORT}/"
@@ -49,12 +62,22 @@ def normalize_target(url: str) -> str:
 def parse_extra_targets(raw: str) -> frozenset[str]:
     """Разобрать `DB_EXTRA_TARGETS` — список `host:port/dbname` через запятую.
 
-    Каждая запись обязана быть полной тройкой. Запись без порта или без имени БД
-    незаметно расширила бы allowlist до уровня хоста, что противоречит выбору
-    единицы сравнения, поэтому это ошибка, а не «любая база на этом хосте».
+    Каждая запись обязана быть полной тройкой: хост, порт в диапазоне
+    0-65535 и имя БД. Порт проверяется через `isdigit() and isascii()`, а не
+    только `isdigit()`: юникодные цифры вроде "²" проходят `str.isdigit()`, но
+    `int()` их не принимает — без явной проверки ASCII отвергнутая запись
+    падала бы с чужой трассой `int()` вместо предсказуемого `ValueError` этой
+    функции. Хост `UNKNOWN_HOST` отдельно запрещён как запись: это маркер
+    нераспознанного DSN, который печатает `ensure_mutation_allowed` в тексте
+    ошибки, и его copy-paste в DB_EXTRA_TARGETS разрешил бы мутацию для ЛЮБОГО
+    хостless или неразбираемого DSN с тем же портом и именем БД. Запись без
+    порта или без имени БД незаметно расширила бы allowlist до уровня хоста,
+    что противоречит выбору единицы сравнения, поэтому это тоже ошибка, а не
+    «любая база на этом хосте».
 
     Raises:
-        ValueError: запись не имеет вида `host:port/dbname`.
+        ValueError: запись не имеет вида `host:port/dbname`, порт вне
+            диапазона 0-65535 или хост равен `UNKNOWN_HOST`.
     """
     targets = set()
     for chunk in (raw or "").split(","):
@@ -63,11 +86,13 @@ def parse_extra_targets(raw: str) -> frozenset[str]:
             continue
         host, _, tail = entry.partition(":")
         port, _, dbname = tail.partition("/")
-        if not host or not port.isdigit() or not dbname:
+        host = host.lower().rstrip(".")
+        valid_port = port.isdigit() and port.isascii() and int(port) <= MAX_PG_PORT
+        if not host or host == UNKNOWN_HOST or not valid_port or not dbname:
             raise ValueError(
                 f"DB_EXTRA_TARGETS: запись '{entry}' должна иметь вид host:port/dbname"
             )
-        targets.add(f"{host.lower().rstrip('.')}:{int(port)}/{dbname}")
+        targets.add(f"{host}:{int(port)}/{dbname}")
     return frozenset(targets)
 
 
@@ -90,6 +115,10 @@ def ensure_mutation_allowed(url: str, action: str) -> None:
     Raises:
         RuntimeError: `APP_ENV=dev`, цель не loopback и отсутствует в
             `DB_EXTRA_TARGETS`.
+        ValueError: `DB_EXTRA_TARGETS` содержит запись не вида
+            `host:port/dbname` — пробрасывается из `parse_extra_targets` как
+            есть, без оборачивания в `RuntimeError`: это ошибка конфигурации
+            (опечатка в `backend/.env`), а не штатный отказ guard'а.
     """
     # Импорт внутри функции: db_guard остаётся импортируемым без конфига, а
     # Settings() собирается на момент вызова — тестовые monkeypatch действуют.

@@ -5,14 +5,14 @@
 ## Стек
 Backend: Python 3.12, FastAPI, SQLAlchemy (sync), Alembic, pydantic-settings; auth — pyjwt HS256 + argon2, httpOnly cookies, CSRF. Зависимости — uv (pyproject.toml + uv.lock).
 Frontend: React 19, TS (strict), Vite, shadcn/ui, Tailwind v4, Recharts, TanStack Query v5.
-PostgreSQL: dev — локальный кластер (`udp_dev` на :5459), прод — Neon; цель переключается `db_target` (дефолт `local`), запись в Neon защищена `backend/db_guard.py`. MinIO (S3) · LLM через абстракцию провайдера (`backend/llm.py`): deploy-time `LLM_PROVIDER` (дефолт `openrouter` — Claude Vision, движок `native`); домен зовёт `llm.get_provider().vision_completion(...)`, транспорт живёт в `llm_openrouter.py`. pypdfium2 + pikepdf + Pillow — raster-коррекция ориентации страниц (deskew).
+PostgreSQL: dev — локальный кластер (`udp_dev` на :5459), прод — Neon; цель переключается `db_target` (дефолт `local`); мутация не-loopback цели защищена `backend/db_guard.py` (ключ — роль `APP_ENV`, не вендор БД). MinIO (S3) · LLM через абстракцию провайдера (`backend/llm.py`): deploy-time `LLM_PROVIDER` (дефолт `openrouter` — Claude Vision, движок `native`); домен зовёт `llm.get_provider().vision_completion(...)`, транспорт живёт в `llm_openrouter.py`. pypdfium2 + pikepdf + Pillow — raster-коррекция ориентации страниц (deskew).
 
 ## Команды — только через `just`, никогда `cd backend && ...`
 `install` · `dev-backend` · `dev-frontend` · `test` · `test-backend-unit` · `test-backend-integration` · `test-int-local` (integration на локальном Postgres, ~6.5x быстрее — см. `docs/testing.md`) · `test-backend-local` · `test-frontend` · `lint` · `typecheck-frontend` · `db-migrate` · `db-dev-init` (создать локальную `udp_dev`) · `db-web` (веб-просмотр таблиц) · `create-superuser` · `create-org` · `create-user`
 
 Рецепты с данными (`dev-backend`, `db-migrate`, `create-*`) идут в **локальную** `udp_dev`. Источник строки из `.env` — `just db_target=env <рецепт>`. Мутация не-loopback цели при `APP_ENV=dev` падает на guard (`backend/db_guard.py`) — это by design.
 
-**Прод-цель в `DB_EXTRA_TARGETS` не вносить.** Список — для долгоживущих dev-целей (Neon test-ветка, докерный `db`). Осознанная миграция прода с дев-машины — one-shot-декларацией роли: `APP_ENV=prod just db_target=env db-migrate`.
+**Прод-цель в `DB_EXTRA_TARGETS` не вносить.** Список — для долгоживущих не-loopback dev-целей (например, докерный `db` на отдельном хосте); сейчас он пуст. Осознанная миграция прода с дев-машины — one-shot-декларацией роли: `APP_ENV=prod just db_target=env db-migrate`.
 
 Shell (Windows): `& "C:\Program Files\Git\bin\bash.exe" -c "cd /c/Users/zhukov_v/Projects/UDP && just <cmd> 2>&1"`
 

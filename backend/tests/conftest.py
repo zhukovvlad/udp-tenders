@@ -149,7 +149,7 @@ def db_engine() -> Iterator:
     # DATABASE_URL нет, поэтому os.getenv локально вернул бы None и проверка была бы
     # мёртвой. Settings читает backend/.env — там прод-строка и лежит.
     from config import Settings
-    from db_guard import normalize_target
+    from db_guard import ensure_mutation_allowed, normalize_target
 
     prod_url = Settings().DATABASE_URL
     if prod_url and normalize_target(test_url) == normalize_target(prod_url):
@@ -178,6 +178,18 @@ def db_engine() -> Iterator:
     cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
     cfg.set_main_option("sqlalchemy.url", test_url)
+
+    # Членство в allowlist guard'а — необходимое, но НЕ достаточное условие для
+    # DROP SCHEMA: guard знает только "можно мутировать", а не "можно
+    # разрушить схему" (это выражают независимые барьеры (a)/(b) выше — barrier
+    # (b) обязан оставаться первым и самостоятельным, чтобы неразрешённый
+    # neondb-style URL, не оканчивающийся на "_test", по-прежнему уходил в
+    # pytest.skip раньше, чем этот вызов вообще увидит цель). Guard здесь
+    # закрывает случай, которого барьеры не ловят: удалённая "_test"-база,
+    # которая не loopback и не в DB_EXTRA_TARGETS. Без этого вызова её схему
+    # дропнули бы безусловно, и только потом упал бы guard внутри
+    # command.upgrade (то есть DROP SCHEMA уже случился бы).
+    ensure_mutation_allowed(test_url, "conftest DROP SCHEMA")
 
     # Сбрасываем схему перед накатом — гарантируем чистый старт
     with engine.begin() as conn:

@@ -73,6 +73,20 @@ def test_safe_host_hides_credentials():
     assert "test_owner" not in host
 
 
+def test_safe_host_survives_malformed_url():
+    """Битый DSN не роняет извлечение хоста (urlsplit кидает ValueError).
+
+    is_target_allowed полагается на то, что safe_host никогда не бросает —
+    поведение load-bearing, а до этого теста было ничем не покрыто.
+    """
+    assert safe_host("postgresql://u@[bad:ipv6/db") == ""
+
+
+def test_safe_host_handles_empty():
+    """Пустой DSN не роняет извлечение хоста и не даёт ложный loopback."""
+    assert safe_host("") == ""
+
+
 def test_parse_extra_targets_empty():
     """Пустая строка — пустой список."""
     assert parse_extra_targets("") == frozenset()
@@ -91,6 +105,30 @@ def test_parse_extra_targets_rejects_partial_entry(entry):
     """Неполная тройка — ошибка: иначе allowlist расширился бы до уровня хоста."""
     with pytest.raises(ValueError, match="host:port/dbname"):
         parse_extra_targets(entry)
+
+
+@pytest.mark.parametrize("entry", ["h.example.com:²/db", "h.example.com:99999999/db"])
+def test_parse_extra_targets_rejects_invalid_port(entry):
+    """Юникодная цифра в порте и порт вне 0-65535 — та же ошибка формата.
+
+    '²'.isdigit() is True, но int('²') бросает ValueError с чужим
+    текстом — без явной проверки isascii() отвергнутая запись падала бы не
+    предсказуемым сообщением этой функции, а трассой int().
+    """
+    with pytest.raises(ValueError, match="host:port/dbname"):
+        parse_extra_targets(entry)
+
+
+def test_parse_extra_targets_rejects_unknown_host_marker():
+    """UNKNOWN_HOST как запись — ошибка, а не заготовка allowlist на все битые DSN.
+
+    UNKNOWN_HOST — маркер нераспознанного хоста в тексте ошибки
+    ensure_mutation_allowed; будь он разрешённым host в DB_EXTRA_TARGETS,
+    copy-paste из ошибки разрешил бы мутацию для любого хостless/битого DSN
+    с тем же портом и именем БД.
+    """
+    with pytest.raises(ValueError, match="host:port/dbname"):
+        parse_extra_targets(f"{UNKNOWN_HOST}:5432/db")
 
 
 def test_normalize_target_handles_ipv6_literal():
@@ -142,6 +180,46 @@ def test_prod_skips_target_check(monkeypatch):
     """При APP_ENV=prod цели не проверяются — роль и есть разрешение."""
     monkeypatch.setenv("APP_ENV", "prod")
     ensure_mutation_allowed(REMOTE_URL, "alembic")
+
+
+def test_dev_allows_target_from_env_list(monkeypatch):
+    """DB_EXTRA_TARGETS из окружения действительно снимает запрет.
+
+    Без этого теста ensure_mutation_allowed мог бы игнорировать
+    settings.DB_EXTRA_TARGETS целиком (например, звать
+    parse_extra_targets("") вместо parse_extra_targets(s.DB_EXTRA_TARGETS)) —
+    остальные 23 теста модуля остались бы зелёными, а единственный
+    пользовательский escape hatch был бы мёртв.
+    """
+    monkeypatch.setenv("DB_EXTRA_TARGETS", normalize_target(REMOTE_URL))
+    ensure_mutation_allowed(REMOTE_URL, "alembic")
+
+
+def test_error_lists_configured_targets(monkeypatch):
+    """При непустом DB_EXTRA_TARGETS текст ошибки перечисляет его, а не «пусто».
+
+    Покрывает ветку `", ".join(sorted(extra))` — до этого теста исполнялась
+    только ветка "сейчас пусто".
+    """
+    other = "other.example.com:5432/otherdb"
+    monkeypatch.setenv("DB_EXTRA_TARGETS", other)
+    with pytest.raises(RuntimeError) as exc:
+        ensure_mutation_allowed(REMOTE_URL, "alembic")
+    message = str(exc.value)
+    assert other in message
+    assert "сейчас пусто" not in message
+
+
+def test_ensure_mutation_allowed_propagates_malformed_extra_targets(monkeypatch):
+    """Неполная запись в DB_EXTRA_TARGETS даёт ValueError, а не RuntimeError.
+
+    ensure_mutation_allowed сам формат не проверяет — это ошибка конфигурации
+    (опечатка в backend/.env), которая обязана падать иначе, чем штатный отказ
+    guard'а, а не быть проглочена под RuntimeError на стартовом пути.
+    """
+    monkeypatch.setenv("DB_EXTRA_TARGETS", "h.example.com")
+    with pytest.raises(ValueError, match="host:port/dbname"):
+        ensure_mutation_allowed(REMOTE_URL, "alembic")
 
 
 def test_error_names_both_exits():
