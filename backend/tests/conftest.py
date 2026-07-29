@@ -149,22 +149,18 @@ def db_engine() -> Iterator:
     # DATABASE_URL нет, поэтому os.getenv локально вернул бы None и проверка была бы
     # мёртвой. Settings читает backend/.env — там прод-строка и лежит.
     from config import Settings
-    from db_guard import _resolve_connect_target, ensure_mutation_allowed, normalize_target
+    from db_guard import _resolve_connect_target, ensure_mutation_allowed
 
     # Предусловие для барьера (a): если TEST_DATABASE_URL нельзя доверенно
     # резолвить (окружение процесса несёт PGHOSTADDR/PGSERVICE, невалидный
     # PGPORT, либо сам DSN не разбирается/несёт цель-определяющий query-ключ),
-    # normalize_target(test_url) даёт UNKNOWN_HOST-форму. Та же форма получится
-    # и для normalize_target(prod_url) — `_resolve_connect_target` первым делом
-    # проверяет PGHOSTADDR/PGSERVICE безусловно, до разбора конкретного DSN, то
-    # есть отравленное окружение обесценивает резолв ОБОИХ URL одинаково.
-    # Барьер (a) ниже сравнивает именно нормализованные строки — с двумя
-    # одинаковыми UNKNOWN_HOST-формами он решил бы "цели совпадают" и молча
-    # ушёл в pytest.skip: безопасно для БД, но незаметно съедает интеграционный
-    # слой и портит инвариант "ровно 6 пропущенных". На деструктивном пути
-    # (DROP SCHEMA) правильный ответ — громкий отказ, а не тихий skip; барьеры
-    # (a) и (b) ниже не ослаблены — это ПРЕДварительная проверка их предпосылки.
-    if _resolve_connect_target(test_url) is None:
+    # нет смысла вообще сравнивать его с прод-целью — барьер (a) ниже сначала
+    # обязан иметь доверенную тройку с ЭТОЙ стороны. На деструктивном пути
+    # (DROP SCHEMA) правильный ответ на "не знаем цель" — громкий отказ, а не
+    # тихий skip; барьеры (a) и (b) ниже не ослаблены — это ПРЕДварительная
+    # проверка их предпосылки.
+    test_target = _resolve_connect_target(test_url)
+    if test_target is None:
         raise RuntimeError(
             "TEST_DATABASE_URL не удалось однозначно определить: либо DSN сам по "
             "себе не разбирается или несёт host/hostaddr/port/dbname/service в "
@@ -174,12 +170,39 @@ def db_engine() -> Iterator:
             "или окружение процесса и повторите прогон."
         )
 
+    # Барьер (a): сравниваем РЕЗОЛВЛЕННЫЕ тройки (host, port, dbname), а не
+    # normalize_target()-строки. Раньше сравнивались строки — обе стороны при
+    # нераспознанной цели давали один и тот же UNKNOWN_HOST-сентинел, и общий
+    # сентинел маскировал ДВЕ разные проблемы сразу: (1) если поражены ОБЕ
+    # стороны одинаково (например, PGHOSTADDR/PGSERVICE — они проверяются
+    # безусловно, до разбора конкретного DSN), сентинелы совпадали, и барьер
+    # решал "цели одинаковы" — случайно safe, но по факту не проверял ничего;
+    # (2) если поражена ТОЛЬКО прод-сторона (например, DATABASE_URL сам несёт
+    # `?host=`/`?dbname=`/`service=`), test_target — реальная тройка,
+    # prod-сторона — сентинел, строки не совпадают НИКОГДА — и DROP SCHEMA
+    # уходил вперёд, даже если реальная прод-цель (та, что не разобралась)
+    # была той же базой, что и test_url. Предусловие выше уже гарантирует
+    # test_target резолвленным, поэтому именно (2) стало систематическим
+    # риском: раньше могло случайно повезти через (1), теперь — нет. Сравнение
+    # кортежей вместо строк убирает сентинел из сравнения целиком — оба
+    # failure mode закрываются одним и тем же способом.
     prod_url = Settings().DATABASE_URL
-    if prod_url and normalize_target(test_url) == normalize_target(prod_url):
-        pytest.skip(
-            "TEST_DATABASE_URL и DATABASE_URL — одна цель после нормализации "
-            "(host:port/dbname); отказ от DROP SCHEMA на проде"
-        )
+    if prod_url:
+        prod_target = _resolve_connect_target(prod_url)
+        if prod_target is None:
+            raise RuntimeError(
+                "DATABASE_URL не удалось однозначно определить: либо DSN сам по "
+                "себе не разбирается или несёт host/hostaddr/port/dbname/service в "
+                "query-строке, либо в окружении процесса задан PGHOSTADDR/PGSERVICE, "
+                "либо PGPORT вне 0-65535. Барьер (a) не может доказать, что "
+                "TEST_DATABASE_URL — не прод, если прод-цель не резолвится — "
+                "почините DATABASE_URL или окружение процесса и повторите прогон."
+            )
+        if test_target == prod_target:
+            pytest.skip(
+                "TEST_DATABASE_URL и DATABASE_URL — одна цель после резолва "
+                "(host, port, dbname); отказ от DROP SCHEMA на проде"
+            )
 
     # Второй рубеж: udp_dev и udp_test различаются четырьмя символами, а цена
     # опечатки — DROP SCHEMA на dev-базе. Требуем, чтобы имя БД было тестовым.

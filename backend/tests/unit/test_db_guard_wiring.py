@@ -187,3 +187,50 @@ def test_db_engine_fixture_fails_loudly_on_unresolvable_target(monkeypatch):
     gen = conftest_module.db_engine.__wrapped__()
     with pytest.raises(RuntimeError, match="TEST_DATABASE_URL"):
         next(gen)
+
+
+def test_db_engine_fails_loudly_when_prod_unresolvable_and_same_target(monkeypatch):
+    """`db_engine` падает громко, а не пропускает DROP SCHEMA, когда прод скрыт за query-ключом.
+
+    P1 внешнего ревью: предыдущий раунд сделал `test_target` обязательно
+    резолвленным (предусловие выше), но `prod_url` оставался непроверенным —
+    сравнение шло по СТРОКАМ `normalize_target()`. Если ТОЛЬКО прод-сторона
+    несёт цель-определяющий query-ключ (`?dbname=` в этом тесте), она даёт
+    `UNKNOWN_HOST`-строку, test-сторона — реальную; строки НИКОГДА не
+    совпадают, и `pytest.skip` не срабатывает — DROP SCHEMA ушёл бы вперёд,
+    даже если реальная (нерезолвленная) прод-цель была той же базой, что и
+    `TEST_DATABASE_URL` (в этом тесте буквально она же, `localhost:5459/udp_test`,
+    только с довеском `?dbname=udp_test`, который guard обязан трактовать как
+    "цель неизвестна", а не "то же самое имя БД").
+
+    Фикс сравнивает РЕЗОЛВЛЕННЫЕ тройки, а не строки, и добавляет отдельную
+    проверку резолвленности прод-стороны — при её отказе `db_engine` обязан
+    упасть `RuntimeError` ДО `DROP SCHEMA`, а не молча продолжить.
+    """
+    monkeypatch.setenv("TEST_DATABASE_URL", "postgresql+psycopg://postgres@localhost:5459/udp_test")
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://postgres@localhost:5459/udp_test?dbname=udp_test",
+    )
+    gen = conftest_module.db_engine.__wrapped__()
+    with pytest.raises(RuntimeError, match="DATABASE_URL"):
+        next(gen)
+
+
+def test_db_engine_fails_loudly_when_prod_unresolvable_and_different_target(monkeypatch):
+    """Нераспознанная прод-цель — всегда громкий отказ, а не только при совпадении targets.
+
+    Пиннит именно это поведение (не «падает только когда цели совпали»):
+    DATABASE_URL с query-ключом целится по виду совсем на другую БД
+    (`otherdb`), но раз прод-цель нельзя доверенно резолвить, guard не может
+    ДОКАЗАТЬ, что она отличается от TEST_DATABASE_URL — поэтому отказ такой
+    же громкий, как и в тесте на совпадающую цель выше.
+    """
+    monkeypatch.setenv("TEST_DATABASE_URL", "postgresql+psycopg://postgres@localhost:5459/udp_test")
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://postgres@remote.example.com:5432/otherdb?dbname=otherdb",
+    )
+    gen = conftest_module.db_engine.__wrapped__()
+    with pytest.raises(RuntimeError, match="DATABASE_URL"):
+        next(gen)
