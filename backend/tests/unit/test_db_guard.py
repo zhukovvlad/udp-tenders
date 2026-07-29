@@ -30,14 +30,21 @@ def _hermetic_guard_env(monkeypatch):
     пустой» был бы зелёным в CI (файла нет) и красным у каждого, кто инструкцию
     выполнил. Process env бьёт env_file — тем же механизмом, что и пин.
 
-    `PGPORT` тоже снимается: `_resolve_connect_target` читает его напрямую из
-    `os.environ` (см. `_port_from_env_or_default`), а не через `Settings()`, —
-    без явного `delenv` тесты порт-дефолта зависели бы от того, задан ли
-    `PGPORT` в шелле разработчика/CI-раннера.
+    `PGPORT`/`PGHOSTADDR`/`PGSERVICE`/`PGHOST`/`PGDATABASE` тоже снимаются:
+    `_resolve_connect_target` читает их напрямую из `os.environ`, а не через
+    `Settings()` — без явного `delenv` поведение тестов зависело бы от того,
+    что задано в шелле разработчика/CI-раннера. `PGHOSTADDR`/`PGSERVICE`
+    особенно: они безусловно превращают ЛЮБОЙ DSN в нераспознанную цель (см.
+    `_resolve_connect_target`), включая loopback-DSN, на которых держится
+    большинство остальных тестов этого файла.
     """
     monkeypatch.setenv("APP_ENV", "dev")
     monkeypatch.setenv("DB_EXTRA_TARGETS", "")
     monkeypatch.delenv("PGPORT", raising=False)
+    monkeypatch.delenv("PGHOSTADDR", raising=False)
+    monkeypatch.delenv("PGSERVICE", raising=False)
+    monkeypatch.delenv("PGHOST", raising=False)
+    monkeypatch.delenv("PGDATABASE", raising=False)
 
 
 def test_normalize_target_builds_triple():
@@ -565,3 +572,169 @@ def test_resolve_connect_target_fallback_denies_invalid_pgport(monkeypatch):
     """Fallback-ветка (`postgres://`) тоже не подставляет 5432 молча при невалидном `PGPORT`."""
     monkeypatch.setenv("PGPORT", "not-a-port")
     assert _resolve_connect_target("postgres://u@h.example.com/dev") is None
+
+
+# --- Регресс: $PGHOSTADDR/$PGSERVICE — дыра ниже уровня create_connect_args ---
+#
+# Найдено внешним ревью, воспроизведено эмпирически: SQLAlchemy вообще не читает
+# PGHOSTADDR/PGSERVICE при сборке connect-args — их подставляет только сам libpq
+# в момент реального psycopg.connect(...). С PGHOSTADDR=10.1.2.3 и PGSERVICE=prod
+# в окружении процесса loopback-DSN `postgresql+psycopg://u@localhost:5459/udp_test`
+# по-прежнему нормализовался в 'localhost:5459/udp_test' с allowed=True, хотя
+# libpq реально уходит на hostaddr (или на host/port/dbname из pg_service.conf).
+# Симметрично query-ключам hostaddr/service: цель считается нераспознанной
+# безусловно, а не резолвится «как получится».
+
+
+def test_pghostaddr_denies_loopback_dsn(monkeypatch):
+    """`PGHOSTADDR` в окружении делает loopback-DSN нераспознанной целью — exploit shape.
+
+    Тест намеренно берёт loopback DSN, а не удалённый: на удалённом DSN
+    is_target_allowed и так был бы False (не loopback, allowlist пуст), и тест
+    ничего не доказал бы даже при незакрытой дыре. Именно loopback-DSN — та
+    форма, где старая реализация (safe_host на netloc) ошибочно давала True.
+    """
+    monkeypatch.setenv("PGHOSTADDR", "10.1.2.3")
+    url = "postgresql+psycopg://u:p@localhost:5459/udp_test"
+    assert _resolve_connect_target(url) is None
+    assert is_target_allowed(url, frozenset()) is False
+    assert normalize_target(url).startswith(UNKNOWN_HOST)
+
+
+def test_pgservice_denies_loopback_dsn(monkeypatch):
+    """`PGSERVICE` в окружении делает loopback-DSN нераспознанной целью — та же дыра."""
+    monkeypatch.setenv("PGSERVICE", "prod")
+    url = "postgresql+psycopg://u:p@localhost:5459/udp_test"
+    assert _resolve_connect_target(url) is None
+    assert is_target_allowed(url, frozenset()) is False
+    assert normalize_target(url).startswith(UNKNOWN_HOST)
+
+
+def test_pghostaddr_and_pgservice_unset_leaves_loopback_allowed(monkeypatch):
+    """Обе переменные не заданы → поведение как сегодня, loopback разрешён."""
+    monkeypatch.delenv("PGHOSTADDR", raising=False)
+    monkeypatch.delenv("PGSERVICE", raising=False)
+    url = "postgresql+psycopg://u:p@localhost:5459/udp_test"
+    assert is_target_allowed(url, frozenset()) is True
+    assert normalize_target(url) == "localhost:5459/udp_test"
+
+
+def test_pghostaddr_denies_on_fallback_path_too(monkeypatch):
+    """`PGHOSTADDR` тоже проверяется до ветвления primary/fallback (`postgres://`)."""
+    monkeypatch.setenv("PGHOSTADDR", "10.1.2.3")
+    assert _resolve_connect_target("postgres://u:p@localhost:5459/udp_test") is None
+
+
+def test_pgservice_denies_on_fallback_path_too(monkeypatch):
+    """`PGSERVICE` тоже проверяется до ветвления primary/fallback (`postgres://`)."""
+    monkeypatch.setenv("PGSERVICE", "prod")
+    assert _resolve_connect_target("postgres://u:p@localhost:5459/udp_test") is None
+
+
+def test_ensure_mutation_allowed_names_pghostaddr_in_error(monkeypatch):
+    """Ошибка называет `PGHOSTADDR` по имени, а не только «нераспознанная цель».
+
+    Пользователь с явно loopback-выглядящим DSN иначе не поймёт, что причина —
+    в его собственном шелле, а не в DSN: DSN тут ни при чём.
+    """
+    monkeypatch.setenv("PGHOSTADDR", "10.1.2.3")
+    url = "postgresql+psycopg://u:p@localhost:5459/udp_test"
+    with pytest.raises(RuntimeError) as exc:
+        ensure_mutation_allowed(url, "alembic")
+    message = str(exc.value)
+    assert "PGHOSTADDR" in message
+    assert "PGSERVICE" not in message
+
+
+def test_ensure_mutation_allowed_names_pgservice_in_error(monkeypatch):
+    """Ошибка называет `PGSERVICE` по имени."""
+    monkeypatch.setenv("PGSERVICE", "prod")
+    url = "postgresql+psycopg://u:p@localhost:5459/udp_test"
+    with pytest.raises(RuntimeError) as exc:
+        ensure_mutation_allowed(url, "alembic")
+    message = str(exc.value)
+    assert "PGSERVICE" in message
+    assert "PGHOSTADDR" not in message
+
+
+# --- PGHOST/PGDATABASE — повторная проверка симметрии по запросу ревью -------
+#
+# Гипотеза (подтверждена эмпирически, не только рассуждением): SQLAlchemy не
+# читает ни PGHOST, ни PGDATABASE при сборке connect-args/make_url — их (как и
+# PGHOSTADDR/PGSERVICE) подставляет только сам libpq в реальном psycopg.connect().
+# Разница с PGHOSTADDR/PGSERVICE: PGHOST/PGDATABASE — это ДЕФОЛТЫ для
+# ОТСУТСТВУЮЩЕГО поля, а не отдельный параметр, замещающий явно заданное. DSN,
+# где поле присутствует явно, полностью игнорирует одноимённую переменную
+# окружения — резолв не читает os.environ вообще для host/dbname. Оба случая
+# (поле отсутствует и поле присутствует) закрыты тестами ниже.
+
+
+def test_pghost_ignored_when_dsn_has_explicit_host(monkeypatch):
+    """`PGHOST` не подменяет явный host в DSN — SQLAlchemy его не читает."""
+    monkeypatch.setenv("PGHOST", "evil.example.com")
+    url = "postgresql+psycopg://u@localhost:5459/udp_dev"
+    assert _resolve_connect_target(url) == ("localhost", 5459, "udp_dev")
+    assert is_target_allowed(url, frozenset()) is True
+
+
+def test_pghost_does_not_fill_hostless_dsn_either(monkeypatch):
+    """`PGHOST` не используется и для hostless DSN — остаётся `UNKNOWN_HOST`, не evil-хост.
+
+    Симметрия с PGHOSTADDR специально проверена и на этой форме: если бы
+    SQLAlchemy когда-нибудь стал читать PGHOST как дефолт для отсутствующего
+    host (сегодня — нет), это было бы новой дырой того же класса.
+    """
+    monkeypatch.setenv("PGHOST", "evil.example.com")
+    url = "postgresql+psycopg:///somedb"
+    resolved = _resolve_connect_target(url)
+    assert resolved == ("", 5432, "somedb")
+    assert normalize_target(url).startswith(UNKNOWN_HOST)
+    assert is_target_allowed(url, frozenset()) is False
+
+
+def test_pgdatabase_ignored_when_dsn_has_explicit_dbname(monkeypatch):
+    """`PGDATABASE` не подменяет явный dbname в DSN — SQLAlchemy его не читает."""
+    monkeypatch.setenv("PGDATABASE", "evildb")
+    url = "postgresql+psycopg://u@localhost:5459/udp_dev"
+    assert _resolve_connect_target(url) == ("localhost", 5459, "udp_dev")
+    assert is_target_allowed(url, frozenset()) is True
+
+
+def test_pgdatabase_does_not_fill_dbname_less_dsn_either(monkeypatch):
+    """`PGDATABASE` не используется и для dbname-less DSN — тройка не совпадает ни с чем."""
+    monkeypatch.setenv("PGDATABASE", "evildb")
+    url = "postgresql+psycopg://u@remote.example.com:5432/"
+    resolved = _resolve_connect_target(url)
+    assert resolved == ("remote.example.com", 5432, "")
+    result = normalize_target(url)
+    assert result == "remote.example.com:5432/"
+    with pytest.raises(ValueError):
+        # Форму host:port/ (пустой dbname) parse_extra_targets в принципе не
+        # может выдать как валидную запись — даже если её вписать в
+        # DB_EXTRA_TARGETS руками, старт упадёт на валидации.
+        parse_extra_targets(result)
+
+
+def test_other_pg_env_vars_do_not_affect_target(monkeypatch):
+    """Опционные (не цель-определяющие) `PG*`-переменные не меняют резолвленную тройку.
+
+    По запросу ревью — обзор остальных стандартных libpq-переменных: PGSSLMODE,
+    PGCONNECT_TIMEOUT, PGAPPNAME, PGOPTIONS, PGPASSFILE, PGSERVICEFILE (без
+    PGSERVICE эта переменная ничего не активирует — сервис-файл читается только
+    когда указано ИМЯ сервиса). Все они влияют на КАК подключаться
+    (опции сессии/аутентификация/поиск файлов), а не КУДА — та же категория, что
+    query-параметры вроде sslmode/channel_binding, уже не отбрасываемые как
+    цель-определяющие.
+    """
+    for name, value in (
+        ("PGSSLMODE", "require"),
+        ("PGCONNECT_TIMEOUT", "5"),
+        ("PGAPPNAME", "myapp"),
+        ("PGOPTIONS", "-c foo=bar"),
+        ("PGPASSFILE", "/tmp/.pgpass"),
+        ("PGSERVICEFILE", "/tmp/pg_service.conf"),
+    ):
+        monkeypatch.setenv(name, value)
+    url = "postgresql+psycopg://u@localhost:5459/udp_dev"
+    assert _resolve_connect_target(url) == ("localhost", 5459, "udp_dev")
+    assert is_target_allowed(url, frozenset()) is True

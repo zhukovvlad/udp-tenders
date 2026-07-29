@@ -12,6 +12,7 @@ from click.testing import CliRunner
 
 import cli
 import main
+import tests.conftest as conftest_module
 
 REMOTE_URL = (
     "postgresql+psycopg://test_owner:secret-pw@"
@@ -25,14 +26,18 @@ def _unlisted_target_in_dev(monkeypatch):
 
     DB_EXTRA_TARGETS пиним явно: env_file абсолютный, и в реальном backend/.env
     список может быть непустым — иначе тест был бы зелёным в CI и красным на
-    машине разработчика. `PGPORT` тоже снимается: REMOTE_URL без явного порта,
-    и невалидный `PGPORT` в шелле поменял бы сообщение об ошибке (нераспознанная
-    цель вместо обычного отказа dev-целью) — тесты ниже проверяют текст именно
-    второго вида.
+    машине разработчика. `PGPORT`/`PGHOSTADDR`/`PGSERVICE`/`PGHOST`/`PGDATABASE`
+    тоже снимаются: REMOTE_URL без явного порта, и любая из этих переменных в
+    шелле поменяла бы сообщение об ошибке (нераспознанная цель вместо обычного
+    отказа dev-целью) — тесты ниже проверяют текст именно второго вида.
     """
     monkeypatch.setenv("APP_ENV", "dev")
     monkeypatch.setenv("DB_EXTRA_TARGETS", "")
     monkeypatch.delenv("PGPORT", raising=False)
+    monkeypatch.delenv("PGHOSTADDR", raising=False)
+    monkeypatch.delenv("PGSERVICE", raising=False)
+    monkeypatch.delenv("PGHOST", raising=False)
+    monkeypatch.delenv("PGDATABASE", raising=False)
     monkeypatch.setattr(cli.settings, "DATABASE_URL", REMOTE_URL, raising=False)
 
 
@@ -157,3 +162,28 @@ def test_alembic_env_loads_dotenv_without_override():
     assert "override" not in call, (
         f"load_dotenv вызван с override — это ломает db-test-migrate: {call}"
     )
+
+
+def test_db_engine_fixture_fails_loudly_on_unresolvable_target(monkeypatch):
+    """`db_engine` падает, а не тихо скипает, когда TEST_DATABASE_URL нераспознан.
+
+    Без предусловия перед барьером (a) отравленное окружение (`PGHOSTADDR`/
+    `PGSERVICE`) делает `normalize_target(test_url)` и `normalize_target(prod_url)`
+    одной и той же `UNKNOWN_HOST`-формой (см. `_resolve_connect_target` —
+    проверка этих переменных безусловна и не зависит от конкретного DSN),
+    барьер (a) решил бы «цели совпадают» и молча ушёл в `pytest.skip`: съедает
+    интеграционный слой незаметно, ломая инвариант «ровно 6 пропущенных», хотя
+    для самой БД это безопасно. На деструктивном DROP SCHEMA-пути правильный
+    ответ — громкий отказ.
+
+    Фикстура вызывается напрямую через `__wrapped__` (сырую функцию под
+    `@pytest.fixture`) — pytest фикстуры нельзя звать как обычные функции, а
+    прогонять целую pytest-сессию с отравленным окружением ради одного теста
+    неоправданно тяжело и рискованно для остальных integration-тестов той же
+    сессии.
+    """
+    monkeypatch.setenv("TEST_DATABASE_URL", "postgresql+psycopg://postgres@localhost:5459/udp_test")
+    monkeypatch.setenv("PGHOSTADDR", "10.1.2.3")
+    gen = conftest_module.db_engine.__wrapped__()
+    with pytest.raises(RuntimeError, match="TEST_DATABASE_URL"):
+        next(gen)

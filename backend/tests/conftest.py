@@ -149,7 +149,30 @@ def db_engine() -> Iterator:
     # DATABASE_URL нет, поэтому os.getenv локально вернул бы None и проверка была бы
     # мёртвой. Settings читает backend/.env — там прод-строка и лежит.
     from config import Settings
-    from db_guard import ensure_mutation_allowed, normalize_target
+    from db_guard import _resolve_connect_target, ensure_mutation_allowed, normalize_target
+
+    # Предусловие для барьера (a): если TEST_DATABASE_URL нельзя доверенно
+    # резолвить (окружение процесса несёт PGHOSTADDR/PGSERVICE, невалидный
+    # PGPORT, либо сам DSN не разбирается/несёт цель-определяющий query-ключ),
+    # normalize_target(test_url) даёт UNKNOWN_HOST-форму. Та же форма получится
+    # и для normalize_target(prod_url) — `_resolve_connect_target` первым делом
+    # проверяет PGHOSTADDR/PGSERVICE безусловно, до разбора конкретного DSN, то
+    # есть отравленное окружение обесценивает резолв ОБОИХ URL одинаково.
+    # Барьер (a) ниже сравнивает именно нормализованные строки — с двумя
+    # одинаковыми UNKNOWN_HOST-формами он решил бы "цели совпадают" и молча
+    # ушёл в pytest.skip: безопасно для БД, но незаметно съедает интеграционный
+    # слой и портит инвариант "ровно 6 пропущенных". На деструктивном пути
+    # (DROP SCHEMA) правильный ответ — громкий отказ, а не тихий skip; барьеры
+    # (a) и (b) ниже не ослаблены — это ПРЕДварительная проверка их предпосылки.
+    if _resolve_connect_target(test_url) is None:
+        raise RuntimeError(
+            "TEST_DATABASE_URL не удалось однозначно определить: либо DSN сам по "
+            "себе не разбирается или несёт host/hostaddr/port/dbname/service в "
+            "query-строке, либо в окружении процесса задан PGHOSTADDR/PGSERVICE, "
+            "либо PGPORT вне 0-65535. Барьеры conftest перед DROP SCHEMA не могут "
+            "доверять сравнению целей в таком состоянии — почините TEST_DATABASE_URL "
+            "или окружение процесса и повторите прогон."
+        )
 
     prod_url = Settings().DATABASE_URL
     if prod_url and normalize_target(test_url) == normalize_target(prod_url):
