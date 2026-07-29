@@ -72,8 +72,9 @@ def no_real_minio_on_startup(monkeypatch: pytest.MonkeyPatch) -> None:
     """ensure_bucket() в lifespan не должен ходить в реальный MinIO из тестов.
 
     Каждый `with TestClient(app)` гоняет lifespan → ensure_bucket(). Без подмены
-    каждый тест платит за попытку соединения с мёртвым localhost:9000
-    (~26с на Windows c firewall-drop, ~3-4с на Linux CI с ретраями boto3) —
+    каждый тест платит за попытку соединения с `S3_ENDPOINT` (дефолт
+    `localhost:9259`), когда MinIO там не поднят — а в тестах он не поднят
+    никогда (~26с на Windows c firewall-drop, ~3-4с на Linux CI с ретраями boto3) —
     именно это делало полный прогон 20+ минут. main.py вызывает s3.ensure_bucket()
     с поздним связыванием, поэтому патча модуля s3 достаточно.
     """
