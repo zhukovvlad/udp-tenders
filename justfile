@@ -107,9 +107,9 @@ pg-test-start:
 pg-test-stop:
     "{{pg_local}}/Library/bin/pg_ctl" -D "{{pg_local}}/data" stop
 
-# Зависимость для рецептов, уважающих db_target: при цели neon поднимать
+# Зависимость для рецептов, уважающих db_target: при цели env поднимать
 # локальный кластер незачем, а падать из-за его отсутствия — тем более.
-# Поднять локальный кластер, если db_target=local (для neon — no-op)
+# Поднять локальный кластер, если db_target=local (при db_target=env — no-op)
 pg-ensure:
     @if [ "{{db_target}}" = "local" ]; then just pg-test-start; fi
 

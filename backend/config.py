@@ -38,6 +38,16 @@ class Settings(BaseSettings):
     # База данных
     DATABASE_URL: str = "postgresql+psycopg://udp_app:CHANGE_ME@localhost:5432/udp"
 
+    # Роль окружения. ИНВАРИАНТ: единственный потребитель APP_ENV — db_guard.
+    # Новый потребитель обязан пересмотреть деплойную таблицу спеки: при
+    # DATABASE_URL на loopback забытый APP_ENV=prod НЕ роняет старт — guard
+    # разрешает loopback безусловно, и процесс молча работает в dev-режиме.
+    APP_ENV: Literal["dev", "prod"] = "dev"
+    # Дополнительные цели, мутируемые при APP_ENV=dev: host:port/dbname через
+    # запятую. Loopback разрешён и без этого списка; каждая запись — полная
+    # тройка (без порта или dbname — ошибка валидации в db_guard).
+    DB_EXTRA_TARGETS: str = ""
+
     # MinIO / S3
     S3_ENDPOINT: str = "http://localhost:9259"
     S3_ACCESS_KEY: str = "minioadmin"
@@ -55,15 +65,6 @@ class Settings(BaseSettings):
     # LLM-провайдер (спека 2026-07-23): deploy-time enum + namespaced-настройки.
     LLM_PROVIDER: Literal["openrouter", "gateway"] = "openrouter"
 
-    # Роль окружения. ИНВАРИАНТ: единственный потребитель APP_ENV — db_guard.
-    # Новый потребитель обязан пересмотреть деплойную таблицу спеки: при
-    # DATABASE_URL на loopback забытый APP_ENV=prod НЕ роняет старт — guard
-    # разрешает loopback безусловно, и процесс молча работает в dev-режиме.
-    APP_ENV: Literal["dev", "prod"] = "dev"
-    # Дополнительные цели, мутируемые при APP_ENV=dev: host:port/dbname через
-    # запятую. Loopback разрешён и без этого списка; каждая запись — полная
-    # тройка (без порта или dbname — ошибка валидации в db_guard).
-    DB_EXTRA_TARGETS: str = ""
     # namespaced openrouter; пустое значение → алиас-цепочка (resolved_* ниже)
     OPENROUTER_MODEL: str = ""
     OPENROUTER_PDF_ENGINE: str = ""

@@ -18,12 +18,32 @@
 
 Спека: docs/superpowers/specs/2026-07-27-deploy-env-contract-design.md
 """
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 DEFAULT_PG_PORT = 5432
 MAX_PG_PORT = 65535
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 UNKNOWN_HOST = "<нераспознанный хост>"
+
+# libpq-ключи, которые ЗАМЕЩАЮТ хост/порт/имя БД из netloc, а не дополняют их:
+# psycopg-диалект SQLAlchemy делает `opts.update(url.query)` при сборке
+# connect-args, поэтому `?host=prod.example.com` на localhost-DSN реально
+# коннектится на prod.example.com, а не на localhost — это цель-определяющий
+# ключ, а не опция соединения вроде sslmode/channel_binding.
+TARGET_OVERRIDE_QUERY_KEYS = frozenset({"host", "port", "dbname"})
+
+
+def _has_target_override_query_key(url: str) -> bool:
+    """DSN содержит query-ключ (`host`/`port`/`dbname`), подменяющий цель из netloc.
+
+    Разбирается независимо от urlsplit-хоста: query-строка синтаксически
+    валидна и разбирается даже когда netloc битый.
+    """
+    try:
+        query = urlsplit(url or "").query
+    except ValueError:
+        return False
+    return bool(TARGET_OVERRIDE_QUERY_KEYS & parse_qs(query).keys())
 
 
 def safe_host(url: str) -> str:
@@ -41,10 +61,17 @@ def normalize_target(url: str) -> str:
 
     Единица сравнения включает имя БД, потому что CI различает свои цели только
     им: `localhost:5432/postgres` против `localhost:5432/udp_test`.
-    Query-параметры отбрасываются — цели, различающиеся только ими, это одна
-    цель. Пустой или неразбираемый хост даёт `UNKNOWN_HOST`: такая цель не
+    Query-параметры обычно отбрасываются — цели, различающиеся только ими, это
+    одна цель. ИСКЛЮЧЕНИЕ: query-ключи `host`/`port`/`dbname` — libpq принимает
+    их наравне с netloc, и psycopg-диалект SQLAlchemy их туда и подставляет
+    (`opts.update(url.query)`), замещая, а не дополняя значение из netloc. Такой
+    DSN даёт `UNKNOWN_HOST`: цель, реально видимая psycopg, не совпадает с тем,
+    что видна в netloc, а значит сравнивать по netloc — значит сравнивать не ту
+    цель. Пустой или неразбираемый хост тоже даёт `UNKNOWN_HOST`: такая цель не
     loopback и ни с чем не совпадает (fail-closed).
     """
+    if _has_target_override_query_key(url):
+        return f"{UNKNOWN_HOST}:{DEFAULT_PG_PORT}/"
     try:
         parts = urlsplit(url or "")
         host = (parts.hostname or "").lower().rstrip(".") or UNKNOWN_HOST
@@ -97,7 +124,18 @@ def parse_extra_targets(raw: str) -> frozenset[str]:
 
 
 def is_target_allowed(url: str, extra: frozenset[str]) -> bool:
-    """Разрешена ли цель в dev: loopback (любая база) или запись из allowlist."""
+    """Разрешена ли цель в dev: loopback (любая база) или запись из allowlist.
+
+    Loopback-шорткат сверяется по `safe_host(url)` — хосту из netloc. Если DSN
+    несёт query-ключ `host`/`port`/`dbname`, реальная цель psycopg — не netloc
+    (см. `normalize_target`), и loopback-вид netloc ничего не доказывает:
+    `?host=localhost...&host=prod...` невозможен, но обратный случай —
+    localhost-netloc с `?host=prod.example.com` — обманул бы шорткат, если его
+    не проверить отдельно. Поэтому override-ключ отклоняет и loopback-путь, не
+    только allowlist-путь.
+    """
+    if _has_target_override_query_key(url):
+        return False
     if safe_host(url) in LOOPBACK_HOSTS:
         return True
     return normalize_target(url) in extra

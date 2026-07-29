@@ -24,7 +24,8 @@ _db_url = config.get_main_option("sqlalchemy.url") or os.environ.get("DATABASE_U
 if not _db_url:
     raise RuntimeError(
         "DATABASE_URL is not set. "
-        "Copy backend/.env.example to backend/.env and fill in the Neon connection string."
+        "Copy backend/.env.example to backend/.env and fill in a working connection string "
+        "(the example's default already points at a local Postgres)."
     )
 config.set_main_option("sqlalchemy.url", _db_url)
 

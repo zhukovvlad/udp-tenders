@@ -136,6 +136,56 @@ def test_normalize_target_handles_ipv6_literal():
     assert normalize_target("postgresql://u@[::1]:5459/db") == "::1:5459/db"
 
 
+@pytest.mark.parametrize(
+    "query",
+    ["host=prod.example.com", "port=6543", "dbname=other_db"],
+)
+def test_normalize_target_rejects_query_key_override(query):
+    """`?host=`/`port=`/`dbname=` не дают матчируемую тройку из netloc.
+
+    psycopg-диалект SQLAlchemy делает `opts.update(url.query)` при сборке
+    connect-args — эти query-ключи ЗАМЕЩАЮТ значение из netloc в реальном
+    подключении, а не дополняют его (проверено эмпирически: `create_connect_args`
+    на `postgresql+psycopg://u@localhost:5459/udp_dev?host=prod.example.com`
+    даёт `{'host': 'prod.example.com', ...}`). Единица сравнения из netloc в
+    этом случае описывает не ту цель, к которой реально подключится psycopg —
+    поэтому normalize_target обязан дать UNKNOWN_HOST, а не тройку по netloc.
+    """
+    url = f"postgresql+psycopg://u@localhost:5459/udp_dev?{query}"
+    result = normalize_target(url)
+    assert result.startswith(UNKNOWN_HOST)
+    # UNKNOWN_HOST не разбирается parse_extra_targets — такая цель не может
+    # совпасть ни с одной записью DB_EXTRA_TARGETS.
+    with pytest.raises(ValueError):
+        parse_extra_targets(result)
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["host=prod.example.com", "port=6543", "dbname=other_db"],
+)
+def test_is_target_allowed_denies_loopback_with_query_key_override(query):
+    """`?host=`/`port=`/`dbname=` на loopback-netloc не проходят loopback-шорткат.
+
+    Без этой проверки `is_target_allowed` смотрел бы на `safe_host(url)` ==
+    "localhost" и пропускал бы мутацию, хотя реальное соединение (через
+    psycopg-диалект) уйдёт на цель, заданную query-ключом — ровно дыра,
+    которую реализация guard'а обязана закрывать.
+    """
+    url = f"postgresql+psycopg://u@localhost:5459/udp_dev?{query}"
+    assert is_target_allowed(url, frozenset()) is False
+
+
+def test_is_target_allowed_still_ignores_ordinary_query_params():
+    """Обычные query-параметры (sslmode, channel_binding, ...) не меняют цель.
+
+    Существующее поведение (см. test_normalize_target_drops_query_params) не
+    должно пострадать от точечного исключения для host/port/dbname.
+    """
+    url = "postgresql+psycopg://u@localhost:5459/udp_dev?sslmode=require&channel_binding=require"
+    assert is_target_allowed(url, frozenset()) is True
+
+
 def test_ipv6_loopback_allowed_without_list():
     """IPv6-loopback разрешён через LOOPBACK_HOSTS, а не через allowlist.
 

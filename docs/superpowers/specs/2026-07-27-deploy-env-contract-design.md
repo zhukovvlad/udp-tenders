@@ -155,7 +155,8 @@ deny-by-default; если у него нет **скоупленного** вых
 - порт — явный или `5432`;
 - dbname — path без ведущего слэша;
 - query-параметры отбрасываются (из-за них строковое равенство полных DSN в старой проверке
-  `conftest` было дырявым);
+  `conftest` было дырявым); **[Ревизия §13: кроме `host`/`port`/`dbname` — эти три ключа
+  цель-определяющие для psycopg, а не опции соединения, см. §13]**;
 - **пустой hostname** (socket-DSN, битый URL после отказа `urlsplit`) → цель не loopback и
   не матчится ни с чем, то есть в dev запрещена (fail-closed); в тексте ошибки показывается
   как `<нераспознанный хост>`, а не пустой строкой;
@@ -469,6 +470,32 @@ loopback, — но при правильной позиции шага его н
 **Цена, которую принимаем:** локальный кластер становится обязательным для прогона тестов на
 дев-машине. Контрибьютора без кластера обслуживает CI (`uv run pytest` напрямую, не через
 `just` — свёртка алиаса CI не задевает).
+
+## 13. Ревизия 2026-07-29: query-ключи `host`/`port`/`dbname` не отбрасываются
+
+**Находка финального ревью ветки.** §5 утверждал, что «query-параметры отбрасываются —
+цели, различающиеся только ими, это одна цель». Это верно для опций соединения
+(`sslmode`, `channel_binding`, `connect_timeout`, …), но не для трёх конкретных ключей.
+Проверено эмпирически на этом чекауте: для DSN
+`postgresql+psycopg://u@localhost:5459/udp_dev?host=prod.example.com` SQLAlchemy-диалект
+psycopg собирает connect-args как `{'host': 'prod.example.com', 'dbname': 'udp_dev', 'port':
+5459}` — ключ `host` **замещает** хост из netloc (`opts.update(url.query)` в диалекте), а не
+дополняет его. То же для `port=` и `dbname=`. При этом `safe_host()`/`normalize_target()` в
+исходной реализации читали только netloc и не видели подмены — `is_target_allowed` возвращал
+`True` для localhost-DSN с `?host=prod.example.com`, хотя реальное соединение уйдёт на
+`prod.example.com`.
+
+**Фикс** (`backend/db_guard.py`): `normalize_target` при наличии `host`/`port`/`dbname` в
+query-строке возвращает `UNKNOWN_HOST`-форму вместо тройки из netloc — такая цель не может
+совпасть ни с одной записью `DB_EXTRA_TARGETS` (маркер отдельно запрещён как запись,
+`parse_extra_targets` его отвергает). `is_target_allowed` отдельно отказывает
+loopback-шорткату для такого DSN — иначе он смотрел бы на `safe_host()` в обход
+`normalize_target`. Обычные query-параметры (`sslmode` и пр.) продолжают отбрасываться как
+раньше — тесты на это поведение (`test_normalize_target_drops_query_params`) не менялись.
+
+Транзитивно закрывает ту же дыру в барьере (a) `backend/tests/conftest.py`
+(`db_engine`-фикстура) — он сравнивает `TEST_DATABASE_URL`/`DATABASE_URL` через
+`normalize_target`.
 
 ## См. также
 

@@ -21,7 +21,7 @@
 | GitHub Actions CI | — | backend ✅ / frontend ✅ | — |
 | **Grand total (локально)** | **76** | **809** | ✅ |
 
-Последний прогон `just test` локально: backend **584 passed / 6 skipped** (`uv run pytest`, 590 собрано; локальный Postgres), frontend **219 passed** (28 файлов). CI настроен для backend (`.github/workflows/backend-tests.yml`) и frontend (`.github/workflows/frontend-tests.yml`) — оба гоняются в GitHub Actions на каждый push в `main` и PR.
+Последний прогон `just test` локально: backend **672 passed / 6 skipped** (`uv run pytest`, 678 собрано; локальный Postgres), frontend **219 passed** (28 файлов). CI настроен для backend (`.github/workflows/backend-tests.yml`) и frontend (`.github/workflows/frontend-tests.yml`) — оба гоняются в GitHub Actions на каждый push в `main` и PR.
 
 ---
 
@@ -225,7 +225,11 @@ UDP_DB_TARGET=env just db-migrate   # то же через переменную 
 чем различаются цели на одном хосте — иначе `localhost:5432/postgres` и
 `localhost:5432/udp_test` были бы неразличимы. Query-параметры (`sslmode`,
 `channel_binding` и пр.) отбрасываются — цели, различающиеся только ими, это одна
-цель. Пустой или неразбираемый хост даёт маркер `UNKNOWN_HOST`
+цель. **Исключение:** ключи `host`, `port` и `dbname` в query-строке НЕ отбрасываются
+— они цель-определяющие для psycopg (SQLAlchemy-диалект подставляет их поверх netloc
+при сборке connect-args, замещая, а не дополняя), поэтому такой DSN нормализуется в
+`UNKNOWN_HOST` и не может совпасть ни с loopback, ни с записью `DB_EXTRA_TARGETS`
+(см. спеку §13). Пустой или неразбираемый хост даёт маркер `UNKNOWN_HOST`
 (`"<нераспознанный хост>"`) — такая цель не loopback и ни с чем не совпадает:
 fail-closed, а не молчаливое разрешение.
 

@@ -468,30 +468,44 @@
 
   **Закрыто 2026-07-27** (спека `2026-07-27-deploy-env-contract-design.md`, AC-0): `env_file`
   абсолютный, роутер передаёт `Settings(_env_file=ENV_PATH)`. Пин `OPENROUTER_MODEL=""` в
-  `test_get_settings` **не снят** (расхождение с планом Task 1, см. `task-1-report.md`): при
-  прогоне обнаружилась ОТДЕЛЬНАЯ утечка в реальный `os.environ`, не связанная с
-  CWD-относительностью — `alembic/env.py` делает модульный `load_dotenv(ROOT / ".env")`
-  (override=False) при миграции тестовой БД, и на машине с непустым `OPENROUTER_MODEL` в
-  боевом `backend/.env` это значение необратимо оседает в `os.environ` на весь процесс
-  pytest. `Settings(_env_file=...)` тут бессилен: env-источник pydantic-settings всегда
-  выигрывает у dotenv-источника. Заведена новая запись ниже.
+  `test_get_settings` на момент AC-0 снять не удалось (расхождение с планом Task 1, см.
+  `task-1-report.md`): при прогоне обнаружилась ОТДЕЛЬНАЯ утечка в реальный `os.environ`, не
+  связанная с CWD-относительностью — `alembic/env.py` делает модульный
+  `load_dotenv(ROOT / ".env")` (override=False) при миграции тестовой БД, и на машине с
+  непустым `OPENROUTER_MODEL` в боевом `backend/.env` это значение необратимо оседало в
+  `os.environ` на весь процесс pytest. `Settings(_env_file=...)` тут бессилен: env-источник
+  pydantic-settings всегда выигрывает у dotenv-источника. Заведена новая запись ниже.
+  **Пин снят** (та же ветка, после бракетирования утечки в `db_engine`-фикстуре
+  `backend/tests/conftest.py`: снапшот/восстановление `os.environ` вокруг `command.upgrade`)
+  — `test_get_settings` в `backend/tests/integration/test_settings.py` больше не пинит
+  `OPENROUTER_MODEL`.
 
-- [ ] **`alembic/env.py` грузит реальный `backend/.env` в `os.environ` при каждом прогоне миграций**
+- [ ] **`alembic/env.py` грузит реальный `backend/.env` в `os.environ` — забракетирован только один call site**
   `load_dotenv(ROOT / ".env")` (без `override`, т.е. `override=False`) выполняется на импорте
   модуля — при подготовке тестовой БД (integration-тесты мигрируют её через alembic) это
   подтягивает значения из боевого `backend/.env` разработчика в НАСТОЯЩИЙ `os.environ`
-  процесса pytest, а не в изолированный dotenv-источник. На машине, где в `backend/.env` уже
-  задан `OPENROUTER_MODEL` (для локальной работы с реальным OpenRouter), это значение
-  переживает monkeypatch/`Settings(_env_file=...)` подмены (env-переменные окружения всегда
-  побеждают dotenv в pydantic-settings) и утекает в любой тест текущего процесса, читающий
-  `OPENROUTER_MODEL` через свежий `Settings()`. Обнаружено при закрытии Task 1 плана
+  процесса pytest, а не в изолированный dotenv-источник. Обнаружено при закрытии Task 1 плана
   `2026-07-27-deploy-env-contract` (см. `task-1-report.md`) — попытка снять пин
-  `OPENROUTER_MODEL=""` в `test_get_settings` привела к падению именно по этой причине.
-  **Решение (не реализовано):** либо `alembic/env.py` не грузит `.env` при тестовом прогоне
-  (например, детект `TEST_DATABASE_URL`), либо conftest.py явно чистит опасные переменные
-  перед session-scope миграцией, либо `load_dotenv` заменяется на локальный dict без записи
-  в `os.environ`. Пин `OPENROUTER_MODEL=""` в `test_get_settings` остаётся необходимым, пока
-  это не закрыто.
+  `OPENROUTER_MODEL=""` в `test_get_settings` изначально падала именно по этой причине.
+  **Частично закрыто** (та же ветка): `db_engine`-фикстура в `backend/tests/conftest.py` —
+  единственный известный in-process вызов `command.upgrade` — теперь снимает снапшот
+  `os.environ` до `command.upgrade` и восстанавливает его в `finally`, поэтому утечка не
+  переживает тестовую сессию; пин `OPENROUTER_MODEL=""` в `test_get_settings` снят (см. запись
+  выше).
+  **Что остаётся открытым:** сам `load_dotenv(..., override=False)` в `alembic/env.py`
+  никуда не делся и продолжает писать в настоящий `os.environ` при каждом in-process вызове
+  Alembic — бракет в `conftest.py` защищает только этот один известный call site, а не сам
+  модуль. Любой будущий in-process вызов Alembic вне `db_engine` (новый фикстур-хелпер,
+  скрипт, вызывающий `command.upgrade`/`command.downgrade` напрямую) заново откроет ту же
+  утечку без предупреждения. Кроме того, бракет закрывает только *реальный* `os.environ`
+  процесса pytest — если `OPENROUTER_MODEL` (или любая другая переменная из `backend/.env`)
+  экспортирована в родительский shell до запуска `pytest` (`export OPENROUTER_MODEL=...`),
+  она никогда не была частью снапшот/restore-цикла conftest (снапшот снимается один раз за
+  сессию, уже после того как shell её проэкспортировал) — такой путь бракетом не покрыт.
+  **Решение:** либо `alembic/env.py` не грузит `.env` при тестовом прогоне (например, детект
+  `TEST_DATABASE_URL`), либо `load_dotenv` заменяется на локальный dict без записи в
+  `os.environ`, либо бракет переносится с одного call site на сам модуль (fixture/context
+  manager вокруг любого in-process вызова Alembic).
 
 - [ ] **`CONFIDENCE_THRESHOLD`, `ALLOWED_ORIGINS`, `TRUSTED_PROXIES` не следуют контракту имён**
   Контракт `<ДОМЕН>_<ЧТО>` введён спекой `2026-07-27-deploy-env-contract-design.md` §4; эти

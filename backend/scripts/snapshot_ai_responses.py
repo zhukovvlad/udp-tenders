@@ -70,7 +70,7 @@ async def _fetch(pdf_path: Path) -> dict:
     base = (os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1").rstrip("/")
     OPENROUTER_URL = f"{base}/chat/completions"
     model = os.getenv("OPENROUTER_MODEL") or os.getenv("AI_MODEL", "anthropic/claude-sonnet-4.6")
-    engine = os.getenv("OPENROUTER_PDF_ENGINE") or os.getenv("PDF_ENGINE", "mistral-ocr")
+    engine = os.getenv("OPENROUTER_PDF_ENGINE") or os.getenv("PDF_ENGINE", "native")
     payload = {
         "model": model,
         "max_tokens": 8192,
