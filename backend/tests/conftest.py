@@ -17,6 +17,7 @@ import httpx as _httpx_module
 import pytest
 import respx
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 # Делаем импорты "from database import ..." и "import crud" работающими
@@ -142,12 +143,85 @@ def db_engine() -> Iterator:
 
     engine = create_engine(test_url, pool_pre_ping=True)
 
-    # Безопасность: отказываемся работать, если TEST_DATABASE_URL совпадает с прод DATABASE_URL.
-    # DROP SCHEMA — деструктивная операция; ошибка конфигурации = катастрофа.
-    prod_url = os.getenv("DATABASE_URL", "")
-    if prod_url and test_url == prod_url:
+    # Безопасность: отказываемся работать, если TEST_DATABASE_URL совпадает с прод
+    # DATABASE_URL. DROP SCHEMA — деструктивная операция; ошибка конфигурации = катастрофа.
+    # Читаем через Settings, а не os.getenv: pytest-dotenv грузит только .env.test, где
+    # DATABASE_URL нет, поэтому os.getenv локально вернул бы None и проверка была бы
+    # мёртвой. Settings читает backend/.env — там прод-строка и лежит.
+    from config import Settings
+    from db_guard import _resolve_connect_target, ensure_mutation_allowed
+
+    # Предусловие для барьера (a): если TEST_DATABASE_URL нельзя доверенно
+    # резолвить (окружение процесса несёт PGHOSTADDR/PGSERVICE, невалидный
+    # PGPORT, либо сам DSN не разбирается/несёт цель-определяющий query-ключ),
+    # нет смысла вообще сравнивать его с прод-целью — барьер (a) ниже сначала
+    # обязан иметь доверенную тройку с ЭТОЙ стороны. На деструктивном пути
+    # (DROP SCHEMA) правильный ответ на "не знаем цель" — громкий отказ, а не
+    # тихий skip; барьеры (a) и (b) ниже не ослаблены — это ПРЕДварительная
+    # проверка их предпосылки.
+    test_target = _resolve_connect_target(test_url)
+    if test_target is None:
+        raise RuntimeError(
+            "TEST_DATABASE_URL не удалось однозначно определить: либо DSN сам по "
+            "себе не разбирается или несёт host/hostaddr/port/dbname/service в "
+            "query-строке, либо в окружении процесса задан PGHOSTADDR/PGSERVICE, "
+            "либо PGPORT вне 0-65535. Барьеры conftest перед DROP SCHEMA не могут "
+            "доверять сравнению целей в таком состоянии — почините TEST_DATABASE_URL "
+            "или окружение процесса и повторите прогон."
+        )
+
+    # Барьер (a): сравниваем РЕЗОЛВЛЕННЫЕ тройки (host, port, dbname), а не
+    # normalize_target()-строки. Раньше сравнивались строки — обе стороны при
+    # нераспознанной цели давали один и тот же UNKNOWN_HOST-сентинел, и общий
+    # сентинел маскировал ДВЕ разные проблемы сразу: (1) если поражены ОБЕ
+    # стороны одинаково (например, PGHOSTADDR/PGSERVICE — они проверяются
+    # безусловно, до разбора конкретного DSN), сентинелы совпадали, и барьер
+    # решал "цели одинаковы" — случайно safe, но по факту не проверял ничего;
+    # (2) если поражена ТОЛЬКО прод-сторона (например, DATABASE_URL сам несёт
+    # `?host=`/`?dbname=`/`service=`), test_target — реальная тройка,
+    # prod-сторона — сентинел, строки не совпадают НИКОГДА — и DROP SCHEMA
+    # уходил вперёд, даже если реальная прод-цель (та, что не разобралась)
+    # была той же базой, что и test_url. Предусловие выше уже гарантирует
+    # test_target резолвленным, поэтому именно (2) стало систематическим
+    # риском: раньше могло случайно повезти через (1), теперь — нет. Сравнение
+    # кортежей вместо строк убирает сентинел из сравнения целиком — оба
+    # failure mode закрываются одним и тем же способом.
+    prod_url = Settings().DATABASE_URL
+    if prod_url:
+        prod_target = _resolve_connect_target(prod_url)
+        if prod_target is None:
+            raise RuntimeError(
+                "DATABASE_URL не удалось однозначно определить: либо DSN сам по "
+                "себе не разбирается или несёт host/hostaddr/port/dbname/service в "
+                "query-строке, либо в окружении процесса задан PGHOSTADDR/PGSERVICE, "
+                "либо PGPORT вне 0-65535. Барьер (a) не может доказать, что "
+                "TEST_DATABASE_URL — не прод, если прод-цель не резолвится — "
+                "почините DATABASE_URL или окружение процесса и повторите прогон."
+            )
+        if test_target == prod_target:
+            pytest.skip(
+                "TEST_DATABASE_URL и DATABASE_URL — одна цель после резолва "
+                "(host, port, dbname); отказ от DROP SCHEMA на проде"
+            )
+
+    # Второй рубеж: udp_dev и udp_test различаются четырьмя символами, а цена
+    # опечатки — DROP SCHEMA на dev-базе. Требуем, чтобы имя БД было тестовым.
+    # НЕ ПОГЛОЩАЕТСЯ allowlist'ом guard'а: udp_dev — легитимная цель для
+    # миграций и приложения, то есть она В списке, но DROP SCHEMA на ней
+    # катастрофа. Членство в allowlist выражает «можно мутировать», а не
+    # «можно разрушить схему». Это разные права.
+    #
+    # `make_url(...).database`, а не `urlsplit(...).path.lstrip("/")`: у
+    # urlsplit `#` — разделитель fragment, поэтому `.../udp_test#archive` дал
+    # бы имя БД "udp_test" (прошёл бы суффиксную проверку), хотя реальная база
+    # называется "udp_test#archive" — SQLAlchemy (и реальный psycopg-коннект)
+    # не знает понятия fragment вовсе. Тот же класс дыры, что закрыт в
+    # db_guard._resolve_connect_target (см. спеку §14).
+    db_name = make_url(test_url).database or ""
+    if not db_name.endswith("_test"):
         pytest.skip(
-            "TEST_DATABASE_URL совпадает с DATABASE_URL — отказ от DROP SCHEMA на проде"
+            f"TEST_DATABASE_URL указывает на базу '{db_name}' — ожидается имя, "
+            "оканчивающееся на '_test'; отказ от DROP SCHEMA"
         )
 
     # Накатываем миграции через Alembic
@@ -158,10 +232,38 @@ def db_engine() -> Iterator:
     cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
     cfg.set_main_option("sqlalchemy.url", test_url)
 
+    # Членство в allowlist guard'а — необходимое, но НЕ достаточное условие для
+    # DROP SCHEMA: guard знает только "можно мутировать", а не "можно
+    # разрушить схему" (это выражают независимые барьеры (a)/(b) выше — barrier
+    # (b) обязан оставаться первым и самостоятельным, чтобы неразрешённый
+    # neondb-style URL, не оканчивающийся на "_test", по-прежнему уходил в
+    # pytest.skip раньше, чем этот вызов вообще увидит цель). Guard здесь
+    # закрывает случай, которого барьеры не ловят: удалённая "_test"-база,
+    # которая не loopback и не в DB_EXTRA_TARGETS. Без этого вызова её схему
+    # дропнули бы безусловно, и только потом упал бы guard внутри
+    # command.upgrade (то есть DROP SCHEMA уже случился бы).
+    ensure_mutation_allowed(test_url, "conftest DROP SCHEMA")
+
     # Сбрасываем схему перед накатом — гарантируем чистый старт
     with engine.begin() as conn:
         conn.exec_driver_sql("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
-    command.upgrade(cfg, "head")
+
+    # command.upgrade() исполняет alembic/env.py В ЭТОМ ЖЕ процессе (in-process,
+    # не подпроцесс), а тот модуль-уровнево делает load_dotenv(ROOT / ".env")
+    # (без override, но это не спасает пустые ключи процесса) — реальный
+    # backend/.env разработчика записывается в настоящий os.environ на весь
+    # остаток pytest-сессии. В pydantic-settings process env выигрывает у
+    # dotenv-источника, поэтому дальнейшие Settings(_env_file=...) в тестах
+    # ничем не защищены от этой утечки. Закрываем здесь, а не в alembic/env.py:
+    # там load_dotenv нужен для реальной работы (db-test-migrate передаёт
+    # TEST_DATABASE_URL через process env поверх .env), поэтому сам вызов
+    # трогать нельзя (AC-7) — снимаем только побочный эффект на тестовый процесс.
+    _environ_snapshot = dict(os.environ)
+    try:
+        command.upgrade(cfg, "head")
+    finally:
+        os.environ.clear()
+        os.environ.update(_environ_snapshot)
 
     yield engine
     engine.dispose()

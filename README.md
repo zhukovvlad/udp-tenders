@@ -23,7 +23,7 @@ B2B веб-приложение для тендерных менеджеров �
 |------|-----------|
 | Бэкенд | Python 3.12, FastAPI, SQLAlchemy (sync), Alembic, pydantic-settings |
 | Аутентификация | pyjwt (HS256), pwdlib[argon2] — httpOnly cookies, double-submit CSRF, ротация refresh-токенов |
-| База данных | PostgreSQL via Neon (serverless) — `postgresql+psycopg://` DSN |
+| База данных | PostgreSQL (`postgresql+psycopg://` DSN) — локальный кластер, Docker или managed-хостинг вроде Neon |
 | Хранилище PDF | MinIO (S3-совместимое), локальный бинарь `minio.exe` |
 | PDF-парсинг | OpenRouter API — Mistral OCR / Claude Vision |
 | Фронтенд | React 19, TypeScript, Vite, shadcn/ui, Tailwind CSS v4, Recharts |
@@ -42,7 +42,8 @@ B2B веб-приложение для тендерных менеджеров �
 - [just](https://just.systems/) — установить по инструкции на сайте или `winget install Casey.Just`
 - [uv](https://docs.astral.sh/uv/) — менеджер зависимостей/окружений Python (`winget install astral-sh.uv` или см. сайт)
 - MinIO — скачать `minio.exe` со [страницы загрузки](https://min.io/download)
-- Аккаунт на [Neon](https://neon.tech) (бесплатный tier) и [OpenRouter](https://openrouter.ai)
+- Postgres 16 — локальный кластер, Docker или managed-хостинг вроде [Neon](https://neon.tech) (бесплатный tier)
+- Аккаунт на [OpenRouter](https://openrouter.ai)
 
 ### 1. Настройка переменных окружения
 
@@ -55,12 +56,13 @@ cp backend/.env.example backend/.env
 | Переменная | Описание |
 |------------|---------|
 | `OPENROUTER_API_KEY` | [openrouter.ai/keys](https://openrouter.ai/keys) |
-| `DATABASE_URL` | Neon Console → Connection string (`postgresql+psycopg://...`) |
+| `DATABASE_URL` | DSN Postgres (`postgresql+psycopg://...`). Локальный кластер, Docker или managed-хостинг вроде Neon — на выбор |
+| `APP_ENV` | `dev` (дефолт) или `prod`. В `dev` guard разрешает мутировать только loopback-цели и `DB_EXTRA_TARGETS`; в `prod` — любые. См. [docs/testing.md](docs/testing.md) |
 | `SECRET_KEY` | Сгенерировать: `openssl rand -hex 32` |
-| `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | Настройки MinIO (по умолчанию `http://localhost:9000` / `minioadmin`) |
+| `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | Настройки MinIO (по умолчанию `http://localhost:9259` / `minioadmin`) |
 | `ALLOWED_ORIGINS` | JSON-массив origin'ов фронтенда, например `["http://localhost:5173"]` |
 
-Подробнее о настройке Neon: [docs/setup/neon-setup.md](docs/setup/neon-setup.md).
+Если для `DATABASE_URL` выбран Neon (один из вариантов, не обязательный): [docs/setup/neon-setup.md](docs/setup/neon-setup.md).
 
 ### 2. Установка зависимостей
 
@@ -71,16 +73,41 @@ just install
 ### 3. Запуск MinIO
 
 ```bash
-minio.exe server ./minio-data --console-address ":9001"
+minio.exe server ./minio-data --address ":9259" --console-address ":9260"
 ```
 
-MinIO API: `http://localhost:9000`, веб-консоль: `http://localhost:9001`.
+MinIO API: `http://localhost:9259`, веб-консоль: `http://localhost:9260`.
 
-### 4. Миграция базы данных
+### 4. Локальный Postgres и миграция базы данных
+
+`DATABASE_URL` из `.env.example` по умолчанию указывает на локальный кластер —
+он не устанавливается автоматически. Разовая установка без админ-прав описана в
+[docs/testing.md](docs/testing.md), раздел «Локальный тестовый Postgres»
+(«Установка с нуля»).
 
 ```bash
-just db-migrate
+just db-dev-init   # создаёт локальную БД udp_dev (если её ещё нет) и сразу накатывает миграции
 ```
+
+Для последующих миграций локальной `udp_dev` — `just db-migrate`.
+Подробнее про `db-dev-init` и переключатель `db_target` — [docs/testing.md](docs/testing.md), раздел «Локальная dev-БД».
+
+**Если для `DATABASE_URL` выбран managed-хостинг (Neon и пр.)** — база уже
+существует, шаг с локальным кластером не нужен. Все рецепты по умолчанию
+работают с локальной `udp_dev` (`db_target=local`); чтобы вместо неё
+использовать DSN из `.env`, добавляйте `db_target=env`:
+
+```bash
+just db_target=env db-migrate
+```
+
+Managed-БД — не loopback, поэтому при `APP_ENV=dev` guard откажет мутировать
+её, пока нормализованная цель (`host:port/dbname`) не добавлена в
+`DB_EXTRA_TARGETS` в `backend/.env`; сообщение об ошибке печатает эту тройку
+ровно в том виде, который принимает переменная. Продакшн-базу мигрируют
+отдельной осознанной командой — `APP_ENV=prod just db_target=env db-migrate` —
+и **никогда** не добавляют в `DB_EXTRA_TARGETS`: это список для
+долгоживущих dev-целей, а не постоянная индульгенция для прода.
 
 ### 5. Создание первого пользователя и организации
 

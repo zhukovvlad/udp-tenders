@@ -28,6 +28,10 @@ OPENROUTER_MAX_TOKENS=64000
 # GATEWAY_MODEL=
 ```
 
+`APP_ENV` (`dev`/`prod`) — тоже deploy-time переменная `backend/.env`, но к LLM-провайдеру
+отношения не имеет: это ось `backend/db_guard.py` (роль окружения для guard'а от мутации
+БД), см. `docs/testing.md`, раздел «Guard от мутации незапланированной БД».
+
 **Движок парсинга PDF** (`OPENROUTER_PDF_ENGINE`):
 
 | Значение | Что делает |
@@ -37,7 +41,7 @@ OPENROUTER_MAX_TOKENS=64000
 | `pdf-text` | извлечение текста (бесплатно, плохо с табличными формами) |
 
 **Обратная совместимость (алиасы).** Старые переменные ещё читаются:
-`OPENROUTER_MODEL → AI_MODEL → дефолт`, `OPENROUTER_PDF_ENGINE → PDF_ENGINE → mistral-ocr`,
+`OPENROUTER_MODEL → AI_MODEL → дефолт`, `OPENROUTER_PDF_ENGINE → PDF_ENGINE → native`,
 `OPENROUTER_MAX_TOKENS → AI_MAX_TOKENS → 64000`. Namespaced-переменная побеждает; пустая
 или пробельная строка = «не задано» (падаем на legacy, затем на дефолт). При использовании
 legacy-переменной в лог один раз пишется предупреждение об устаревании.
@@ -134,3 +138,5 @@ resp = await llm.get_provider().vision_completion(
 - Спека (дизайн, инварианты, AC): `docs/superpowers/specs/2026-07-23-llm-provider-toggle-design.md`
 - Девлог реализации фазы 1: `docs/devlog/2026-07-24-llm-provider-toggle.md`
 - Парсинг УПД и коррекция ориентации: `docs/agent/pdf-parsing.md`
+- [deployment.md](deployment.md) — вторая deploy-time ось: `APP_ENV`/`DATABASE_URL`,
+  профили развёртывания, guard от мутации незапланированной БД.

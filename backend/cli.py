@@ -6,7 +6,9 @@
 """
 import click
 
+from config import settings
 from database import SessionLocal
+from db_guard import ensure_mutation_allowed
 from models import Organization, OrgRole, User
 from security import hash_password
 
@@ -15,6 +17,11 @@ from security import hash_password
 def cli():
     """УПД Трекер — инструменты администрирования."""
     pass
+
+
+def _guard(action: str) -> None:
+    """Отказаться мутировать БД, если цель не разрешена для текущего APP_ENV."""
+    ensure_mutation_allowed(settings.DATABASE_URL, f"cli {action}")
 
 
 @cli.command("create-superuser")
@@ -28,6 +35,7 @@ def cli():
 )
 def create_superuser(email: str, password: str) -> None:
     """Создать суперюзера системы (без привязки к организации)."""
+    _guard("create-superuser")
     db = SessionLocal()
     try:
         if db.query(User).filter(User.email == email).first():
@@ -53,6 +61,7 @@ def create_superuser(email: str, password: str) -> None:
 @click.option("--inn", default=None, help="ИНН организации (необязательно)")
 def create_org(name: str, inn: str | None) -> None:
     """Создать организацию."""
+    _guard("create-org")
     db = SessionLocal()
     try:
         org = Organization(name=name, inn=inn or None)
@@ -76,6 +85,7 @@ def create_org(name: str, inn: str | None) -> None:
 )
 def create_user(email: str, org_id: int, role: str, password: str) -> None:
     """Создать обычного пользователя в организации."""
+    _guard("create-user")
     db = SessionLocal()
     try:
         org = db.query(Organization).filter(Organization.id == org_id).first()

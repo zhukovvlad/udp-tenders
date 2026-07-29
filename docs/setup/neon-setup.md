@@ -1,5 +1,10 @@
 # Neon Postgres setup для UDP
 
+> **Neon — один из вариантов, а не «база проекта».** Развёртывание возможно на локальном
+> Postgres, в Docker или на managed-хостинге; дев-цикл по умолчанию идёт на локальном
+> кластере (`docs/testing.md`, раздел «Локальная dev-БД»). Этот документ нужен, только если
+> вы выбрали Neon.
+
 ## 1. Регистрация и проект
 
 1. Открыть https://neon.tech и зарегистрироваться (Google/GitHub быстрее).
@@ -27,13 +32,9 @@ postgresql+psycopg://<owner>:<password>@ep-<adjective>-<noun>-<hash>.eu-central-
 
 ## 3. Сохранить в `backend/.env`
 
-В `backend/.env` (от корня репо, не коммитится) заменить старую строку:
-
-```
-DATABASE_URL=sqlite:///./database.db
-```
-
-на полученную выше:
+В `backend/.env` (от корня репо, не коммитится) заменить строку `DATABASE_URL`
+(по умолчанию — DSN локального кластера, см. `backend/.env.example`) на
+полученную выше:
 
 ```
 DATABASE_URL=postgresql+psycopg://<owner>:<password>@ep-<adjective>-<noun>-<hash>.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require

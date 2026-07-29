@@ -41,8 +41,11 @@ def get_settings():
         else bool(os.getenv("OPENROUTER_API_KEY", "").startswith("sk-")),
         # модель — через алиас-цепочку §1 (не ручной os.getenv — дрейф логики);
         # свежий Settings() перечитывает environ, обновлённый _ensure_env()
+        # Settings(_env_file=ENV_PATH): роутер держит абсолютный ENV_PATH для
+        # записи через set_key, и читать он обязан тот же файл. Без этого свежий
+        # Settings() читал бы backend/.env в обход подменённого в тестах ENV_PATH.
         "model": settings.GATEWAY_MODEL if is_gateway
-        else resolved_openrouter_model(Settings()),
+        else resolved_openrouter_model(Settings(_env_file=ENV_PATH)),
         "confidence_threshold": float(os.getenv("CONFIDENCE_THRESHOLD", "0.7")),
     }
 

@@ -17,15 +17,22 @@ load_dotenv(ROOT / ".env")
 
 import models  # noqa: F401,E402  -- регистрируем модели в Base.metadata
 from database import Base  # noqa: E402
+from db_guard import ensure_mutation_allowed  # noqa: E402
 
 config = context.config
 _db_url = config.get_main_option("sqlalchemy.url") or os.environ.get("DATABASE_URL")
 if not _db_url:
     raise RuntimeError(
         "DATABASE_URL is not set. "
-        "Copy backend/.env.example to backend/.env and fill in the Neon connection string."
+        "Copy backend/.env.example to backend/.env and fill in a working connection string "
+        "(the example's default already points at a local Postgres)."
     )
 config.set_main_option("sqlalchemy.url", _db_url)
+
+# Fail-fast до любого DDL. Стоит выше engine_from_config/fileConfig — коннекта
+# к этому моменту ещё не было. Покрывает и online-, и offline-режим: модуль
+# исполняется до ветвления.
+ensure_mutation_allowed(_db_url, "alembic")
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

@@ -2,7 +2,6 @@
 __pycache__/
 *.pyc
 *.pyo
-backend/.env
 backend/database.db
 backend/database.db.backup
 backend/logs/
@@ -24,10 +23,13 @@ minio-data/
 .DS_Store
 Thumbs.db
 
-# Тесты — реальные PDF и тестовые env-файлы
+# Тесты — реальные PDF
 backend/tests/fixtures/pdf/real/
-.env.test
-.env.test.local
+
+# env-файлы: игнорируем и .env*, и *.env (обе формы имени), кроме шаблонов .example
+.env*
+*.env
+!.env*.example
 
 # Тестовые артефакты
 backend/htmlcov/
@@ -48,7 +50,6 @@ e2e/playwright-report/
 /backend/scripts/check_prostoy.py
 /tasks
 /CLAUDE_CODE_GATEWAY_INSTRUCTION.md
-.gateway.env
 .access_token
 .refresh_token
 /temp
