@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     AI_MODEL: str = "anthropic/claude-sonnet-5"
     AI_MAX_TOKENS: int | None = None  # deprecated-алиас OPENROUTER_MAX_TOKENS; None = не задан
     CONFIDENCE_THRESHOLD: float = 0.7
-    PDF_ENGINE: str = "native"
+    PDF_ENGINE: str | None = None  # deprecated-алиас OPENROUTER_PDF_ENGINE; None = не задан
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 
     # LLM-провайдер (спека 2026-07-23): deploy-time enum + namespaced-настройки.
@@ -104,18 +104,20 @@ def resolved_openrouter_model(s: "Settings") -> str:
 
 
 def resolved_openrouter_pdf_engine(s: "Settings") -> str:
-    """OPENROUTER_PDF_ENGINE → deprecated PDF_ENGINE (warning) → код-дефолт native.
+    """OPENROUTER_PDF_ENGINE → deprecated PDF_ENGINE (warning, если задан) → native.
 
     Дефолт native, а не mistral-ocr: последний нестабилен на СФ с 60+ строками,
     и фактические .env давно используют native (docs/TECH_DEBT.md).
-    Предупреждение выдаётся при ЛЮБОМ использовании legacy-переменной. Прежнее
-    условие `legacy != "mistral-ocr"` глушило его ровно для значения из
+    PDF_ENGINE опционален (None = не задан), поэтому «не задано» отличимо от
+    «задано значением, равным дефолту» — предупреждение выдаётся только при
+    реальном использовании legacy-переменной, а не на чистой установке. Прежнее
+    условие `legacy != "mistral-ocr"` глушило warning ровно для значения из
     легаси-.env, из-за чего переменная не имела пути к удалению; снятие условия
     и смена дефолта — одно неделимое изменение, порознь они друг друга ломают.
     """
     if s.OPENROUTER_PDF_ENGINE.strip():
         return s.OPENROUTER_PDF_ENGINE.strip()
-    legacy = s.PDF_ENGINE.strip()
+    legacy = (s.PDF_ENGINE or "").strip()
     if legacy:
         _warn_deprecated_alias_once(
             "PDF_ENGINE", "PDF_ENGINE устарел — используйте OPENROUTER_PDF_ENGINE")
