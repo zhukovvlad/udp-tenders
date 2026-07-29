@@ -54,8 +54,10 @@ Neon — при хостинге в компании guard не защищал �
    сделать `str | None = None` (см. «Отклонения от плана»), плюс autouse-сброс
    `_warned_deprecated_aliases` и перевод новых тестов на hermetic `_mk()`.
 4. **Task 5 — `TEST_MODE` и `.gitignore` по env-паттернам** (`86a1a4c`, без fix-round). Мёртвая
-   переменная `TEST_MODE` (нет потребителей в коде) снята из `.env.test.example`; `.gitignore`
-   консолидирован в `.env*` / `!.env*.example` вместо перечисления отдельных файлов.
+   переменная `TEST_MODE` (нет потребителей в коде) снята из `.env.test.example`; на этом шаге
+   `.gitignore` консолидирован в `.env*` / `!.env*.example` вместо перечисления отдельных файлов
+   (это не финальное состояние файла — см. дополнение из CodeRabbit-раунда в «Follow-up по
+   внешнему ревью»).
 5. **Task 6 — документация** (`7c2f418`, fix-round `3968a76`). `README.md`, `.env.example`,
    `docs/setup/neon-setup.md`, `docs/testing.md` (раздел guard'а переписан построчно по факту кода
    `db_guard.py`), `docs/instructions/llm-provider.md`, `.github/instructions/backend.instructions.md`,
@@ -89,8 +91,9 @@ Neon — при хостинге в компании guard не защищал �
   **load-bearing**: если бы он вырос, это означало бы, что где-то по пути добавился новый
   `pytest.skip`, проглотивший интеграционный слой (например, барьер conftest молча скипнул бы
   вместо падения на нерезолвящемся `DATABASE_URL`) — и зелёный прогон в этом случае ничего бы не
-  доказывал. Все шесть skip — параметризация `tests/test_auth_coverage.py:79` (не реализованные
-  auth-эндпоинты), структурные и не связаны с задачей.
+  доказывал. Все шесть skip — параметризация `tests/test_auth_coverage.py:79`
+  (`if path in PUBLIC_PATHS: pytest.skip(...)` — публичные эндпоинты, для которых auth
+  сознательно не требуется), структурные и не связаны с задачей.
 - **CI на PR #45:** все три проверки зелёные — `backend-tests` (46s), `frontend-tests` (1m5s),
   `CodeRabbit` (review completed). PR помечен GitHub как `MERGEABLE`.
 
@@ -195,7 +198,9 @@ CodeRabbit/Codex один и тот же класс дефекта в guard'е �
 поддерживать список известных полей.
 
 Отдельно, вне этой цепочки: CodeRabbit-раунд на `3f751dd` (гигиена, не безопасность) — 5
-комментариев, 4 приняты (`*.env` не покрывал `<имя>.env`; `snapshot_ai_responses.py` трактовал
+комментариев, 4 приняты (`.env*` покрывает только имена, *начинающиеся* с `.env` — файл вида
+`<имя>.env` (например `.gateway.env`) оставался неигнорируемым; закрыто добавлением `*.env` рядом
+с уже существующим `.env*`, с `!.env*.example` по-прежнему последним; `snapshot_ai_responses.py` трактовал
 `PDF_ENGINE=""` как значение, а не как «не задано»; autouse-фикстура сбрасывала
 `_warned_deprecated_aliases` только на setup, не на teardown; README для managed-хостинга вёл в
 тупик — предписывал `db-dev-init`, который игнорирует `DATABASE_URL`), 1 отклонён с обоснованием
