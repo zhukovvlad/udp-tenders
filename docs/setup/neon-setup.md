@@ -32,13 +32,9 @@ postgresql+psycopg://<owner>:<password>@ep-<adjective>-<noun>-<hash>.eu-central-
 
 ## 3. Сохранить в `backend/.env`
 
-В `backend/.env` (от корня репо, не коммитится) заменить старую строку:
-
-```
-DATABASE_URL=sqlite:///./database.db
-```
-
-на полученную выше:
+В `backend/.env` (от корня репо, не коммитится) заменить строку `DATABASE_URL`
+(по умолчанию — DSN локального кластера, см. `backend/.env.example`) на
+полученную выше:
 
 ```
 DATABASE_URL=postgresql+psycopg://<owner>:<password>@ep-<adjective>-<noun>-<hash>.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require

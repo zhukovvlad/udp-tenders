@@ -23,7 +23,7 @@ B2B веб-приложение для тендерных менеджеров �
 |------|-----------|
 | Бэкенд | Python 3.12, FastAPI, SQLAlchemy (sync), Alembic, pydantic-settings |
 | Аутентификация | pyjwt (HS256), pwdlib[argon2] — httpOnly cookies, double-submit CSRF, ротация refresh-токенов |
-| База данных | PostgreSQL via Neon (serverless) — `postgresql+psycopg://` DSN |
+| База данных | PostgreSQL (`postgresql+psycopg://` DSN) — локальный кластер, Docker или managed-хостинг вроде Neon |
 | Хранилище PDF | MinIO (S3-совместимое), локальный бинарь `minio.exe` |
 | PDF-парсинг | OpenRouter API — Mistral OCR / Claude Vision |
 | Фронтенд | React 19, TypeScript, Vite, shadcn/ui, Tailwind CSS v4, Recharts |
@@ -78,11 +78,20 @@ minio.exe server ./minio-data --address ":9259" --console-address ":9260"
 
 MinIO API: `http://localhost:9259`, веб-консоль: `http://localhost:9260`.
 
-### 4. Миграция базы данных
+### 4. Локальный Postgres и миграция базы данных
+
+`DATABASE_URL` из `.env.example` по умолчанию указывает на локальный кластер —
+он не устанавливается автоматически. Разовая установка без админ-прав описана в
+[docs/testing.md](docs/testing.md), раздел «Локальный тестовый Postgres»
+(«Установка с нуля»). Если для `DATABASE_URL` выбран managed-хостинг (Neon и
+пр.) — этот шаг не нужен, база уже существует, переходите сразу к миграции.
 
 ```bash
-just db-migrate
+just db-dev-init   # создаёт БД udp_dev (если её ещё нет) и сразу накатывает миграции
 ```
+
+Для последующих миграций, когда `udp_dev` уже создана, — `just db-migrate`.
+Подробнее про `db-dev-init` и переключатель `db_target` — [docs/testing.md](docs/testing.md), раздел «Локальная dev-БД».
 
 ### 5. Создание первого пользователя и организации
 
