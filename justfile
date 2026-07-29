@@ -61,10 +61,9 @@ dev-frontend:
 
 # === Tests ===
 
-# Все backend-тесты. Если установлен локальный тестовый Postgres (см. ниже) —
-# гоняем на нём (~30 сек); иначе — TEST_DATABASE_URL из .env (Neon, ~6-8 мин).
-test-backend:
-    @if test -d "{{pg_local}}/data"; then echo "==> backend-тесты на локальном Postgres (localhost:{{pg_port}})"; just test-backend-local; else echo "==> backend-тесты на TEST_DATABASE_URL из .env (Neon)"; cd backend && uv run pytest; fi
+# Все backend-тесты. Локальный кластер обязателен: fallback на Neon свёрнут
+# ревизией §12 спеки (Neon test-ветка исключена).
+test-backend: test-backend-local
 
 # Только unit (быстро)
 test-backend-unit:
@@ -187,9 +186,9 @@ db-migrate: pg-ensure
     @echo "==> БД: {{db_target}}"
     cd backend && {{db_env}} uv run alembic upgrade head
 
-# Накатить миграции на тестовую БД (TEST_DATABASE_URL)
-db-test-migrate:
-    cd backend && DATABASE_URL=$TEST_DATABASE_URL uv run alembic upgrade head
+# Накатить миграции на локальную тестовую БД (udp_test)
+db-test-migrate: pg-test-start
+    cd backend && DATABASE_URL="{{test_db_local}}" uv run alembic upgrade head
 
 # Проверка дрейфа ORM/БД: локальная тест-БД до head + alembic check.
 # Нулевой код = моделей и схемы совпадают (нет pending upgrade ops).

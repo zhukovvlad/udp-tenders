@@ -31,8 +31,8 @@
 # Установить всё (backend + frontend)
 just install
 
-# Backend — нужен TEST_DATABASE_URL в .env.test (отдельная Neon test-ветка)
-just test-backend            # все; АВТО: локальный Postgres если установлен (~30 сек), иначе Neon
+# Backend — TEST_DATABASE_URL указывает на локальный udp_test; кластер поднимается автоматически
+just test-backend            # все backend-тесты, на локальном Postgres (~30 сек)
 just test-backend-unit       # быстро (без БД): 155 PASSED за ~1 сек
 just test-backend-integration # с реальной Postgres: 220 PASSED
 just coverage-backend        # HTML отчёт в backend/htmlcov/
@@ -57,27 +57,31 @@ just typecheck-frontend      # tsc --noEmit
 
 ### Конфигурация
 
-- **`.env.test`** в корне репо (в `.gitignore`) с `TEST_DATABASE_URL` — отдельная Neon test-ветка, **не прод**.
+- **`.env.test`** в корне репо (в `.gitignore`) с `TEST_DATABASE_URL` — локальный `udp_test`
+  на том же кластере, что `udp_dev`, **не прод**: `TEST_DATABASE_URL` не должен указывать
+  на прод-БД ни при каких обстоятельствах, независимо от вендора.
   Шаблон: `.env.test.example`. Префикс должен быть `postgresql+psycopg://`.
 - В CI (backend-tests.yml) переменные приходят из GitHub Actions env/secrets, `.env.test` не нужен.
 - **`TEST_DATABASE_URL` не появляется в raw shell env автоматически.** Внутри
   `pytest` её подхватывает плагин `pytest-dotenv` через `env_files = [".env.test"]`
   (`backend/pyproject.toml`, `[tool.pytest.ini_options]`) — переменная видна
-  ТОЛЬКО внутри процесса `pytest`. `just db-test-migrate` (читает `$TEST_DATABASE_URL`
-  из шелла) и любой ad-hoc `psql`/`alembic` вне pytest её не увидят, если
-  `.env.test` не подгружен в сам шелл вручную (`export $(cat .env.test)` / аналог
-  в PowerShell) — это ожидаемое поведение `pytest-dotenv`, не баг.
+  ТОЛЬКО внутри процесса `pytest`. Любой ad-hoc `psql`/`alembic` вне pytest её не
+  увидит, если `.env.test` не подгружен в сам шелл вручную (`export $(cat .env.test)`
+  / аналог в PowerShell) — это ожидаемое поведение `pytest-dotenv`, не баг.
+  `just db-test-migrate` этого ограничения не касается: DSN подставлен инлайн
+  через `{{test_db_local}}`, `.env.test` рецепт не читает вовсе.
 
 ---
 
 ## Локальный тестовый Postgres (быстрые integration)
 
-**Зачем.** `TEST_DATABASE_URL` по умолчанию указывает на Neon (eu-central-1) —
-каждый SQL-запрос платит ~43 мс сетевого RTT, и 324 integration-теста идут
-6–8 минут (замер 2026-07-20: `test_invoices.py`, 59 тестов — 63 с). Против
-localhost тот же файл проходит за 9.7 с (~6.5x). CI уже так работает
-(`pgvector/pgvector:pg16` service-container, полный прогон ~1 мин) — локальная
-установка воспроизводит тот же стек без Docker и без админ-прав.
+**Зачем.** До ревизии §12 спеки `TEST_DATABASE_URL` по умолчанию указывал на Neon
+(eu-central-1) — каждый SQL-запрос платил ~43 мс сетевого RTT, и 324
+integration-теста шли 6–8 минут (замер 2026-07-20: `test_invoices.py`, 59 тестов —
+63 с). Против localhost тот же файл проходит за 9.7 с (~6.5x) — эта разница и
+стала одним из аргументов в пользу исключения Neon test-ветки. CI уже работает на
+локальном стеке (`pgvector/pgvector:pg16` service-container, полный прогон ~1
+мин) — текущая установка воспроизводит тот же стек без Docker и без админ-прав.
 
 **Что установлено.** PostgreSQL 16 + pgvector 0.8.3 из conda-forge через
 портативный micromamba, целиком в профиле пользователя:
@@ -125,20 +129,13 @@ echo "port = 5459" >> "$DATA/postgresql.conf"
 `.env` не меняется: рецепты `*-local` передают `TEST_DATABASE_URL` инлайн —
 шелл-переменная имеет приоритет над значением из dotenv внутри pytest.
 
-`just test-backend` (и, следовательно, `just test`) сам выбирает БД: если
-каталог `%LOCALAPPDATA%\Programs\udp-pgtest\data` существует — локальный
-Postgres, иначе — Neon из `.env` (у контрибьюторов без локальной установки
-поведение прежнее). Явный прогон против Neon — `just test-backend-integration`:
-полезная финальная проверка перед PR, максимально близкая к прод-БД.
-
-> **Внимание (2026-07-27).** С dev-машины за корпоративной TLS-инспекцией **все**
-> пути в Neon сейчас недоступны — не только прод-БД, но и test-ветка:
-> `TEST_DATABASE_URL` тоже несёт `channel_binding=require`, и коннект падает с
-> `secure channel data mismatch` (проверено). Значит `test-backend-integration`,
-> `db-test-migrate` и `just db_target=env <рецепт>` на этой машине не работают, а
-> «финальная проверка перед PR, близкая к прод-БД» временно недоступна — её роль
-> берёт CI, где инспекции нет. Лечится снятием TLS-инспекции для `*.neon.tech`
-> на стороне IT; подробности — раздел «Локальная dev-БД».
+`just test-backend` (и, следовательно, `just test`) требует локального кластера —
+фолбэк на Neon свёрнут ревизией §12 спеки, Neon test-ветка исключена. Если
+каталог `%LOCALAPPDATA%\Programs\udp-pgtest\data` отсутствует, зависимость
+`pg-test-start` падает с внятным сообщением («Локальный Postgres не установлен —
+см. docs/testing.md»), а не тихим фолбэком. Контрибьютора без локальной установки
+обслуживает CI: там `uv run pytest` идёт напрямую, минуя `just`, против
+service-container Postgres.
 
 ---
 
@@ -153,6 +150,9 @@ SCRAM channel binding по подменённому сертификату, пр
 
 Версии совпадают точно: Neon 16.14 и локальный кластер 16.14, `vector` +
 `pg_trgm` есть в обоих — схема ложится один-в-один.
+
+Neon с этой машины недостижим из-за корпоративной TLS-инспекции; для дев-цикла
+и тестов это неважно — обе цели локальные.
 
 `udp_dev` живёт в том же кластере, что `udp_test` (порт 5459). Это безопасно:
 conftest дропает схему только в своей базе, а guard в `conftest.py` дополнительно
@@ -347,7 +347,7 @@ unzip -o pgweb.zip && mv pgweb_windows_amd64 pgweb.exe && rm pgweb.zip
 ### Backend
 
 - **pytest 9** + `pytest-asyncio` (auto-mode), `pytest-cov`, `pytest-dotenv`.
-- **`db_engine`** (session-scoped): открывает соединение к Neon test-ветке, накатывает Alembic
+- **`db_engine`** (session-scoped): открывает соединение к локальному `udp_test`, накатывает Alembic
   миграции один раз на всю сессию pytest.
 - **`db_session`** (function-scoped): каждый тест запускается в своей транзакции с
   `join_transaction_mode="create_savepoint"`. Любые `db.commit()` внутри теста
