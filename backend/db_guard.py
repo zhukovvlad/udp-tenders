@@ -16,50 +16,101 @@
 источник доверия), а не дыра в проверке; при таком паттерне работы это стоит
 держать в уме на ревью операций.
 
+ВАЖНО про источник цели: цель (host/port/dbname) берётся не хендролленным
+парсингом DSN (`urlsplit` + список query-ключей), а из того же слоя, который
+реально подключается — `_resolve_connect_target` строит connect-args через
+SQLAlchemy-диалект (`create_connect_args`), то есть то же самое, что увидел бы
+`psycopg.connect(...)`. Два независимых парсера (наш и SQLAlchemy/libpq)
+расходились на query-ключах `hostaddr` (libpq-параметр, замещающий host для
+сетевого адреса) и на `#`/`//` в пути (SQLAlchemy не знает понятия fragment) —
+подробности см. в спеке, §13 и §14.
+
 Спека: docs/superpowers/specs/2026-07-27-deploy-env-contract-design.md
 """
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
+
+from sqlalchemy.engine import make_url
 
 DEFAULT_PG_PORT = 5432
 MAX_PG_PORT = 65535
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 UNKNOWN_HOST = "<нераспознанный хост>"
 
-# libpq-ключи, которые ЗАМЕЩАЮТ хост/порт/имя БД из netloc, а не дополняют их:
-# psycopg-диалект SQLAlchemy делает `opts.update(url.query)` при сборке
-# connect-args, поэтому `?host=prod.example.com` на localhost-DSN реально
-# коннектится на prod.example.com, а не на localhost — это цель-определяющий
-# ключ, а не опция соединения вроде sslmode/channel_binding.
-TARGET_OVERRIDE_QUERY_KEYS = frozenset({"host", "port", "dbname"})
+# libpq/psycopg-ключи, которые ЗАМЕЩАЮТ хост/порт/имя БД из netloc или делают
+# цель нечитаемой для guard'а, а не дополняют netloc опцией соединения вроде
+# sslmode/channel_binding:
+#   - host/port/dbname через query — психоп-диалект SQLAlchemy делает
+#     `opts.update(url.query)` при сборке connect-args, то есть `?host=` /
+#     `?port=` / `?dbname=` подставляются в реальный коннект вместо значения
+#     из netloc, а не рядом с ним;
+#   - hostaddr — отдельный libpq-параметр: если заданы И host, И hostaddr, то
+#     РЕАЛЬНЫЙ сетевой адрес — hostaddr, host используется только для
+#     TLS-верификации имени (libpq: "Parameter Key Words", hostaddr).
+#     SQLAlchemy об этом не знает и просто прокидывает оба ключа дальше;
+#   - service — имя записи в pg_service.conf, из которой берутся host/port/
+#     dbname; guard не видит содержимое этого файла, поэтому цель для него
+#     принципиально неизвестна.
+# Единица сравнения guard'а — тройка host:port/dbname, читаемая из netloc через
+# connect-args. DSN, где любой из этих ключей задан через query, не может дать
+# доверенную тройку этим способом — цель считается нераспознанной, а не
+# подставляется «как получится» из netloc.
+TARGET_DEFINING_QUERY_KEYS = frozenset({"host", "hostaddr", "port", "dbname", "service"})
 
 
-def _has_target_override_query_key(url: str) -> bool:
-    """DSN содержит query-ключ (`host`/`port`/`dbname`), подменяющий цель из netloc.
+def _resolve_connect_target(url: str) -> tuple[str, int, str] | None:
+    """`(host, port, dbname)` так, как их увидит драйвер при реальном коннекте.
 
-    Query извлекается через `partition("?")` — ВСЁ после первого `?`, — а не
-    через `urlsplit(url).query`. Расхождение не гипотетическое: `urlsplit`
-    трактует `#` как разделитель fragment и обрезает query до него, тогда как
-    URL-парсер SQLAlchemy понятия fragment не знает вовсе (query — это хвост
-    после первого `?`, без исключений). DSN вида
-    `postgresql+psycopg://u@localhost:5459/udp_dev#frag?host=prod.example.com`
-    из-за этого расхождения давал `urlsplit(url).query == ""` (весь хвост
-    ушёл в fragment) и override оставался незамеченным, хотя SQLAlchemy
-    реально подставляет `host=prod.example.com` в connect-args (проверено
-    эмпирически на этом чекауте). `partition("?")` смотрит на URL так же, как
-    и SQLAlchemy, — синтаксического понятия `#` для него не существует.
+    `None` — разобрать не удалось или цель нельзя доверенно определить (битый
+    DSN, `service=` в query). Ось метода — не переизобретать парсинг DSN, а
+    спросить тот же слой, который реально подключается: `create_connect_args`
+    психоп-диалекта SQLAlchemy строит связку host/port/dbname точно так же,
+    как для настоящего `psycopg.connect(...)`, включая замещение из query.
 
-    Fail-closed: если разбор всё же не удался (защитный try/except — на
-    практике `partition`/`parse_qs` не бросают ни на какой строке), считаем
-    цель имеющей override (True), а не наоборот — согласно общей позиции
-    модуля «не смогли разобрать — считаем непроверяемым, не безопасным».
+    Fail-closed на каждом шаге: `make_url` бросил — `None`; среди query-ключей
+    нашёлся цель-определяющий (см. `TARGET_DEFINING_QUERY_KEYS`) — `None`,
+    независимо от того, удалось бы диалекту его разрулить технически корректно
+    (порт-only оверрайд на localhost технически остаётся loopback, но остаётся
+    query-оверрайдом, а не netloc-значением, — единица сравнения этого guard'а
+    построена на netloc, поэтому он не доверяется).
     """
     try:
-        _, sep, query = (url or "").partition("?")
-        if not sep:
-            return False
-        return bool(TARGET_OVERRIDE_QUERY_KEYS & parse_qs(query).keys())
-    except ValueError:
-        return True
+        parsed = make_url(url or "")
+    except Exception:
+        return None
+
+    if TARGET_DEFINING_QUERY_KEYS & parsed.query.keys():
+        return None
+
+    try:
+        dialect_cls = parsed.get_dialect()
+        dialect = dialect_cls()
+        connect_args = dialect.create_connect_args(parsed)
+        # Форма — (позиционные_аргументы, именованные_аргументы); не
+        # предполагаем это молча, проверяем через unpacking + duck-typing.
+        _, kwargs = connect_args
+        if not hasattr(kwargs, "get"):
+            raise TypeError("create_connect_args: второй элемент не dict-like")
+        host = str(kwargs.get("host") or "").lower().rstrip(".")
+        port = kwargs.get("port") or DEFAULT_PG_PORT
+        dbname = str(kwargs.get("dbname") or "")
+    except Exception:
+        # Диалект не импортируется — на практике это редкий, но реальный
+        # случай: bare `postgresql://` (без `+psycopg`) резолвится в
+        # психоп2-диалект, а в проекте установлен только psycopg 3 (`uv.lock`).
+        # Единственный источник, оставшийся доступным после отказа диалекта, —
+        # атрибуты самого `make_url`; они НИКОГДА не отражают query-оверрайды
+        # (уже отфильтровано выше), поэтому доверять netloc-полям здесь
+        # безопасно. Путь у́же основного: он существует только на случай «драйвер
+        # не импортируется», когда реально подключиться всё равно было бы нечем.
+        host = (parsed.host or "").lower().rstrip(".")
+        port = parsed.port or DEFAULT_PG_PORT
+        dbname = parsed.database or ""
+
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        port = DEFAULT_PG_PORT
+    return (host, port, dbname)
 
 
 def safe_host(url: str) -> str:
@@ -77,28 +128,25 @@ def normalize_target(url: str) -> str:
 
     Единица сравнения включает имя БД, потому что CI различает свои цели только
     им: `localhost:5432/postgres` против `localhost:5432/udp_test`.
-    Query-параметры обычно отбрасываются — цели, различающиеся только ими, это
-    одна цель. ИСКЛЮЧЕНИЕ: query-ключи `host`/`port`/`dbname` — libpq принимает
-    их наравне с netloc, и psycopg-диалект SQLAlchemy их туда и подставляет
-    (`opts.update(url.query)`), замещая, а не дополняя значение из netloc. Такой
-    DSN даёт `UNKNOWN_HOST`: цель, реально видимая psycopg, не совпадает с тем,
-    что видна в netloc, а значит сравнивать по netloc — значит сравнивать не ту
-    цель. Пустой или неразбираемый хост тоже даёт `UNKNOWN_HOST`: такая цель не
-    loopback и ни с чем не совпадает (fail-closed).
+
+    Триплет строится из `_resolve_connect_target` — источник тот же слой,
+    который реально подключается (см. модульный докстринг). Нераспознанная
+    цель (битый DSN, `service=`/`hostaddr=`/`host=`/`port=`/`dbname=` в query)
+    даёт `UNKNOWN_HOST`-форму: такая цель не loopback и не совпадает ни с одной
+    записью `DB_EXTRA_TARGETS` (маркер отдельно запрещён как запись —
+    `parse_extra_targets` его отвергает).
+
+    Пустой hostname (socket-DSN вида `postgresql:///db`) — тоже `UNKNOWN_HOST`
+    для хост-части: `_resolve_connect_target` в этом случае успешно вернул
+    порт и dbname, но host — пустая строка, и она заменяется на маркер здесь
+    же, не в `_resolve_connect_target` (там пустой host — валидный ответ, а не
+    признак отказа).
     """
-    if _has_target_override_query_key(url):
+    resolved = _resolve_connect_target(url)
+    if resolved is None:
         return f"{UNKNOWN_HOST}:{DEFAULT_PG_PORT}/"
-    try:
-        parts = urlsplit(url or "")
-        host = (parts.hostname or "").lower().rstrip(".") or UNKNOWN_HOST
-        port = parts.port or DEFAULT_PG_PORT
-        # dbname сравнивается литералом: без unquote() и без lower() —
-        # "/db%2Dname" и "/db-name" считаются разными целями. Это fail-closed
-        # в безопасную сторону: лишняя запись в allowlist не совпадёт с
-        # настоящей целью, а не наоборот.
-        dbname = (parts.path or "").lstrip("/")
-    except ValueError:
-        return f"{UNKNOWN_HOST}:{DEFAULT_PG_PORT}/"
+    host, port, dbname = resolved
+    host = host or UNKNOWN_HOST
     return f"{host}:{port}/{dbname}"
 
 
@@ -142,17 +190,18 @@ def parse_extra_targets(raw: str) -> frozenset[str]:
 def is_target_allowed(url: str, extra: frozenset[str]) -> bool:
     """Разрешена ли цель в dev: loopback (любая база) или запись из allowlist.
 
-    Loopback-шорткат сверяется по `safe_host(url)` — хосту из netloc. Если DSN
-    несёт query-ключ `host`/`port`/`dbname`, реальная цель psycopg — не netloc
-    (см. `normalize_target`), и loopback-вид netloc ничего не доказывает:
-    `?host=localhost...&host=prod...` невозможен, но обратный случай —
-    localhost-netloc с `?host=prod.example.com` — обманул бы шорткат, если его
-    не проверить отдельно. Поэтому override-ключ отклоняет и loopback-путь, не
-    только allowlist-путь.
+    Loopback-шорткат сверяется по **резолвленному** хосту из
+    `_resolve_connect_target`, а не по `safe_host(url)` (netloc). Иначе
+    `?hostaddr=10.1.2.3` на `localhost`-netloc обманул бы шорткат: netloc
+    показывает loopback, а реальный коннект (libpq отдаёт приоритет hostaddr
+    над host) уходит на `10.1.2.3`. Нераспознанная цель (см.
+    `_resolve_connect_target`) отклоняется безусловно — fail-closed.
     """
-    if _has_target_override_query_key(url):
+    resolved = _resolve_connect_target(url)
+    if resolved is None:
         return False
-    if safe_host(url) in LOOPBACK_HOSTS:
+    host, _port, _dbname = resolved
+    if host in LOOPBACK_HOSTS:
         return True
     return normalize_target(url) in extra
 

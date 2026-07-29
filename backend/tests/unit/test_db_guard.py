@@ -3,6 +3,7 @@ import pytest
 
 from db_guard import (
     UNKNOWN_HOST,
+    _resolve_connect_target,
     ensure_mutation_allowed,
     is_target_allowed,
     normalize_target,
@@ -316,3 +317,129 @@ def test_error_leaks_no_password():
     with pytest.raises(RuntimeError) as exc:
         ensure_mutation_allowed(REMOTE_URL, "cli create-superuser")
     assert "secret-pw" not in str(exc.value)
+
+
+# --- Регресс: `_resolve_connect_target` вместо urlsplit+блэклиста ----------
+#
+# Найдено внешним ревью после второго патча: guard разбирал DSN сам
+# (urlsplit + список query-ключей), а реально подключается SQLAlchemy-диалект
+# + libpq — два независимых парсера расходились на `hostaddr` (libpq отдаёт
+# ему приоритет над `host` для сетевого адреса, но не входил в старый список
+# TARGET_OVERRIDE_QUERY_KEYS) и на `#`/`//` в пути (SQLAlchemy не знает
+# понятия fragment, а `#`-тесты уже были покрыты отдельно — здесь добавлены
+# `dev#archive`/`//dev` без `?host=` вовсе, то есть без явного query-ключа).
+
+
+def test_hostaddr_query_key_denies_loopback_shortcut():
+    """`?hostaddr=` на loopback-netloc не проходит loopback-шорткат.
+
+    libpq: если заданы И host, И hostaddr, реальный сетевой адрес — hostaddr,
+    host используется только для TLS-верификации имени. `10.1.2.3` — не
+    loopback, поэтому реальное соединение уходит не туда, куда указывает
+    netloc (`localhost`). `hostaddr` входит в TARGET_DEFINING_QUERY_KEYS
+    наравне с host/port/dbname/service — по той же причине: тройка,
+    прочитанная из netloc, не описывает цель, к которой реально подключится
+    psycopg.
+    """
+    url = "postgresql+psycopg://u:p@localhost:5459/udp_dev?hostaddr=10.1.2.3"
+    assert is_target_allowed(url, frozenset()) is False
+
+
+def test_normalize_target_rejects_hostaddr_query_key():
+    """`?hostaddr=` даёт `UNKNOWN_HOST`, а не тройку из netloc или из hostaddr.
+
+    Не подставляем и резолвленный `10.1.2.3` вместо netloc: единица
+    сравнения guard'а — netloc-тройка, а DSN с hostaddr эту тройку сделать
+    доверенной не может — ровно так же, как `?host=`/`?port=`/`?dbname=`.
+    """
+    url = "postgresql+psycopg://u:p@localhost:5459/udp_dev?hostaddr=10.1.2.3"
+    result = normalize_target(url)
+    assert result.startswith(UNKNOWN_HOST)
+    with pytest.raises(ValueError):
+        parse_extra_targets(result)
+
+
+def test_normalize_target_rejects_service_query_key():
+    """`?service=` даёт `UNKNOWN_HOST`: pg_service.conf guard не видит.
+
+    service тянет host/port/dbname из файла конфигурации, которого guard не
+    видит вовсе — цель принципиально неизвестна, а не просто «отличается от
+    netloc».
+    """
+    url = "postgresql+psycopg://u@remote.example.com:5432/dev?service=myservice"
+    result = normalize_target(url)
+    assert result.startswith(UNKNOWN_HOST)
+
+
+def test_is_target_allowed_denies_service_query_key():
+    """`?service=` запрещён безусловно — даже с непустым allowlist."""
+    url = "postgresql+psycopg://u@remote.example.com:5432/dev?service=myservice"
+    extra = parse_extra_targets("remote.example.com:5432/dev")
+    assert is_target_allowed(url, extra) is False
+
+
+def test_normalize_target_does_not_collapse_fragment_dbname_to_bare_name():
+    """`/dev#archive` в пути — часть имени БД, а не `#`-разделитель fragment.
+
+    SQLAlchemy (и реальный psycopg-коннект) не знает понятия URL-fragment —
+    всё после первого `/` в пути является именем БД буквально, включая `#`.
+    Запись в DB_EXTRA_TARGETS для `dev` не должна пропускать эту цель:
+    реальная БД называется `dev#archive`, а не `dev`.
+    """
+    url = "postgresql+psycopg://u:p@remote.example.com:5432/dev#archive"
+    result = normalize_target(url)
+    assert result == "remote.example.com:5432/dev#archive"
+    extra = parse_extra_targets("remote.example.com:5432/dev")
+    assert is_target_allowed(url, extra) is False
+
+
+def test_normalize_target_does_not_collapse_double_slash_dbname_to_bare_name():
+    """`//dev` в пути даёт имя БД `/dev`, а не `dev` — совпадения по `dev` нет."""
+    url = "postgresql+psycopg://u:p@remote.example.com:5432//dev"
+    result = normalize_target(url)
+    assert result == "remote.example.com:5432//dev"
+    extra = parse_extra_targets("remote.example.com:5432/dev")
+    assert is_target_allowed(url, extra) is False
+
+
+def test_resolve_connect_target_falls_back_when_dialect_unavailable(monkeypatch):
+    """Отказ диалекта (`ModuleNotFoundError`-подобный) не глушит легитимный DSN.
+
+    Диалект недоступен (типовая причина — bare `postgresql://` резолвится в
+    психоп2, которого нет в проекте: используется psycopg 3). Единственный
+    оставшийся источник — атрибуты самого `make_url`, которые не видят
+    query-оверрайды (уже отфильтровано до попытки диалекта), поэтому
+    fallback безопасен. Мокаем сам сбой диалекта, а не полагаемся на то, что
+    конкретная версия SQLAlchemy действительно бросит его для bare DSN —
+    поведение проверено эмпирически и оказалось иным (см. отчёт).
+    """
+    import sqlalchemy.engine.url as sa_url
+
+    def _boom(self, _is_async=False):
+        raise ModuleNotFoundError("psycopg2")
+
+    monkeypatch.setattr(sa_url.URL, "get_dialect", _boom)
+    result = _resolve_connect_target("postgresql://u@h.example.com:5432/db")
+    assert result == ("h.example.com", 5432, "db")
+
+
+def test_resolve_connect_target_fallback_still_rejects_query_override(monkeypatch):
+    """Fallback тоже не доверяет query-оверрайдам — проверка стоит до диалекта.
+
+    Проверка `TARGET_DEFINING_QUERY_KEYS` в `_resolve_connect_target`
+    выполняется один раз, до ветвления primary/fallback, поэтому она
+    защищает fallback-путь так же, как основной.
+    """
+    import sqlalchemy.engine.url as sa_url
+
+    def _boom(self, _is_async=False):
+        raise ModuleNotFoundError("psycopg2")
+
+    monkeypatch.setattr(sa_url.URL, "get_dialect", _boom)
+    result = _resolve_connect_target("postgresql://u@localhost:5432/db?hostaddr=10.1.2.3")
+    assert result is None
+
+
+def test_resolve_connect_target_returns_none_for_unparsable_url():
+    """`make_url` сам бросает — `_resolve_connect_target` даёт `None`, не трассу."""
+    assert _resolve_connect_target("postgresql://u@[bad:ipv6/db") is None

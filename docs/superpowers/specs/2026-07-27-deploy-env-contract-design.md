@@ -108,6 +108,8 @@ def ensure_mutation_allowed(url: str, action: str) -> None:
 
 Конфиг читается через свежий `Settings()`. Это даёт `Literal`-валидацию `APP_ENV`, один
 путь чтения для всех call-site и независимость от CWD (после правки `env_file`, коммит 1).
+**[Ревизия §16: абсолютный `env_file` необходим, но не достаточен для CWD-независимости в
+тестах — отдельная утечка через `alembic/env.py`, см. §16.]**
 
 Цель передаётся **аргументом** — тем URL, который вызывающий собирается мутировать, а не
 `settings.DATABASE_URL`. Принципиально: в `db-test-migrate` цель приходит из process env,
@@ -381,6 +383,8 @@ loopback, — но при правильной позиции шага его н
   пин `OPENROUTER_MODEL=""`, добавленный в `a8601aa`, снят, и `test_get_settings` зелёный без
   него. Формально это частичная отмена `a8601aa`: пин лечил симптом при незакрытом корне,
   корень закрывается — пин уходит.
+  **[Ревизия §16: пин реально снялся не одним этим коммитом — потребовалась ещё
+  снапшот/restore `os.environ` в `conftest.py` вокруг in-process `command.upgrade`, см. §16.]**
 - **AC-1.** `APP_ENV` — `Literal["dev","prod"]`, дефолт `dev`. Невалидное значение падает на
   валидации `Settings`.
 - **AC-2.** При `APP_ENV=dev` мутация не-loopback цели, отсутствующей в `DB_EXTRA_TARGETS`,
@@ -496,6 +500,114 @@ loopback-шорткату для такого DSN — иначе он смотр
 Транзитивно закрывает ту же дыру в барьере (a) `backend/tests/conftest.py`
 (`db_engine`-фикстура) — он сравнивает `TEST_DATABASE_URL`/`DATABASE_URL` через
 `normalize_target`.
+
+**[Ревизия §15: механизм этого раздела (`_has_target_override_query_key`,
+`TARGET_OVERRIDE_QUERY_KEYS`, ручной `partition("?")`) заменён — второй внешний обзор нашёл
+ещё две дыры того же класса (`hostaddr`, `#`/`//` в пути), и вместо третьего точечного патча
+guard переведён на чтение цели из connect-args самого SQLAlchemy-диалекта. Подробности,
+включая почему это не еще один точечный патч, а закрытие всего класса дыры, — в §15.]**
+
+## 15. Ревизия 2026-07-29 (продолжение): цель — из connect-args драйвера, а не из ручного парсинга
+
+**Находка второго внешнего ревью** (после патча §14, тот же прогон PR #45). §14 закрыл
+`?host=`/`?port=`/`?dbname=` через query и `#`-fragment точечно, но сам механизм остался
+структурным риском: guard разбирает DSN сам (`urlsplit` + список цель-определяющих
+query-ключей), тогда как реально подключается SQLAlchemy-диалект + libpq — два независимых
+парсера. Второе ревью нашло ещё две дыры того же класса, обе воспроизведены эмпирически на
+этом чекауте:
+
+- **`?hostaddr=`** — libpq-параметр, не входивший в список §14, и легитимный: DNS bypass,
+  pgBouncer, Cloud SQL-коннекторы. При одновременных `host` и `hostaddr` РЕАЛЬНЫЙ сетевой
+  адрес — `hostaddr`, `host` используется только для TLS-верификации имени (libpq:
+  "Parameter Key Words", `hostaddr`). DSN
+  `postgresql+psycopg://u:p@localhost:5459/udp_dev?hostaddr=10.1.2.3` проходил
+  loopback-шорткат (`safe_host()` видел `localhost`), хотя реальный коннект уходит на
+  `10.1.2.3` — не loopback.
+- **`/dev#archive`** и **`//dev`** в пути (без единого query-ключа из списка §14).
+  SQLAlchemy (и реальный psycopg-коннект) не знает понятия URL-fragment вовсе: `#` и второй
+  `/` в пути — часть имени БД буквально. Старый `normalize_target` через
+  `urlsplit(url).path.lstrip("/")` давал `dev` в обоих случаях (обрезая `#archive` как
+  fragment и один ведущий `/` как разделитель пути), хотя реальная БД называется
+  `dev#archive` / `/dev` — запись allowlist `remote.example.com:5432/dev` пропускала DSN,
+  целящийся на другую базу.
+
+**Фикс** (`backend/db_guard.py`): весь механизм §13/§14 —
+`_has_target_override_query_key`, `TARGET_OVERRIDE_QUERY_KEYS`, `partition("?")`-парсинг —
+удалён и заменён приватной `_resolve_connect_target(url) -> tuple[host, port, dbname] | None`:
+
+1. DSN разбирается через `sqlalchemy.engine.make_url` — единый парсер вместо `urlsplit`,
+   снимающий саму возможность расхождения по `#`/`//`: `make_url(...).query` для
+   `...#frag?host=...` уже не путает fragment с query (проверено эмпирически — даёт тот же
+   результат, что и старый `partition("?")`, но через парсер SQLAlchemy, а не
+   переизобретённый вручную);
+2. DSN, где среди query-ключей есть `host`/`hostaddr`/`port`/`dbname`/`service`
+   (`TARGET_DEFINING_QUERY_KEYS` — `hostaddr` и `service` добавлены к списку §14),
+   отклоняется безусловно (`None`). `service` — потому что тянет host/port/dbname из
+   `pg_service.conf`, файла, которого guard не видит, то есть цель принципиально неизвестна,
+   а не просто «отличается от netloc»;
+3. для остальных DSN триплет строится через `create_connect_args` того же
+   SQLAlchemy-диалекта, который использовал бы `create_engine(...)`, — guard спрашивает тот
+   же слой, который реально подключается, вместо повторной ручной реализации;
+4. узкий fallback на атрибуты самого `make_url` (`.host`/`.port`/`.database`) — на случай,
+   если диалект не импортируется (например, bare `postgresql://` резолвится в психоп2,
+   который не установлен в проекте — используется psycopg 3, `uv.lock`). Эти атрибуты по
+   построению не видят query-оверрайды, поэтому применять их для DSN, уже отфильтрованных
+   на шаге 2, безопасно. Проверка шага 2 стоит один раз, до ветвления на диалект/fallback —
+   защищает оба пути одинаково, а не только fallback.
+
+`normalize_target` и `is_target_allowed` оба построены на `_resolve_connect_target`;
+`is_target_allowed`'s loopback-шорткат сверяется по **резолвленному** хосту, а не по
+`safe_host(url)` — вторым было ровно то, что открывало `hostaddr`-дыру.
+
+**Эмпирическая проверка** (на этом чекауте, `create_connect_args` напрямую):
+
+| DSN | Реальные connect-args | Guard до фикса | Guard после фикса |
+|---|---|---|---|
+| `?hostaddr=10.1.2.3` на `localhost` | `host='localhost', hostaddr='10.1.2.3'` | `localhost:5459/udp_dev` → `allowed=True` | `<нераспознанный хост>:5432/` → `allowed=False` |
+| `.../dev#archive` | `dbname='dev#archive'` | `remote.example.com:5432/dev` (совпадает с allowlist `dev`) | `remote.example.com:5432/dev#archive` → `allowed=False` |
+| `.../…//dev` (двойной слэш) | `dbname='/dev'` | `remote.example.com:5432/dev` (совпадает) | `remote.example.com:5432//dev` → `allowed=False` |
+
+Существующие тесты `?host=`/`?port=`/`?dbname=` (§14) и `#`-fragment остались зелёными без
+изменений: эти три ключа уже входят в `TARGET_DEFINING_QUERY_KEYS`, и поведение для них не
+изменилось (по-прежнему безусловный отказ), только источник разбора — не самодельный
+`partition("?")` + `parse_qs`, а `make_url(...).query`.
+
+## 16. Ревизия 2026-07-29 (ещё один проход): AC-0 — пин `OPENROUTER_MODEL=""` снялся утечкой os.environ, не одним абсолютным `env_file`
+
+**Уточнение к §5 и §10 (AC-0).** §5 (строка «независимость от CWD (после правки `env_file`,
+коммит 1)») и §10 AC-0 описывали закрытие CWD-зависимости `env_file` как достаточное условие
+для снятия пина `OPENROUTER_MODEL=""` в `test_get_settings` (пин добавлен в `a8601aa`). Ветка
+это не подтвердила: абсолютный `env_file` — необходимое, но **не достаточное** условие.
+
+Отдельная, независимая утечка обнаружилась при исполнении коммита 2 (задокументирована в
+`task-1-report.md` и commit-message `0a1e915`): `backend/tests/conftest.py`, фикстура
+`db_engine`, вызывает `command.upgrade(cfg, "head")` **in-process** (не подпроцессом) для
+наката тестовых миграций. Это импортирует `backend/alembic/env.py`, а тот на уровне модуля
+делает `load_dotenv(ROOT / ".env")` (без `override` — инвариант AC-7, трогать нельзя).
+Настоящий `backend/.env` разработчика от этого оседает в **реальном** `os.environ` на весь
+остаток pytest-сессии, а pydantic-settings безусловно ранжирует env выше dotenv-источника —
+поэтому дальнейшие `Settings(_env_file=...)` в тестах ничем не защищены от этой утечки,
+сколько бы ни был абсолютным сам `env_file`. На машине с непустым `OPENROUTER_MODEL` в
+`backend/.env` это значение переживало `Settings(_env_file=fake_env)` в тесте и ломало
+`test_get_settings`, поэтому пин `monkeypatch.setenv("OPENROUTER_MODEL", "")` был возвращён
+сразу после коммита 1 (см. правку в `0a1e915`, отменяющую снятие из Task-1-брифа).
+
+Пин снялся только тогда, когда `db_engine` стал сохранять снапшот `os.environ` перед
+`command.upgrade()` и восстанавливать его в `finally` (коммит `25b6786`,
+`backend/tests/conftest.py`, строки со `_environ_snapshot`). Commit-message `25b6786`
+формулирует причину верно уже на тот момент («это позволило снять пин ... — тест теперь
+зелёный без него (AC-0)») — расхождение было только в тексте самой спеки (§5/§10), которая
+продолжала связывать AC-0 исключительно с коммитом 1, не в реализации.
+
+**Следствия:**
+
+| Что | Было (§5/§10) | Уточнено |
+|---|---|---|
+| Причина пина `OPENROUTER_MODEL=""` | CWD-относительный `env_file` | абсолютный `env_file` необходим, но недостаточен — реальная причина: утечка `backend/.env` в `os.environ` через module-level `load_dotenv` в `alembic/env.py` при in-process `command.upgrade` |
+| Что реально закрыло AC-0 | коммит 1 (`env_file` абсолютный) | коммит 1 (предусловие, необходимое) **+** снапшот/restore `os.environ` вокруг `command.upgrade` в `conftest.py` (`db_engine`, коммит `25b6786`) |
+| `alembic/env.py`'s `load_dotenv` | — | не трогается и не может быть причиной сама по себе: вызов нужен для `db-test-migrate` (AC-7); утечка — побочный эффект **только** в in-process тестовом сценарии (`command.upgrade` внутри pytest-процесса), закрыт на стороне `conftest.py`, не на стороне `env.py` |
+
+Текст §5 и §10 не переписан — см. пометки на местах.
 
 ## См. также
 
