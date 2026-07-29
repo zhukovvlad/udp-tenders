@@ -25,10 +25,14 @@ def _unlisted_target_in_dev(monkeypatch):
 
     DB_EXTRA_TARGETS пиним явно: env_file абсолютный, и в реальном backend/.env
     список может быть непустым — иначе тест был бы зелёным в CI и красным на
-    машине разработчика.
+    машине разработчика. `PGPORT` тоже снимается: REMOTE_URL без явного порта,
+    и невалидный `PGPORT` в шелле поменял бы сообщение об ошибке (нераспознанная
+    цель вместо обычного отказа dev-целью) — тесты ниже проверяют текст именно
+    второго вида.
     """
     monkeypatch.setenv("APP_ENV", "dev")
     monkeypatch.setenv("DB_EXTRA_TARGETS", "")
+    monkeypatch.delenv("PGPORT", raising=False)
     monkeypatch.setattr(cli.settings, "DATABASE_URL", REMOTE_URL, raising=False)
 
 

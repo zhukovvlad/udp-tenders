@@ -14,11 +14,11 @@
 делают её неотличимой от настоящего localhost — guard её пропустит без
 объявления в DB_EXTRA_TARGETS. Осознанный компромисс дизайна (loopback как
 источник доверия), а не дыра в проверке; при таком паттерне работы это стоит
-держать в уме на ревью операций. Тот же ряд: DSN без явного порта, чья
-`host:5432/db`-тройка есть в `DB_EXTRA_TARGETS`, подключится не на дефолтный
-5432, а туда, куда указывает `$PGPORT`, если та задана в окружении процесса —
-единственный libpq-переменная-окружения вектор fail-open, практически
-недостижимый, пока `DB_EXTRA_TARGETS` пуст (см. §5 спеки).
+держать в уме на ревью операций. Тот же ряд: DSN без явного порта резолвит
+порт через `$PGPORT` (libpq-приоритет: DSN → service-файл → env → built-in
+default) точно так же, как это сделал бы реальный коннект — `_resolve_connect_target`
+подставляет `DEFAULT_PG_PORT` только если `PGPORT` не задан вовсе (см. §16
+спеки).
 
 ВАЖНО про источник цели: цель (host/port/dbname) берётся не хендролленным
 парсингом DSN (`urlsplit` + список query-ключей), а из того же слоя, который
@@ -33,6 +33,7 @@ SQLAlchemy-диалект (`create_connect_args`), то есть то же са�
 
 Спека: docs/superpowers/specs/2026-07-27-deploy-env-contract-design.md
 """
+import os
 from urllib.parse import urlsplit
 
 from sqlalchemy.engine import make_url
@@ -41,6 +42,28 @@ DEFAULT_PG_PORT = 5432
 MAX_PG_PORT = 65535
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 UNKNOWN_HOST = "<нераспознанный хост>"
+
+
+def _port_from_env_or_default() -> int | None:
+    """Порт для DSN без явного порта — так, как это сделал бы сам libpq.
+
+    Приоритет параметров подключения в libpq: DSN/keyword-аргументы →
+    service-файл → переменные окружения → built-in default. Guard уже
+    отклоняет DSN с `service=` (см. `TARGET_DEFINING_QUERY_KEYS`), поэтому
+    следующий по приоритету источник после самого DSN — `$PGPORT`.
+
+    `PGPORT` не задан → `DEFAULT_PG_PORT` (сегодняшнее поведение). Задан, но
+    не ASCII-цифры в диапазоне 0-65535 → `None`: libpq всё равно отверг бы
+    такое значение при реальном коннекте, а тихая подстановка `5432` была бы
+    маленькой ложью о цели — fail-closed предпочтительнее.
+    """
+    raw = os.environ.get("PGPORT")
+    if raw is None:
+        return DEFAULT_PG_PORT
+    if raw.isdigit() and raw.isascii() and int(raw) <= MAX_PG_PORT:
+        return int(raw)
+    return None
+
 
 # libpq/psycopg-ключи, которые ЗАМЕЩАЮТ хост/порт/имя БД из netloc или делают
 # цель нечитаемой для guard'а, а не дополняют netloc опцией соединения вроде
@@ -77,7 +100,9 @@ def _resolve_connect_target(url: str) -> tuple[str, int, str] | None:
     независимо от того, удалось бы диалекту его разрулить технически корректно
     (порт-only оверрайд на localhost технически остаётся loopback, но остаётся
     query-оверрайдом, а не netloc-значением, — единица сравнения этого guard'а
-    построена на netloc, поэтому он не доверяется).
+    построена на netloc, поэтому он не доверяется). Отсутствующий в DSN порт
+    резолвится через `$PGPORT` (см. `_port_from_env_or_default`) — невалидный
+    `PGPORT` тоже даёт `None`, а не тихий откат на `DEFAULT_PG_PORT`.
     """
     try:
         parsed = make_url(url or "")
@@ -97,7 +122,7 @@ def _resolve_connect_target(url: str) -> tuple[str, int, str] | None:
         if not hasattr(kwargs, "get"):
             raise TypeError("create_connect_args: второй элемент не dict-like")
         host = str(kwargs.get("host") or "").lower().rstrip(".")
-        port = kwargs.get("port") or DEFAULT_PG_PORT
+        port = kwargs.get("port")
         dbname = str(kwargs.get("dbname") or "")
     except Exception:
         # Диалект не импортируется — реальный, не гипотетический триггер:
@@ -116,9 +141,15 @@ def _resolve_connect_target(url: str) -> tuple[str, int, str] | None:
         # Путь у́же основного: он существует только на случай «диалект не
         # резолвится», когда реально подключиться всё равно было бы нечем.
         host = (parsed.host or "").lower().rstrip(".")
-        port = parsed.port or DEFAULT_PG_PORT
+        port = parsed.port
         dbname = parsed.database or ""
 
+    if port is None:
+        # Явного порта в DSN нет ни в одной из веток — берём из окружения так
+        # же, как это сделал бы сам libpq (DSN → service-файл → env → default).
+        port = _port_from_env_or_default()
+        if port is None:
+            return None
     try:
         port = int(port)
     except (TypeError, ValueError):
@@ -144,8 +175,9 @@ def normalize_target(url: str) -> str:
 
     Триплет строится из `_resolve_connect_target` — источник тот же слой,
     который реально подключается (см. модульный докстринг). Нераспознанная
-    цель (битый DSN, `service=`/`hostaddr=`/`host=`/`port=`/`dbname=` в query)
-    даёт `UNKNOWN_HOST`-форму: такая цель не loopback и не совпадает ни с одной
+    цель (битый DSN, `service=`/`hostaddr=`/`host=`/`port=`/`dbname=` в query,
+    либо `$PGPORT` в окружении задан, но не ASCII-цифры 0-65535) даёт
+    `UNKNOWN_HOST`-форму: такая цель не loopback и не совпадает ни с одной
     записью `DB_EXTRA_TARGETS` (маркер отдельно запрещён как запись —
     `parse_extra_targets` его отвергает).
 
@@ -248,9 +280,10 @@ def ensure_mutation_allowed(url: str, action: str) -> None:
         return
 
     if _resolve_connect_target(url) is None:
-        # Цель нераспознана (битый DSN либо `host`/`hostaddr`/`port`/`dbname`/
-        # `service` в query — см. TARGET_DEFINING_QUERY_KEYS): normalize_target
-        # в этом случае даёт UNKNOWN_HOST-форму, которую parse_extra_targets
+        # Цель нераспознана: битый DSN, `host`/`hostaddr`/`port`/`dbname`/
+        # `service` в query (см. TARGET_DEFINING_QUERY_KEYS), либо `$PGPORT`
+        # в окружении задан, но не ASCII-цифры 0-65535. normalize_target в
+        # этом случае даёт UNKNOWN_HOST-форму, которую parse_extra_targets
         # безусловно отвергает как запись — совет «добавьте её в
         # DB_EXTRA_TARGETS» был бы гарантированно нерабочим (и в некоторых
         # случаях — рецептом уйти на непреднамеренную цель, скрытую query-
@@ -261,12 +294,14 @@ def ensure_mutation_allowed(url: str, action: str) -> None:
             f"{action}: цель DSN не удалось однозначно определить при APP_ENV=dev.\n"
             f"Хост в основной части DSN (может не совпадать с реальной целью "
             f"коннекта — потому и отказ): {safe_host(url) or UNKNOWN_HOST}.\n"
-            "Причина одна из двух: DSN не разбирается (проверьте синтаксис), либо "
-            "он содержит host/hostaddr/port/dbname/service в query-строке — guard "
+            "Возможные причины: DSN не разбирается (проверьте синтаксис); он "
+            "содержит host/hostaddr/port/dbname/service в query-строке — guard "
             "не доверяет такой цели, потому что реальный коннект может отличаться "
-            "от того, что видно в основной части DSN.\n"
+            "от того, что видно в основной части DSN; либо DSN без явного порта, "
+            "а переменная окружения PGPORT задана значением вне 0-65535.\n"
             "Если дело в query-ключе — уберите его из query-строки (перенесите "
-            "значение в основную часть DSN, если оно нужно) и повторите операцию."
+            "значение в основную часть DSN, если оно нужно) и повторите операцию. "
+            "Если дело в PGPORT — поправьте значение переменной окружения."
         )
 
     target = normalize_target(url)

@@ -29,9 +29,15 @@ def _hermetic_guard_env(monkeypatch):
     инструкция плана предписывает вписать туда DB_EXTRA_TARGETS. Тогда «дефолт
     пустой» был бы зелёным в CI (файла нет) и красным у каждого, кто инструкцию
     выполнил. Process env бьёт env_file — тем же механизмом, что и пин.
+
+    `PGPORT` тоже снимается: `_resolve_connect_target` читает его напрямую из
+    `os.environ` (см. `_port_from_env_or_default`), а не через `Settings()`, —
+    без явного `delenv` тесты порт-дефолта зависели бы от того, задан ли
+    `PGPORT` в шелле разработчика/CI-раннера.
     """
     monkeypatch.setenv("APP_ENV", "dev")
     monkeypatch.setenv("DB_EXTRA_TARGETS", "")
+    monkeypatch.delenv("PGPORT", raising=False)
 
 
 def test_normalize_target_builds_triple():
@@ -487,3 +493,75 @@ def test_resolve_connect_target_primary_path_uses_create_connect_args(monkeypatc
     result = _resolve_connect_target("postgresql+psycopg://u@h.example.com:5432/db")
     assert result == ("h.example.com", 5432, "db")
     assert len(calls) == 1
+
+
+# --- Регресс: $PGPORT для DSN без явного порта (CodeRabbit, поверх 2a07417) --
+#
+# libpq-приоритет параметров: DSN/keyword-аргументы → service-файл → env →
+# built-in default. `_resolve_connect_target` подставлял DEFAULT_PG_PORT
+# безусловно для DSN без порта — allowlist-запись `host:5432/db` тем самым
+# разрешала мутацию DSN, который реально коннектится на `host:$PGPORT/db`,
+# если `PGPORT` задан в окружении процесса. Loopback-ветка не затронута:
+# loopback разрешает любую базу на любом порту by design.
+
+
+def test_normalize_target_uses_pgport_when_dsn_has_no_explicit_port(monkeypatch):
+    """Портless DSN + `$PGPORT` → нормализованная тройка содержит `PGPORT`."""
+    monkeypatch.setenv("PGPORT", "6001")
+    url = "postgresql+psycopg://u@remote.example.com/db"
+    assert normalize_target(url) == "remote.example.com:6001/db"
+
+
+def test_is_target_allowed_denies_default_port_entry_when_pgport_set(monkeypatch):
+    """Allowlist-запись с портом `5432` не пропускает DSN, реально идущий на `PGPORT`."""
+    monkeypatch.setenv("PGPORT", "6001")
+    url = "postgresql+psycopg://u@remote.example.com/db"
+    extra = parse_extra_targets("remote.example.com:5432/db")
+    assert is_target_allowed(url, extra) is False
+
+
+def test_is_target_allowed_permits_pgport_entry_when_pgport_set(monkeypatch):
+    """Allowlist-запись с реальным `PGPORT`-портом пропускает тот же DSN."""
+    monkeypatch.setenv("PGPORT", "6001")
+    url = "postgresql+psycopg://u@remote.example.com/db"
+    extra = parse_extra_targets("remote.example.com:6001/db")
+    assert is_target_allowed(url, extra) is True
+
+
+def test_explicit_dsn_port_wins_over_differing_pgport(monkeypatch):
+    """Явный порт в DSN сильнее `$PGPORT` — тот же приоритет, что и у libpq."""
+    monkeypatch.setenv("PGPORT", "6001")
+    url = "postgresql+psycopg://u@remote.example.com:5432/db"
+    assert normalize_target(url) == "remote.example.com:5432/db"
+    extra = parse_extra_targets("remote.example.com:5432/db")
+    assert is_target_allowed(url, extra) is True
+
+
+def test_normalize_target_defaults_to_5432_when_pgport_unset(monkeypatch):
+    """`PGPORT` не задан → поведение как сегодня, порт `5432`."""
+    monkeypatch.delenv("PGPORT", raising=False)
+    url = "postgresql+psycopg://u@remote.example.com/db"
+    assert normalize_target(url) == "remote.example.com:5432/db"
+
+
+@pytest.mark.parametrize("bad_pgport", ["abc", "-1", "99999999", "5432.0", "5432 "])
+def test_resolve_connect_target_denies_invalid_pgport(monkeypatch, bad_pgport):
+    """Невалидный `PGPORT` (не ASCII-цифры 0-65535) — нераспознанная цель, не тихий 5432."""
+    monkeypatch.setenv("PGPORT", bad_pgport)
+    url = "postgresql+psycopg://u@remote.example.com/db"
+    assert _resolve_connect_target(url) is None
+    assert normalize_target(url).startswith(UNKNOWN_HOST)
+    assert is_target_allowed(url, parse_extra_targets("remote.example.com:5432/db")) is False
+
+
+def test_resolve_connect_target_pgport_applies_on_fallback_path_too(monkeypatch):
+    """`$PGPORT` учитывается и в fallback-ветке (`postgres://`, диалект недоступен)."""
+    monkeypatch.setenv("PGPORT", "6001")
+    result = _resolve_connect_target("postgres://u@h.example.com/dev")
+    assert result == ("h.example.com", 6001, "dev")
+
+
+def test_resolve_connect_target_fallback_denies_invalid_pgport(monkeypatch):
+    """Fallback-ветка (`postgres://`) тоже не подставляет 5432 молча при невалидном `PGPORT`."""
+    monkeypatch.setenv("PGPORT", "not-a-port")
+    assert _resolve_connect_target("postgres://u@h.example.com/dev") is None
