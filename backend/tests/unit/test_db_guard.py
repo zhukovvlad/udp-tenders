@@ -176,6 +176,23 @@ def test_is_target_allowed_denies_loopback_with_query_key_override(query):
     assert is_target_allowed(url, frozenset()) is False
 
 
+def test_normalize_target_rejects_query_key_override_after_fragment():
+    """`#fragment?host=...` не должен обходить override-детект через urlsplit.
+
+    `urlsplit` трактует `#` как разделитель fragment и обрезает `.query` до
+    него, но URL-парсер SQLAlchemy понятия fragment не знает вовсе — весь
+    хвост после первого `?` для него query, независимо от `#` где-то внутри.
+    Поэтому DSN с `#frag?host=...` реально подключается по host= (проверено
+    эмпирически: create_connect_args даёt {'host': 'prod.example.com', ...}),
+    хотя старая реализация (urlsplit(url).query) видела пустую query и
+    override пропускала.
+    """
+    url = "postgresql+psycopg://u@localhost:5459/udp_dev#frag?host=prod.example.com&dbname=proddb"
+    result = normalize_target(url)
+    assert result.startswith(UNKNOWN_HOST)
+    assert is_target_allowed(url, frozenset()) is False
+
+
 def test_is_target_allowed_still_ignores_ordinary_query_params():
     """Обычные query-параметры (sslmode, channel_binding, ...) не меняют цель.
 

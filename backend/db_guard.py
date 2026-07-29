@@ -36,14 +36,30 @@ TARGET_OVERRIDE_QUERY_KEYS = frozenset({"host", "port", "dbname"})
 def _has_target_override_query_key(url: str) -> bool:
     """DSN содержит query-ключ (`host`/`port`/`dbname`), подменяющий цель из netloc.
 
-    Разбирается независимо от urlsplit-хоста: query-строка синтаксически
-    валидна и разбирается даже когда netloc битый.
+    Query извлекается через `partition("?")` — ВСЁ после первого `?`, — а не
+    через `urlsplit(url).query`. Расхождение не гипотетическое: `urlsplit`
+    трактует `#` как разделитель fragment и обрезает query до него, тогда как
+    URL-парсер SQLAlchemy понятия fragment не знает вовсе (query — это хвост
+    после первого `?`, без исключений). DSN вида
+    `postgresql+psycopg://u@localhost:5459/udp_dev#frag?host=prod.example.com`
+    из-за этого расхождения давал `urlsplit(url).query == ""` (весь хвост
+    ушёл в fragment) и override оставался незамеченным, хотя SQLAlchemy
+    реально подставляет `host=prod.example.com` в connect-args (проверено
+    эмпирически на этом чекауте). `partition("?")` смотрит на URL так же, как
+    и SQLAlchemy, — синтаксического понятия `#` для него не существует.
+
+    Fail-closed: если разбор всё же не удался (защитный try/except — на
+    практике `partition`/`parse_qs` не бросают ни на какой строке), считаем
+    цель имеющей override (True), а не наоборот — согласно общей позиции
+    модуля «не смогли разобрать — считаем непроверяемым, не безопасным».
     """
     try:
-        query = urlsplit(url or "").query
+        _, sep, query = (url or "").partition("?")
+        if not sep:
+            return False
+        return bool(TARGET_OVERRIDE_QUERY_KEYS & parse_qs(query).keys())
     except ValueError:
-        return False
-    return bool(TARGET_OVERRIDE_QUERY_KEYS & parse_qs(query).keys())
+        return True
 
 
 def safe_host(url: str) -> str:

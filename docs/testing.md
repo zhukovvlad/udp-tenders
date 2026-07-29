@@ -12,16 +12,16 @@
 
 | Слой | Файлов | Тестов | Статус |
 |---|---|---|---|
-| Backend unit | 19 | 189 | ✅ |
-| Backend integration | 28 | 327 | ✅ |
+| Backend unit | 26 | 273 | ✅ |
+| Backend integration | 28 | 332 | ✅ |
 | Backend top-level | 1 | 74 | ✅ |
-| **Backend total** | **48** | **590** | ✅ |
-| Frontend (Vitest + RTL + MSW) | 28 | 219 | ✅ |
+| **Backend total** | **55** | **679** | ✅ |
+| Frontend (Vitest + RTL + MSW) | 29 | 222 | ✅ |
 | E2E (Playwright) | — | — | ⏳ отложено |
 | GitHub Actions CI | — | backend ✅ / frontend ✅ | — |
-| **Grand total (локально)** | **76** | **809** | ✅ |
+| **Grand total (локально)** | **84** | **901** | ✅ |
 
-Последний прогон `just test` локально: backend **672 passed / 6 skipped** (`uv run pytest`, 678 собрано; локальный Postgres), frontend **219 passed** (28 файлов). CI настроен для backend (`.github/workflows/backend-tests.yml`) и frontend (`.github/workflows/frontend-tests.yml`) — оба гоняются в GitHub Actions на каждый push в `main` и PR.
+Последний прогон `just test` локально: backend **673 passed / 6 skipped** (`uv run pytest`, 679 собрано; локальный Postgres), frontend **222 passed** (29 файлов). CI настроен для backend (`.github/workflows/backend-tests.yml`) и frontend (`.github/workflows/frontend-tests.yml`) — оба гоняются в GitHub Actions на каждый push в `main` и PR.
 
 ---
 
