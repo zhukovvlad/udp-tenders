@@ -26,8 +26,9 @@ Thumbs.db
 # Тесты — реальные PDF
 backend/tests/fixtures/pdf/real/
 
-# env-файлы: игнорируем все варианты, кроме шаблонов .example
+# env-файлы: игнорируем и .env*, и *.env (обе формы имени), кроме шаблонов .example
 .env*
+*.env
 !.env*.example
 
 # Тестовые артефакты
