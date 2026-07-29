@@ -77,8 +77,12 @@ def test_safe_host_hides_credentials():
 def test_safe_host_survives_malformed_url():
     """Битый DSN не роняет извлечение хоста (urlsplit кидает ValueError).
 
-    is_target_allowed полагается на то, что safe_host никогда не бросает —
-    поведение load-bearing, а до этого теста было ничем не покрыто.
+    is_target_allowed больше не читает safe_host() — loopback-шорткат сверяется
+    по резолвленному хосту из `_resolve_connect_target` (см. соответствующий
+    докстринг `is_target_allowed`). Но `ensure_mutation_allowed` зовёт
+    `safe_host()` для диагностики в тексте ошибки нераспознанной цели — там
+    его "никогда не бросает" остаётся load-bearing тем же образом: битый DSN
+    не должен ронять формирование самого сообщения об ошибке.
     """
     assert safe_host("postgresql://u@[bad:ipv6/db") == ""
 
@@ -378,6 +382,30 @@ def test_is_target_allowed_denies_service_query_key():
     assert is_target_allowed(url, extra) is False
 
 
+def test_ensure_mutation_allowed_gives_actionable_advice_for_unresolvable_target():
+    """Нераспознанная цель (`?hostaddr=`) не советует нерабочий DB_EXTRA_TARGETS.
+
+    До этого фикса текст ошибки для ЛЮБОЙ отклонённой цели предлагал добавить
+    `normalize_target(url)` в DB_EXTRA_TARGETS — для нераспознанной цели это
+    `<нераспознанный хост>:5432/`, запись, которую `parse_extra_targets`
+    безусловно отвергает как формат. Пользователь, последовавший совету,
+    получил бы ValueError при следующем чтении Settings(). Ветка `hostaddr`/
+    `service` шире, чем раньше (см. TARGET_DEFINING_QUERY_KEYS), поэтому этот
+    путь теперь достижим не только через битый DSN.
+    """
+    url = "postgresql+psycopg://u:p@localhost:5459/udp_dev?hostaddr=10.1.2.3"
+    with pytest.raises(RuntimeError) as exc:
+        ensure_mutation_allowed(url, "alembic")
+    message = str(exc.value)
+    assert UNKNOWN_HOST not in message
+    assert "DB_EXTRA_TARGETS" not in message
+    assert "host/hostaddr/port/dbname/service" in message
+    with pytest.raises(ValueError):
+        # Подтверждаем, что старый совет действительно был бы нерабочим —
+        # чтобы не полагаться на утверждение без проверки.
+        parse_extra_targets(f"{UNKNOWN_HOST}:5432/")
+
+
 def test_normalize_target_does_not_collapse_fragment_dbname_to_bare_name():
     """`/dev#archive` в пути — часть имени БД, а не `#`-разделитель fragment.
 
@@ -402,44 +430,60 @@ def test_normalize_target_does_not_collapse_double_slash_dbname_to_bare_name():
     assert is_target_allowed(url, extra) is False
 
 
-def test_resolve_connect_target_falls_back_when_dialect_unavailable(monkeypatch):
-    """Отказ диалекта (`ModuleNotFoundError`-подобный) не глушит легитимный DSN.
+def test_resolve_connect_target_falls_back_for_postgres_scheme():
+    """`postgres://` (без `ql`) реально бросает в `get_dialect()` — не мок.
 
-    Диалект недоступен (типовая причина — bare `postgresql://` резолвится в
-    психоп2, которого нет в проекте: используется psycopg 3). Единственный
-    оставшийся источник — атрибуты самого `make_url`, которые не видят
-    query-оверрайды (уже отфильтровано до попытки диалекта), поэтому
-    fallback безопасен. Мокаем сам сбой диалекта, а не полагаемся на то, что
-    конкретная версия SQLAlchemy действительно бросит его для bare DSN —
-    поведение проверено эмпирически и оказалось иным (см. отчёт).
+    Найдено ревью: bare `postgresql://` (изначальное предположение брифа для
+    этого теста) НЕ триггерит отказ диалекта — психоп2-диалект строит
+    connect-args чистой строковой логикой и не трогает `self.dbapi`, поэтому
+    не бросает, даже когда пакет `psycopg2` не установлен (проверено
+    эмпирически на SQLAlchemy 2.0.35). Реальный триггер — схема `postgres://`
+    (без `postgresql`), которую отдают дашборды Neon/Heroku/Supabase/Render и
+    которую пользователь чаще всего вставляет в `DATABASE_URL`: `postgres`
+    не зарегистрирована как диалект в SQLAlchemy вовсе, `get_dialect()`
+    бросает `NoSuchModuleError` без единого мока — ровно та ветка, которую
+    ловит `except Exception` в `_resolve_connect_target`.
     """
-    import sqlalchemy.engine.url as sa_url
-
-    def _boom(self, _is_async=False):
-        raise ModuleNotFoundError("psycopg2")
-
-    monkeypatch.setattr(sa_url.URL, "get_dialect", _boom)
-    result = _resolve_connect_target("postgresql://u@h.example.com:5432/db")
-    assert result == ("h.example.com", 5432, "db")
+    result = _resolve_connect_target("postgres://u@h.example.com:5432/dev#archive")
+    assert result == ("h.example.com", 5432, "dev#archive")
 
 
-def test_resolve_connect_target_fallback_still_rejects_query_override(monkeypatch):
+def test_resolve_connect_target_fallback_still_rejects_query_override():
     """Fallback тоже не доверяет query-оверрайдам — проверка стоит до диалекта.
 
     Проверка `TARGET_DEFINING_QUERY_KEYS` в `_resolve_connect_target`
     выполняется один раз, до ветвления primary/fallback, поэтому она
-    защищает fallback-путь так же, как основной.
+    защищает fallback-путь так же, как основной. `postgres://` — тот же
+    реальный триггер отказа диалекта, что и в предыдущем тесте, без мока.
     """
-    import sqlalchemy.engine.url as sa_url
-
-    def _boom(self, _is_async=False):
-        raise ModuleNotFoundError("psycopg2")
-
-    monkeypatch.setattr(sa_url.URL, "get_dialect", _boom)
-    result = _resolve_connect_target("postgresql://u@localhost:5432/db?hostaddr=10.1.2.3")
+    result = _resolve_connect_target("postgres://u@localhost:5432/db?hostaddr=10.1.2.3")
     assert result is None
 
 
 def test_resolve_connect_target_returns_none_for_unparsable_url():
     """`make_url` сам бросает — `_resolve_connect_target` даёт `None`, не трассу."""
     assert _resolve_connect_target("postgresql://u@[bad:ipv6/db") is None
+
+
+def test_resolve_connect_target_primary_path_uses_create_connect_args(monkeypatch):
+    """Пин на то, что основной путь реально спрашивает диалект, а не netloc напрямую.
+
+    Без этого теста ничто не заметило бы, если бы `_resolve_connect_target`
+    тихо перестал звать `create_connect_args` и стал читать `parsed.host` для
+    ЛЮБОГО DSN (не только для fallback) — поведение для "чистых" DSN осталось
+    бы прежним внешне, но перестало бы быть тем самым "спросить слой, который
+    реально подключается", ради которого весь модуль переписан.
+    """
+    from sqlalchemy.dialects.postgresql.psycopg import PGDialect_psycopg
+
+    calls = []
+    original = PGDialect_psycopg.create_connect_args
+
+    def _spy(self, url):
+        calls.append(url)
+        return original(self, url)
+
+    monkeypatch.setattr(PGDialect_psycopg, "create_connect_args", _spy)
+    result = _resolve_connect_target("postgresql+psycopg://u@h.example.com:5432/db")
+    assert result == ("h.example.com", 5432, "db")
+    assert len(calls) == 1

@@ -12,12 +12,12 @@ import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import httpx as _httpx_module
 import pytest
 import respx
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 # Делаем импорты "from database import ..." и "import crud" работающими
@@ -164,7 +164,14 @@ def db_engine() -> Iterator:
     # миграций и приложения, то есть она В списке, но DROP SCHEMA на ней
     # катастрофа. Членство в allowlist выражает «можно мутировать», а не
     # «можно разрушить схему». Это разные права.
-    db_name = (urlsplit(test_url).path or "").lstrip("/")
+    #
+    # `make_url(...).database`, а не `urlsplit(...).path.lstrip("/")`: у
+    # urlsplit `#` — разделитель fragment, поэтому `.../udp_test#archive` дал
+    # бы имя БД "udp_test" (прошёл бы суффиксную проверку), хотя реальная база
+    # называется "udp_test#archive" — SQLAlchemy (и реальный psycopg-коннект)
+    # не знает понятия fragment вовсе. Тот же класс дыры, что закрыт в
+    # db_guard._resolve_connect_target (см. спеку §14).
+    db_name = make_url(test_url).database or ""
     if not db_name.endswith("_test"):
         pytest.skip(
             f"TEST_DATABASE_URL указывает на базу '{db_name}' — ожидается имя, "
