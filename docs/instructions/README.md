@@ -11,3 +11,4 @@
 ## Содержание
 
 - [LLM-провайдер](llm-provider.md) — переключатель `LLM_PROVIDER`, настройка OpenRouter, Settings API, вызов LLM из кода.
+- [Развёртывание](deployment.md) — профили деплоя, `APP_ENV`/`DATABASE_URL`, guard от мутации незапланированной БД, диагностика отказов.

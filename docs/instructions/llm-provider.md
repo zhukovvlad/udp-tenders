@@ -138,3 +138,5 @@ resp = await llm.get_provider().vision_completion(
 - Спека (дизайн, инварианты, AC): `docs/superpowers/specs/2026-07-23-llm-provider-toggle-design.md`
 - Девлог реализации фазы 1: `docs/devlog/2026-07-24-llm-provider-toggle.md`
 - Парсинг УПД и коррекция ориентации: `docs/agent/pdf-parsing.md`
+- [deployment.md](deployment.md) — вторая deploy-time ось: `APP_ENV`/`DATABASE_URL`,
+  профили развёртывания, guard от мутации незапланированной БД.
