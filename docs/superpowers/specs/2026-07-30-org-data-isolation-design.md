@@ -60,9 +60,14 @@ Column and index already exist (`models.py:264`, migration `d1e2f3a4b5c6`) but a
 ### 3.4 `project_organizations`: one org per project (D10)
 
 - New unique index `uq_project_organizations_project` on `project_organizations (project_id)` — at most one organization per project, enforced by the DB. Safe to create: the table is empty in every known environment (that emptiness is the subject of TECH_DEBT item 3); if a future environment somehow holds multi-org rows, the migration fails loudly — resolve manually, do not auto-pick.
-- `POST /admin/organizations/{org_id}/projects` (`link_project`): explicit pre-check — project already linked to *any* org → **409** «Проект уже привязан к организации» (the constraint remains the backstop for races).
-- `DELETE /admin/organizations/{org_id}/projects/{project_id}` (`unlink_project`): if the project has documents → **409** «Проект содержит документы — перепривязка проекта с данными в MVP не поддерживается». Unlinking a data-less project (mis-click fix) stays allowed. Re-linking a drained project to a different org would strand `uploaded_by_org_id`/supplier attribution — this guard closes that path instead of defining relink data-migration semantics (deferred with the contractor axis).
-- Admin routes stay in the structural-guard whitelist (§9.2) — these two behavior changes are in scope regardless; the grid covers them (§9.1).
+- **Link and `customer_org_id` move together** (external review 2026-07-30, round 2). The unique index alone guarantees «one link row», not «link org == owner org», and the current `link_project` (`crud/admin.py:386-396`) creates the link without touching the project — after the runbook linking step, `customer_org_id` would stay NULL while §5 declares owner and linked org identical. Rules for `POST /admin/organizations/{org_id}/projects` (`link_project`):
+  - link is allowed iff `project.customer_org_id IS NULL` or `== org_id`;
+  - link **atomically sets** `customer_org_id = org_id` in the same transaction as the `ProjectOrganization` insert;
+  - a non-NULL `customer_org_id != org_id` → **409** «Проект принадлежит другой организации — требуется ручное исправление» (legacy/manual state, never produced by this flow);
+  - already linked to *any* org → **409** «Проект уже привязан к организации» (the unique index remains the backstop for races).
+- `DELETE /admin/organizations/{org_id}/projects/{project_id}` (`unlink_project`): **409** if the project has *any* project-scoped business entity — `documents`, `reference_prices`, `compensation_corridors`, `project_supplier_exclusions` (external review round 2: a documents-only guard would let a new org inherit the previous org's reference prices, corridors, and exclusions) — «Проект содержит данные — перепривязка проекта с данными в MVP не поддерживается». Unlinking a truly empty project (mis-click fix) stays allowed and **atomically clears** `customer_org_id`. Re-linking a project with data to a different org would strand attribution — this guard closes that path instead of defining relink data-migration semantics (deferred with the contractor axis).
+- Tests assert **both** columns (`project_organizations` row and `customer_org_id`) after create (§5), link, and unlink.
+- Admin routes stay in the structural-guard whitelist (§9.2) — these behavior changes are in scope regardless; the grid covers them (§9.1).
 
 ## 4. Authorization core (`auth.py`)
 
@@ -152,7 +157,7 @@ Fixtures: two organizations, each with a project, a document, invoices, and org-
 - **Role rows**: member → 403 on project update/delete vs admin → 200 — pins the 403-vs-404 distribution (foreign = 404, own-but-wrong-role = 403).
 - **Org-less user row**: non-superuser with `org_id IS NULL` sees an empty world (fail-closed contract, §4).
 - Suppliers: each org sees/mutates only its registry; 409 bodies per §6.3; superuser cross-org merge → 422, duplicates never pair suppliers of different orgs (§6.2).
-- **D10 invariant rows**: linking a second org to an already-linked project → 409; unlinking an org from a project that has documents → 409 (§3.4).
+- **D10 invariant rows**: linking a second org to an already-linked project → 409; link to a project with foreign non-NULL `customer_org_id` → 409; unlink of a project holding any business entity (documents / reference prices / corridors / exclusions — one case each) → 409; successful link sets `customer_org_id`, successful unlink clears it (both columns asserted) (§3.4).
 
 ### 9.2 Structural guard
 
@@ -203,7 +208,7 @@ Idempotent: re-running after manual fixes only touches still-NULL rows.
 2. **Migration + models** (one indivisible change): `Supplier.org_id`, rebuild of the two uniqueness constraints under the new names, `uq_project_organizations_project` (§3.4); criterion — green `just db-test-check`.
 3. **Authz core**: `check_project_access` (+ `get_project_access` wrapper), `accessible_project_ids`, `scope_to_projects`; unit tests incl. the 404 invariant and org-less fail-closed.
 4. **Suppliers**: `get_or_create_supplier(org_id=...)` + 4 call sites, endpoint org filters, constraint matcher + 409-body tests.
-5. **Projects router + admin link/unlink guards**: create / update / delete / list / subresources per §5; `link_project` 409 on already-linked project, `unlink_project` 409 on project with documents (§3.4).
+5. **Projects router + admin link/unlink guards**: create / update / delete / list / subresources per §5; `link_project` — 409 on already-linked project or foreign `customer_org_id`, atomic `customer_org_id` sync; `unlink_project` — 409 on project with any project-scoped data, atomic `customer_org_id` clear (§3.4).
 6. **Remaining routers**: invoices (upload order §7, bulk first-query filter, resource-derive), dashboard, export, reference prices.
 7. **Isolation grid + structural guard** (§9). May be pulled up before step 4 for a red-first TDD flow — decided in the plan.
 8. **UI** (§8).
