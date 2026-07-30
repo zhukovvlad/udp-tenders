@@ -116,7 +116,7 @@ All `/api/suppliers/*` filter `WHERE org_id = user.org_id` (superuser — unfilt
 The handler gains `current_user` and one edit resolves four things, **in this order**:
 
 1. `user.is_superuser` → **403** (D6).
-2. `check_project_access(project_id)` — **strictly before the dedup fast-path**. The dedup query (`invoices.py:267-273`) currently runs immediately after hashing and returns `200 {**_serialize_document(existing), duplicate: true}`; if the access check came after it, a user of a foreign project uploading the same PDF would receive the full serialization of a foreign document (metadata, status, invoices). Grid test: foreign `project_id` + existing `file_hash` → **404, not 200-duplicate**. Side bonus: the check also closes the current «nonexistent project_id → FK error → 500» path.
+2. `check_project_access(project_id)` — **strictly before the dedup fast-path**, and also **before the existing `.pdf` filename validation** (currently first in the handler, `invoices.py:261`). Full resulting order: 403 (superuser) → 404 (access) → 400 (format) → hash → dedup → create. Authz before validation is consistent with «foreign = nonexistent»: a user without access to the project must not receive even format feedback about their file. The dedup query (`invoices.py:267-273`) currently runs immediately after hashing and returns `200 {**_serialize_document(existing), duplicate: true}`; if the access check came after it, a user of a foreign project uploading the same PDF would receive the full serialization of a foreign document (metadata, status, invoices). Grid test: foreign `project_id` + existing `file_hash` → **404, not 200-duplicate**. Side bonus: the check also closes the current «nonexistent project_id → FK error → 500» path.
 3. Dedup fast-path (unchanged).
 4. `create_document(..., uploaded_by_org_id=user.org_id)` — starts populating §3.3.
 
@@ -166,6 +166,8 @@ Stored in the repo at `backend/scripts/drain_null_org.sql` (with a usage note in
 
 1. `documents.uploaded_by_org_id ← project → project_organizations` (one org per project in MVP; multiple orgs on a project → conflict report, leave NULL).
 2. `suppliers.org_id ← invoices → documents → uploaded_by_org_id`: **deterministic rule** — if all of a supplier's invoices resolve to exactly one org, set it; if they span multiple orgs (possible in dev: one vendor's PDFs uploaded into projects now linked to different orgs), leave `NULL` and emit it in the report for manual resolution. No "first match wins".
+
+The report must enumerate **both classes of residual NULL**, not just conflicts: «конфликт (несколько org)» *and* «проект без привязки» (documents of projects the superuser did not link at runbook step 2 are not multi-org and would otherwise pass step 4's review silently, hiding incomplete drainage).
 
 Idempotent: re-running after manual fixes only touches still-NULL rows.
 
