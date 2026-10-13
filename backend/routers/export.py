@@ -79,11 +79,12 @@ _FMT_QTY = "#,##0.000"
 # Col 1=A Дата, 2=B Номер, 3=C Поставщик
 # Raw block:  4=D Кол-во по документу, 5=E Ед. изм. по документу
 # Calc block: 6=F Расчётное кол-во,    7=G Базовая ед. изм.
-# 8=H Базовая цена, 9=I Ставка НДС; H и J–Q — цены за единицу базовой ед. изм. (₽/ед.)
+# 8=H Базовая цена, 9=I Ставка НДС (справочно); H и J–Q — цены за единицу базовой ед. изм. (₽/ед.)
 # 10=J Материал без НДС, 11=K Доставка без НДС, 12=L Прочее без НДС, 13=M Итого без НДС (=J+K+L)
-# 14=N Материал с НДС (=J*(1+I)), 15=O Доставка с НДС (=K*(1+I)), 16=P Прочее с НДС (=L*(1+I))
+# 14=N Материал с НДС, 15=O Доставка с НДС, 16=P Прочее с НДС — значения из бэкенда: НДС берётся
+#   из vat_amount каждой строки СФ (смешанные ставки, «без НДС»), а не пересчётом J–L по ставке I
 # 17=Q Итого с НДС (=N+O+P)
-# 18=R Сумма без НДС (=M*F), 19=S Сумма с НДС (=Q*F) — суммы по СФ; в месяце/итоге — SUM
+# 18=R Сумма без НДС, 19=S Сумма с НДС — точные суммы по СФ (значения); в месяце/итоге — SUM
 # 20=T Откл.%, 21=U Откл.₽, 22=V Коридор %, 23=W Компенсация ₽
 _COLUMNS = [
     ("Дата УПД",                  13, _FMT_DATE,      "center"),  # A  1
@@ -200,7 +201,8 @@ def _write_class_section(
       (spacer)
 
     Columns 1–12 (A–L): static DB values; H and J–Q are per-unit prices.
-    Columns 13–21 (M–U): Excel formulas (per-unit totals, invoice sums R/S, deviations T/U).
+    Data rows: M, Q, T, U are Excel formulas; N–P (per-unit with VAT) and R/S (exact invoice
+    sums) are backend values so VAT follows each line's recorded vat_amount.
     Columns 22–23 (V–W): corridor/compensation — Python values on month and total rows.
     Month and grand-total rows: SUMPRODUCT weighted averages for prices, SUM for R/S/U.
     """
@@ -343,12 +345,13 @@ def _write_class_section(
                     cell.number_format = fmt
 
             _dc(13, f"=J{n}+K{n}+L{n}")               # M Итого без НДС
-            _dc(14, f"=J{n}*(1+I{n})")                # N Материал с НДС
-            _dc(15, f"=K{n}*(1+I{n})")                # O Доставка с НДС
-            _dc(16, f"=L{n}*(1+I{n})")                # P Прочее с НДС
+            # N–P, R/S: backend values — VAT from each line's recorded vat_amount, not J–L × (1+I)
+            _dc(14, r["mat_per_m3"])                  # N Материал с НДС
+            _dc(15, r["delivery_per_m3"])             # O Доставка с НДС
+            _dc(16, r["other_per_m3"])                # P Прочее с НДС
             _dc(17, f"=N{n}+O{n}+P{n}")               # Q Итого с НДС
-            _dc(18, f"=M{n}*F{n}")                    # R Сумма без НДС
-            _dc(19, f"=Q{n}*F{n}")                    # S Сумма с НДС
+            _dc(18, r["sum_excl_vat"])                # R Сумма без НДС
+            _dc(19, r["sum_with_vat"])                # S Сумма с НДС
             _dc(20, f'=IFERROR(IF(H{n}>0,(Q{n}-H{n})/H{n},""),"")',
                 font=_dev_font(r["deviation_pct"]), fmt=_FMT_PCT)   # T Откл.%
             _dc(21, f'=IFERROR(IF(H{n}>0,(Q{n}-H{n})*F{n},""),"")',

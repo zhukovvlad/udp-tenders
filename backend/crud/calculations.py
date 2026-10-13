@@ -644,6 +644,9 @@ def compute_export_rows(
             "other_per_m3_excl_vat": money_round(other_per_unit_excl_vat, 6),
             "other_per_m3": money_round(other_per_unit, 6),
             "total_per_m3": money_round(total_per_unit, 6),
+            # Exact invoice sums (before per-unit division) — VAT from each line's recorded vat_amount.
+            "sum_excl_vat": money_round(br.mat_total + delivery_excl_alloc + additive_excl_alloc, 2),
+            "sum_with_vat": money_round(mat_with_vat + delivery_alloc + additive_alloc, 2),
             "deviation_pct": deviation_pct,
             "deviation_amount": deviation_amount,
         })

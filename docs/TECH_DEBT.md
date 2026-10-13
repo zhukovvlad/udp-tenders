@@ -129,6 +129,24 @@
 - [ ] **Шаблон alembic script.py.mako даёт ruff I001 на каждой новой ревизии**
   The default import order emitted by `backend/alembic/script.py.mako` trips ruff `I001` on every `just db-revision`; `pyproject.toml` per-file-ignores for `alembic/versions/*` cover E402/F401/UP007/UP035 but NOT I001, so each new revision needs a manual `ruff check --fix`. Two candidate fixes: (a) preferred — reorder imports in `backend/alembic/script.py.mako` (it is a template, not a historical migration → editing allowed); (b) add `I001` to the `alembic/versions/*` per-file ignore in `pyproject.toml`. Обнаружено в PR-1 (миграция add_hot_path_indexes).
 
+- [ ] **Ставка НДС меняется во времени, а базовая цена её не хранит; fallback зашит как 20 %**
+  Базовая цена (`ReferencePrice.price`) — одно число «с НДС» на период, а сравнение идёт с
+  ценой СФ с НДС как есть. Если период базовой цены пересекает смену ставки (18 → 20 % с
+  01.01.2019, 20 → 22 % с 01.01.2026), СФ после смены дают ложное отклонение ≈ +1,67 % (и
+  компенсацию при узком коридоре), хотя цена без НДС не менялась. Отдельно: fallback ставки
+  СФ — константа 20 % (`coalesce(Invoice.vat_rate, 20)` ~15× в `crud/calculations.py`,
+  `crud/suppliers.py`, `routers/dashboard.py`; дефолт `Invoice.vat_rate`; `routers/invoices.py`;
+  промпт и `inv_data.get("vat_rate", 20)` в `pdf_parser.py`) — для СФ 2026+ без ставки неверно.
+  **Обход сейчас:** резать периоды базовых цен по датам смены ставки и вводить цену с НДС
+  по действующей ставке.
+  **Решение (нужна спека):** (1) таблица ставок НДС по датам вместо константы 20 %;
+  (2) поле «ставка НДС» у базовой цены (миграция; дефолт — по дате начала периода) и
+  приведение базы к ставке СФ при сравнении: `база × (1 + ставка СФ) / (1 + ставка базы)` —
+  зеркально в `compute_calculations`, `compute_export_rows`, `crud/suppliers.py`;
+  (3) предупреждение в UI, когда ставка базовой цены расходится с основной ставкой СФ.
+  Открытый вопрос для спеки: должна ли смена ставки НДС давать отклонение/компенсацию.
+  Обнаружено в ревью PR #47.
+
 ---
 
 ## Frontend

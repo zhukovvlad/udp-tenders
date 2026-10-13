@@ -5,8 +5,8 @@ Layout overview (23 columns A–W; H, J–Q are per-unit prices):
   D=RawQty  E=RawUnit  F=CalcQty (normalized)  G=BaseUnit
   H=RefPrice  I=VATrate
   J=MatExcl  K=DelivExcl  L=OtherExcl  M=formula:J+K+L
-  N=formula:J*(1+I)  O=formula:K*(1+I)  P=formula:L*(1+I)  Q=formula:N+O+P
-  R=formula:sum excl VAT (M*F)  S=formula:sum incl VAT (Q*F)
+  N=MatIncl  O=DelivIncl  P=OtherIncl (values from recorded line VAT)  Q=formula:N+O+P
+  R=sum excl VAT  S=sum incl VAT (exact invoice sums, values)
   T=formula:deviation%  U=formula:deviation₽
   V=corridor%  W=compensation₽
 """
@@ -112,6 +112,7 @@ class TestComputeExportRows:
             "delivery_per_m3_excl_vat", "delivery_per_m3",
             "other_per_m3_excl_vat", "other_per_m3",
             "total_per_m3", "deviation_pct", "deviation_amount",
+            "sum_excl_vat", "sum_with_vat",
         }
         assert required_keys <= r.keys()
 
@@ -194,6 +195,29 @@ class TestComputeExportRows:
         assert float(r["total_per_m3"]) == pytest.approx(
             float(r["mat_per_m3"] + r["delivery_per_m3"] + r["other_per_m3"])
         )
+
+    def test_invoice_sums_follow_recorded_line_vat_on_mixed_rate_invoice(self, db_session, factories):
+        """sum_with_vat uses each line's recorded VAT (delivery «без НДС»), not invoice rate × excl."""
+        project = factories.ProjectFactory.create()
+        mc = factories.MaterialClassFactory.create(calc_role="base")
+        doc = factories.DocumentFactory.create(project=project)
+        inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10), vat_rate=20.0)
+        factories.InvoiceItemFactory.create(
+            invoice=inv, material_class=mc, item_type="material",
+            quantity=10.0, unit_price=5333.33, amount=53_333.33, vat_amount=10_666.67,
+        )
+        factories.InvoiceItemFactory.create(
+            invoice=inv, item_type="delivery",
+            quantity=14.0, unit_price=625.0, amount=8_750.0, vat_amount=0,
+        )
+        rows = compute_export_rows(
+            db_session, project.id,
+            period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
+        )
+        r = rows[0]
+        assert r["sum_excl_vat"] == Decimal("62083.33")
+        assert r["sum_with_vat"] == Decimal("72750.00")  # 64 000 material + 8 750 delivery w/o VAT
+        assert float(r["delivery_per_m3"]) == pytest.approx(875.0)
 
     # ── Delivery proportional allocation ────────────────────────────────────
 
@@ -650,8 +674,8 @@ class TestExportEndpoint:
         assert headers[20] == "Откл. от плана, %"
         assert headers[23] == "Компенсация, ₽"
 
-    def test_sum_columns_formulas_in_data_month_and_total_rows(self, client, factories):
-        """R/S = per-unit total × qty in data rows; SUM over data ranges in month and class-total rows."""
+    def test_sum_columns_values_in_data_rows_and_sum_in_month_and_total(self, client, factories):
+        """R/S hold exact invoice sums in data rows; SUM over data ranges in month and class-total rows."""
         project = factories.ProjectFactory.create()
         mc = factories.MaterialClassFactory.create(name="В25", calc_role="base")
         doc = factories.DocumentFactory.create(project=project)
@@ -667,8 +691,9 @@ class TestExportEndpoint:
         mar = _find_data_row(ws)
         apr = mar + 3  # data → separator → April month row → data
 
-        assert ws.cell(row=mar, column=18).value == f"=M{mar}*F{mar}"
-        assert ws.cell(row=mar, column=19).value == f"=Q{mar}*F{mar}"
+        # factory defaults: 8000 ₽/ед. excl VAT, VAT 20 % → 10 × 8000 = 80 000 / 96 000
+        assert float(ws.cell(row=mar, column=18).value) == pytest.approx(80_000.0)
+        assert float(ws.cell(row=mar, column=19).value) == pytest.approx(96_000.0)
         assert ws.cell(row=mar - 1, column=18).value == f"=SUM(R{mar}:R{mar})"
         assert ws.cell(row=mar - 1, column=19).value == f"=SUM(S{mar}:S{mar})"
 
@@ -731,9 +756,36 @@ class TestExportEndpoint:
         assert float(ws.cell(row=n - 1, column=23).value) == pytest.approx(1500.0)
         assert float(ws.cell(row=n + 1, column=23).value) == pytest.approx(1500.0)
 
+    def test_mixed_vat_invoice_with_vat_values_match_document(self, client, factories):
+        """N/O/P and S come from recorded line VAT: delivery «без НДС» is not grossed up by column I."""
+        project = factories.ProjectFactory.create()
+        mc = factories.MaterialClassFactory.create(calc_role="base")
+        doc = factories.DocumentFactory.create(project=project)
+        inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10), vat_rate=20.0)
+        factories.InvoiceItemFactory.create(
+            invoice=inv, material_class=mc, item_type="material",
+            quantity=10.0, unit_price=5333.33, amount=53_333.33, vat_amount=10_666.67,
+        )
+        factories.InvoiceItemFactory.create(
+            invoice=inv, item_type="delivery",
+            quantity=14.0, unit_price=625.0, amount=8_750.0, vat_amount=0,
+        )
+        resp = client.get(
+            f"/api/export/excel?project_id={project.id}"
+            "&period_start=2026-03-01&period_end=2026-03-31"
+        )
+        ws = load_workbook(BytesIO(resp.content), data_only=False).active
+        n = _find_data_row(ws)
+        assert float(ws.cell(row=n, column=14).value) == pytest.approx(6400.0)   # N material w/ VAT
+        assert float(ws.cell(row=n, column=15).value) == pytest.approx(875.0)    # O delivery, 0 % VAT
+        assert float(ws.cell(row=n, column=16).value) == pytest.approx(0.0)      # P other
+        assert ws.cell(row=n, column=17).value == f"=N{n}+O{n}+P{n}"            # Q stays a formula
+        assert float(ws.cell(row=n, column=18).value) == pytest.approx(62_083.33)
+        assert float(ws.cell(row=n, column=19).value) == pytest.approx(72_750.0)
+
     def test_formula_columns_contain_excel_formulas(self, client, factories):
-        """Columns M–U (13–21) in a data row must hold '=...' formula strings
-        (not pre-computed floats)."""
+        """Columns M, Q, T, U in a data row hold '=...' formulas; N–P and R/S hold
+        backend values derived from recorded line VAT."""
         project = factories.ProjectFactory.create()
         mc = factories.MaterialClassFactory.create(calc_role="base")
         doc = factories.DocumentFactory.create(project=project)
@@ -748,13 +800,17 @@ class TestExportEndpoint:
         data_row = _find_data_row(ws)
         assert data_row is not None, "No data row found (col D must have qty > 0)"
 
-        formula_cols = {
-            13: "M", 14: "N", 15: "O", 16: "P", 17: "Q", 18: "R", 19: "S", 20: "T", 21: "U",
-        }
+        formula_cols = {13: "M", 17: "Q", 20: "T", 21: "U"}
         for col, letter in formula_cols.items():
             v = ws.cell(row=data_row, column=col).value
             assert isinstance(v, str) and v.startswith("="), (
                 f"Col {letter}({col}) row {data_row}: expected formula, got {v!r}"
+            )
+        value_cols = {14: "N", 15: "O", 16: "P", 18: "R", 19: "S"}
+        for col, letter in value_cols.items():
+            v = ws.cell(row=data_row, column=col).value
+            assert isinstance(v, int | float), (
+                f"Col {letter}({col}) row {data_row}: expected number, got {v!r}"
             )
 
     def test_static_columns_contain_plain_values(self, client, factories):
