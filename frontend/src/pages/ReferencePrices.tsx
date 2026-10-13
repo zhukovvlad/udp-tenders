@@ -180,7 +180,7 @@ export default function ReferencePrices() {
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label className="text-2xs uppercase tracking-wider text-fg-tertiary">
-                      Цена ₽ *
+                      Цена с НДС, ₽ за ед. *
                     </Label>
                     <Input
                       type="number"
@@ -290,7 +290,7 @@ export default function ReferencePrices() {
                 <TableRow>
                   <TableHead>Класс</TableHead>
                   <TableHead>Период</TableHead>
-                  <TableHead className="text-right">Цена</TableHead>
+                  <TableHead className="text-right">Цена с НДС</TableHead>
                   <TableHead>Ед.</TableHead>
                   <TableHead>Источник</TableHead>
                   <TableHead className="w-12"></TableHead>
