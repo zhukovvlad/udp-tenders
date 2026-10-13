@@ -79,11 +79,12 @@ _FMT_QTY = "#,##0.000"
 # Col 1=A Дата, 2=B Номер, 3=C Поставщик
 # Raw block:  4=D Кол-во по документу, 5=E Ед. изм. по документу
 # Calc block: 6=F Расчётное кол-во,    7=G Базовая ед. изм.
-# 8=H Базовая цена, 9=I Ставка НДС
+# 8=H Базовая цена, 9=I Ставка НДС; H и J–Q — цены за единицу базовой ед. изм. (₽/ед.)
 # 10=J Материал без НДС, 11=K Доставка без НДС, 12=L Прочее без НДС, 13=M Итого без НДС (=J+K+L)
 # 14=N Материал с НДС (=J*(1+I)), 15=O Доставка с НДС (=K*(1+I)), 16=P Прочее с НДС (=L*(1+I))
-# 17=Q Итого с НДС (=N+O+P), 18=R Откл.% , 19=S Откл.₽
-# 20=T Коридор %, 21=U Компенсация ₽
+# 17=Q Итого с НДС (=N+O+P)
+# 18=R Сумма без НДС (=M*F), 19=S Сумма с НДС (=Q*F) — суммы по СФ; в месяце/итоге — SUM
+# 20=T Откл.%, 21=U Откл.₽, 22=V Коридор %, 23=W Компенсация ₽
 _COLUMNS = [
     ("Дата УПД",                  13, _FMT_DATE,      "center"),  # A  1
     ("Номер УПД",                 14, "@",            "left"),    # B  2
@@ -92,20 +93,22 @@ _COLUMNS = [
     ("Ед. изм. по документу",     14, "@",            "center"),  # E  5  raw
     ("Расчётное кол-во",          14, _FMT_QTY,       "right"),   # F  6  normalized
     ("Базовая ед. изм.",          12, "@",            "center"),  # G  7  normalized
-    ("Базовая цена",              16, _FMT_MONEY,     "right"),   # H  8
+    ("Базовая цена с НДС, ₽/ед.", 16, _FMT_MONEY,     "right"),   # H  8
     ("Ставка НДС, %",             10, _FMT_PCT_RATE,  "center"),  # I  9
-    ("Материал без НДС",          16, _FMT_MONEY,     "right"),   # J 10  static
-    ("Доставка без НДС",          16, _FMT_MONEY,     "right"),   # K 11  static
-    ("Прочее без НДС",            16, _FMT_MONEY,     "right"),   # L 12  static
-    ("Итого без НДС",             16, _FMT_MONEY,     "right"),   # M 13  =J+K+L
-    ("Материал с НДС",            16, _FMT_MONEY,     "right"),   # N 14  =J*(1+I)
-    ("Доставка с НДС",            16, _FMT_MONEY,     "right"),   # O 15  =K*(1+I)
-    ("Прочее с НДС",              16, _FMT_MONEY,     "right"),   # P 16  =L*(1+I)
-    ("Итого с НДС",               16, _FMT_MONEY,     "right"),   # Q 17  =N+O+P
-    ("Откл. от плана, %",         16, _FMT_PCT,       "right"),   # R 18  formula
-    ("Откл. от плана, ₽",         16, _FMT_MONEY,     "right"),   # S 19  formula
-    ("Коридор, %",                11, _FMT_PCT_RATE,  "center"),  # T 20  static
-    ("Компенсация, ₽",            16, _FMT_MONEY,     "right"),   # U 21  Python value
+    ("Материал без НДС, ₽/ед.",   16, _FMT_MONEY,     "right"),   # J 10  static
+    ("Доставка без НДС, ₽/ед.",   16, _FMT_MONEY,     "right"),   # K 11  static
+    ("Прочее без НДС, ₽/ед.",     16, _FMT_MONEY,     "right"),   # L 12  static
+    ("Итого без НДС, ₽/ед.",      16, _FMT_MONEY,     "right"),   # M 13  =J+K+L
+    ("Материал с НДС, ₽/ед.",     16, _FMT_MONEY,     "right"),   # N 14  =J*(1+I)
+    ("Доставка с НДС, ₽/ед.",     16, _FMT_MONEY,     "right"),   # O 15  =K*(1+I)
+    ("Прочее с НДС, ₽/ед.",       16, _FMT_MONEY,     "right"),   # P 16  =L*(1+I)
+    ("Итого с НДС, ₽/ед.",        16, _FMT_MONEY,     "right"),   # Q 17  =N+O+P
+    ("Сумма без НДС, ₽",          18, _FMT_MONEY,     "right"),   # R 18  =M*F
+    ("Сумма с НДС, ₽",            18, _FMT_MONEY,     "right"),   # S 19  =Q*F
+    ("Откл. от плана, %",         16, _FMT_PCT,       "right"),   # T 20  formula
+    ("Откл. от плана, ₽",         16, _FMT_MONEY,     "right"),   # U 21  formula
+    ("Коридор, %",                11, _FMT_PCT_RATE,  "center"),  # V 22  static
+    ("Компенсация, ₽",            16, _FMT_MONEY,     "right"),   # W 23  Python value
 ]
 _N_COLS = len(_COLUMNS)
 
@@ -159,14 +162,19 @@ def _write_grand_total_row(
     _c(13, f"=J{r}+K{r}+L{r}", fmt=_FMT_MONEY)   # M Итого без НДС
     _c(17, f"=N{r}+O{r}+P{r}", fmt=_FMT_MONEY)   # Q Итого с НДС
 
-    sum_s = ",".join(f"S{s}:S{e}" for s, e in data_ranges)
-    _c(19, f'=IF(COUNT({sum_s})=0,"",SUM({sum_s}))', font=_dev_font(dev_total_py, bold=True, size=12), fmt=_FMT_MONEY)
+    # R/S Сумма без/с НДС — plain sums of invoice amounts across all months
+    for ci, cl in ((18, "R"), (19, "S")):
+        sum_cl = ",".join(f"{cl}{s}:{cl}{e}" for s, e in data_ranges)
+        _c(ci, f"=SUM({sum_cl})", fmt=_FMT_MONEY)
+
+    sum_u = ",".join(f"U{s}:U{e}" for s, e in data_ranges)
+    _c(21, f'=IF(COUNT({sum_u})=0,"",SUM({sum_u}))', font=_dev_font(dev_total_py, bold=True, size=12), fmt=_FMT_MONEY)
 
     denom = "+".join(f"SUMPRODUCT((H{s}:H{e}>0)*H{s}:H{e}*F{s}:F{e})" for s, e in data_ranges)
-    _c(18, f'=IFERROR(S{r}/({denom}),"")', font=_dev_font(dev_total_py, bold=True, size=12), fmt=_FMT_PCT)
+    _c(20, f'=IFERROR(U{r}/({denom}),"")', font=_dev_font(dev_total_py, bold=True, size=12), fmt=_FMT_PCT)
 
-    _c(20, None)  # T Коридор % — not aggregated at class level
-    _c(21, comp_total, font=_dev_font(comp_total or 0, bold=True, size=12), fmt=_FMT_MONEY)
+    _c(22, None)  # V Коридор % — not aggregated at class level
+    _c(23, comp_total, font=_dev_font(comp_total or 0, bold=True, size=12), fmt=_FMT_MONEY)
 
     ws.row_dimensions[r].height = 24
 
@@ -191,9 +199,10 @@ def _write_class_section(
       [ИТОГО по <class>]
       (spacer)
 
-    Columns 1–12 (A–L): static DB values.
-    Columns 13–19 (M–S): Excel formulas (totals and deviations).
-    Subtotal and grand-total rows also use SUMPRODUCT/SUM formulas.
+    Columns 1–12 (A–L): static DB values; H and J–Q are per-unit prices.
+    Columns 13–21 (M–U): Excel formulas (per-unit totals, invoice sums R/S, deviations T/U).
+    Columns 22–23 (V–W): corridor/compensation — Python values on month and total rows.
+    Month and grand-total rows: SUMPRODUCT weighted averages for prices, SUM for R/S/U.
     """
     cur = start_row
 
@@ -277,16 +286,18 @@ def _write_class_section(
         _hc(15, f'=IFERROR(SUMPRODUCT(O{s}:O{e},F{s}:F{e})/SUM(F{s}:F{e}),"")', fmt=_FMT_MONEY)
         _hc(16, f'=IFERROR(SUMPRODUCT(P{s}:P{e},F{s}:F{e})/SUM(F{s}:F{e}),"")', fmt=_FMT_MONEY)
         _hc(17, f"=N{rh}+O{rh}+P{rh}", fmt=_FMT_MONEY)   # Q Итого с НДС
-        _hc(19, f'=IF(COUNT(S{s}:S{e})=0,"",SUM(S{s}:S{e}))', font=_dev_font(month_dev, bold=True), fmt=_FMT_MONEY)
-        _hc(18, f'=IFERROR(S{rh}/SUMPRODUCT((H{s}:H{e}>0)*H{s}:H{e}*F{s}:F{e}),"")',
+        _hc(18, f"=SUM(R{s}:R{e})", fmt=_FMT_MONEY)       # R Сумма без НДС
+        _hc(19, f"=SUM(S{s}:S{e})", fmt=_FMT_MONEY)       # S Сумма с НДС
+        _hc(21, f'=IF(COUNT(U{s}:U{e})=0,"",SUM(U{s}:U{e}))', font=_dev_font(month_dev, bold=True), fmt=_FMT_MONEY)
+        _hc(20, f'=IFERROR(U{rh}/SUMPRODUCT((H{s}:H{e}>0)*H{s}:H{e}*F{s}:F{e}),"")',
             font=_dev_font(month_dev, bold=True), fmt=_FMT_PCT)
-        # Columns T/U: corridor % and monthly compensation (Python values, nonlinear → not formulaic)
+        # Columns V/W: corridor % and monthly compensation (Python values, nonlinear → not formulaic)
         month_key = (material_class_id, year, month)
         month_comp = (comp_by_class_month or {}).get(month_key, {})
         _corridor = month_comp.get("corridor_pct")
         _comp_amt = month_comp.get("compensation_amount")
-        _hc(20, (_corridor / Decimal("100")) if _corridor is not None else None, fmt=_FMT_PCT_RATE)
-        _hc(21, _comp_amt, font=_dev_font(_comp_amt or 0, bold=True), fmt=_FMT_MONEY)
+        _hc(22, (_corridor / Decimal("100")) if _corridor is not None else None, fmt=_FMT_PCT_RATE)
+        _hc(23, _comp_amt, font=_dev_font(_comp_amt or 0, bold=True), fmt=_FMT_MONEY)
         ws.row_dimensions[rh].height = 18
         cur += 1
 
@@ -336,10 +347,12 @@ def _write_class_section(
             _dc(15, f"=K{n}*(1+I{n})")                # O Доставка с НДС
             _dc(16, f"=L{n}*(1+I{n})")                # P Прочее с НДС
             _dc(17, f"=N{n}+O{n}+P{n}")               # Q Итого с НДС
-            _dc(18, f'=IFERROR(IF(H{n}>0,(Q{n}-H{n})/H{n},""),"")',
-                font=_dev_font(r["deviation_pct"]), fmt=_FMT_PCT)   # R Откл.%
-            _dc(19, f'=IFERROR(IF(H{n}>0,(Q{n}-H{n})*F{n},""),"")',
-                font=_dev_font(r["deviation_amount"]))             # S Откл.₽
+            _dc(18, f"=M{n}*F{n}")                    # R Сумма без НДС
+            _dc(19, f"=Q{n}*F{n}")                    # S Сумма с НДС
+            _dc(20, f'=IFERROR(IF(H{n}>0,(Q{n}-H{n})/H{n},""),"")',
+                font=_dev_font(r["deviation_pct"]), fmt=_FMT_PCT)   # T Откл.%
+            _dc(21, f'=IFERROR(IF(H{n}>0,(Q{n}-H{n})*F{n},""),"")',
+                font=_dev_font(r["deviation_amount"]))             # U Откл.₽
 
             ws.row_dimensions[cur].height = 16
             cur += 1

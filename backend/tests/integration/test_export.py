@@ -1,17 +1,19 @@
 """Tests for the Excel export: compute_export_rows() logic and /api/export/excel endpoint.
 
-Layout overview (21 columns A–U):
+Layout overview (23 columns A–W; H, J–Q are per-unit prices):
   A=Date  B=Number  C=Supplier
   D=RawQty  E=RawUnit  F=CalcQty (normalized)  G=BaseUnit
   H=RefPrice  I=VATrate
   J=MatExcl  K=DelivExcl  L=OtherExcl  M=formula:J+K+L
   N=formula:J*(1+I)  O=formula:K*(1+I)  P=formula:L*(1+I)  Q=formula:N+O+P
-  R=formula:deviation%  S=formula:deviation₽
-  T=corridor%  U=compensation₽
+  R=formula:sum excl VAT (M*F)  S=formula:sum incl VAT (Q*F)
+  T=formula:deviation%  U=formula:deviation₽
+  V=corridor%  W=compensation₽
 """
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from io import BytesIO
 from urllib.parse import unquote
 
@@ -611,7 +613,8 @@ class TestExportEndpoint:
 
     # ── Column layout ────────────────────────────────────────────────────────
 
-    def test_sheet_has_exactly_21_columns(self, client, factories):
+    def test_sheet_has_exactly_23_columns(self, client, factories):
+        """Sheet spans A–W: 21 legacy columns plus two invoice-sum columns."""
         project = factories.ProjectFactory.create()
         mc = factories.MaterialClassFactory.create(calc_role="base")
         doc = factories.DocumentFactory.create(project=project)
@@ -622,11 +625,115 @@ class TestExportEndpoint:
             "&period_start=2026-03-01&period_end=2026-03-31"
         )
         ws = load_workbook(BytesIO(resp.content)).active
-        assert ws.max_column == 21
+        assert ws.max_column == 23
+
+    def test_price_headers_are_per_unit_and_sum_headers_present(self, client, factories):
+        """Per-unit price columns say «₽/ед.»; R/S are invoice sums without and with VAT."""
+        project = factories.ProjectFactory.create()
+        mc = factories.MaterialClassFactory.create(calc_role="base")
+        doc = factories.DocumentFactory.create(project=project)
+        inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10))
+        factories.InvoiceItemFactory.create(invoice=inv, material_class=mc, quantity=10.0)
+        resp = client.get(
+            f"/api/export/excel?project_id={project.id}"
+            "&period_start=2026-03-01&period_end=2026-03-31"
+        )
+        ws = load_workbook(BytesIO(resp.content)).active
+        header_row = _find_data_row(ws) - 2  # column headers sit right above the month row
+        headers = {c: ws.cell(row=header_row, column=c).value for c in range(1, 24)}
+        for col in (8, *range(10, 18)):  # H, J–Q
+            assert headers[col].endswith(", ₽/ед."), f"col {col}: {headers[col]!r}"
+        assert headers[8] == "Базовая цена с НДС, ₽/ед."
+        assert headers[17] == "Итого с НДС, ₽/ед."
+        assert headers[18] == "Сумма без НДС, ₽"
+        assert headers[19] == "Сумма с НДС, ₽"
+        assert headers[20] == "Откл. от плана, %"
+        assert headers[23] == "Компенсация, ₽"
+
+    def test_sum_columns_formulas_in_data_month_and_total_rows(self, client, factories):
+        """R/S = per-unit total × qty in data rows; SUM over data ranges in month and class-total rows."""
+        project = factories.ProjectFactory.create()
+        mc = factories.MaterialClassFactory.create(name="В25", calc_role="base")
+        doc = factories.DocumentFactory.create(project=project)
+        inv_mar = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10))
+        inv_apr = factories.InvoiceFactory.create(document=doc, date=date(2026, 4, 5))
+        factories.InvoiceItemFactory.create(invoice=inv_mar, material_class=mc, quantity=10.0)
+        factories.InvoiceItemFactory.create(invoice=inv_apr, material_class=mc, quantity=5.0)
+        resp = client.get(
+            f"/api/export/excel?project_id={project.id}"
+            "&period_start=2026-03-01&period_end=2026-04-30"
+        )
+        ws = load_workbook(BytesIO(resp.content), data_only=False).active
+        mar = _find_data_row(ws)
+        apr = mar + 3  # data → separator → April month row → data
+
+        assert ws.cell(row=mar, column=18).value == f"=M{mar}*F{mar}"
+        assert ws.cell(row=mar, column=19).value == f"=Q{mar}*F{mar}"
+        assert ws.cell(row=mar - 1, column=18).value == f"=SUM(R{mar}:R{mar})"
+        assert ws.cell(row=mar - 1, column=19).value == f"=SUM(S{mar}:S{mar})"
+
+        total = apr + 1
+        assert ws.cell(row=total, column=1).value == "ИТОГО по В25"
+        assert ws.cell(row=total, column=18).value == f"=SUM(R{mar}:R{mar},R{apr}:R{apr})"
+        assert ws.cell(row=total, column=19).value == f"=SUM(S{mar}:S{mar},S{apr}:S{apr})"
+
+    def test_deviation_formulas_moved_to_t_and_u(self, client, factories):
+        """Deviation % / ₽ live in T/U and reference H, Q, F of the same row; totals sum U."""
+        project = factories.ProjectFactory.create()
+        mc = factories.MaterialClassFactory.create(calc_role="base")
+        doc = factories.DocumentFactory.create(project=project)
+        inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10))
+        factories.InvoiceItemFactory.create(invoice=inv, material_class=mc, quantity=10.0)
+        resp = client.get(
+            f"/api/export/excel?project_id={project.id}"
+            "&period_start=2026-03-01&period_end=2026-03-31"
+        )
+        ws = load_workbook(BytesIO(resp.content), data_only=False).active
+        n = _find_data_row(ws)
+        assert ws.cell(row=n, column=20).value == f'=IFERROR(IF(H{n}>0,(Q{n}-H{n})/H{n},""),"")'
+        assert ws.cell(row=n, column=21).value == f'=IFERROR(IF(H{n}>0,(Q{n}-H{n})*F{n},""),"")'
+        m = n - 1
+        assert ws.cell(row=m, column=21).value == f'=IF(COUNT(U{n}:U{n})=0,"",SUM(U{n}:U{n}))'
+        assert ws.cell(row=m, column=20).value == (
+            f'=IFERROR(U{m}/SUMPRODUCT((H{n}:H{n}>0)*H{n}:H{n}*F{n}:F{n}),"")'
+        )
+        t = n + 1
+        assert ws.cell(row=t, column=21).value == f'=IF(COUNT(U{n}:U{n})=0,"",SUM(U{n}:U{n}))'
+        assert ws.cell(row=t, column=20).value == (
+            f'=IFERROR(U{t}/(SUMPRODUCT((H{n}:H{n}>0)*H{n}:H{n}*F{n}:F{n})),"")'
+        )
+
+    def test_corridor_and_compensation_in_v_and_w(self, client, factories):
+        """Month row carries corridor % in V and compensation ₽ in W; class total sums W."""
+        project = factories.ProjectFactory.create()
+        mc = factories.MaterialClassFactory.create(calc_role="base")
+        factories.CompensationCorridorFactory.create(
+            project_id=project.id, material_class_id=mc.id, corridor_pct=Decimal("5.00"),
+        )
+        factories.ReferencePriceFactory.create(
+            project=project, material_class=mc, price=1000.0,
+            period_start=date(2026, 3, 1), period_end=date(2026, 3, 31),
+        )
+        doc = factories.DocumentFactory.create(project=project)
+        inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 3, 10), vat_rate=20.0)
+        factories.InvoiceItemFactory.create(
+            invoice=inv, material_class=mc,
+            quantity=10.0, unit_price=1000.0, amount=10_000.0, vat_amount=2_000.0,
+        )
+        resp = client.get(
+            f"/api/export/excel?project_id={project.id}"
+            "&period_start=2026-03-01&period_end=2026-03-31"
+        )
+        ws = load_workbook(BytesIO(resp.content)).active
+        n = _find_data_row(ws)
+        # avg 1200 ₽/ед. vs ref 1000 with 5 % corridor → (1200 − 1050) × 10 = 1500
+        assert float(ws.cell(row=n - 1, column=22).value) == pytest.approx(0.05)
+        assert float(ws.cell(row=n - 1, column=23).value) == pytest.approx(1500.0)
+        assert float(ws.cell(row=n + 1, column=23).value) == pytest.approx(1500.0)
 
     def test_formula_columns_contain_excel_formulas(self, client, factories):
-        """Columns M(13), N(14), O(15), P(16), Q(17), R(18), S(19) in a data row
-        must hold '=...' formula strings (not pre-computed floats)."""
+        """Columns M–U (13–21) in a data row must hold '=...' formula strings
+        (not pre-computed floats)."""
         project = factories.ProjectFactory.create()
         mc = factories.MaterialClassFactory.create(calc_role="base")
         doc = factories.DocumentFactory.create(project=project)
@@ -641,7 +748,9 @@ class TestExportEndpoint:
         data_row = _find_data_row(ws)
         assert data_row is not None, "No data row found (col D must have qty > 0)"
 
-        formula_cols = {13: "M", 14: "N", 15: "O", 16: "P", 17: "Q", 18: "R", 19: "S"}
+        formula_cols = {
+            13: "M", 14: "N", 15: "O", 16: "P", 17: "Q", 18: "R", 19: "S", 20: "T", 21: "U",
+        }
         for col, letter in formula_cols.items():
             v = ws.cell(row=data_row, column=col).value
             assert isinstance(v, str) and v.startswith("="), (
