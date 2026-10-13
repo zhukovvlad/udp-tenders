@@ -67,7 +67,7 @@ export default function MaterialPage() {
                   <TableRow>
                     <TableHead>Объект</TableHead>
                     <TableHead>Период</TableHead>
-                    <TableHead className="text-right">Базовая цена</TableHead>
+                    <TableHead className="text-right">Базовая цена с НДС</TableHead>
                     <TableHead>Источник</TableHead>
                   </TableRow>
                 </TableHeader>

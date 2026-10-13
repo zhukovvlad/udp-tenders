@@ -1290,7 +1290,7 @@ export default function ProjectPage() {
                   {/* Price */}
                   <div className="flex flex-col gap-1">
                     <label className="text-xs text-fg-secondary">
-                      Цена (₽)
+                      Цена с НДС, ₽ за ед.
                     </label>
                     <Input
                       type="number"
@@ -1361,7 +1361,7 @@ export default function ProjectPage() {
                 </DialogHeader>
                 <div className="space-y-3 py-2">
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs text-fg-secondary">Цена (₽)</label>
+                    <label className="text-xs text-fg-secondary">Цена с НДС, ₽ за ед.</label>
                     <Input
                       type="number"
                       min={0}
