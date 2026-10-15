@@ -20,14 +20,35 @@ depends_on: Union[str, Sequence[str], None] = None
 
 logger = logging.getLogger("alembic.runtime.migration")
 
-# Позиция считается растворной, если в наименовании есть «раствор» (кладочный,
-# цементный, цементно-песчаный…). Класс переносится, только если таковы ВСЕ его позиции.
+# Позиция — строительный раствор, если наименование НАЧИНАЕТСЯ со слова «раствор», перед
+# которым допустимы только прилагательные («Цементный», «Цементно-песчаный», «Готовый
+# кладочный»). \M (конец слова) отсекает «растворитель»/«растворонасос», а существительное
+# впереди — «Добавка для раствора». Неоднозначное остаётся в other. Класс переносится,
+# только если таковы ВСЕ его позиции.
+_MORTAR_ITEM_RE = r"^\s*([а-яё]+(-[а-яё]+)?(ый|ий|ой|ая|яя|ое|ее|ые|ие)\s+)*раствор\M"
 _MORTAR_CLASSES_SQL = """
     SELECT mc.id, mc.name FROM material_classes mc
     WHERE mc.material_type_id = :other
       AND EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.material_class_id = mc.id)
       AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.material_class_id = mc.id
-                      AND COALESCE(ii.raw_name, '') NOT ILIKE '%раствор%')
+                      AND COALESCE(ii.raw_name, '') !~* :mortar_re)
+"""
+
+# Класс без своего правила наследовал правило типа other; после смены типа resolve_corridor
+# (класс → тип → нет правила) его бы не нашёл — закрепляем правило на классе в проектах,
+# где класс используется (позиции или эталонные цены).
+_MATERIALIZE_INHERITED_SQL = """
+    INSERT INTO compensation_corridors (project_id, material_class_id, is_compensable, corridor_pct)
+    SELECT t.project_id, :cls, t.is_compensable, t.corridor_pct
+    FROM compensation_corridors t
+    WHERE t.material_type_id = :other AND t.material_class_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM compensation_corridors c
+                      WHERE c.material_class_id = :cls AND c.project_id = t.project_id)
+      AND (EXISTS (SELECT 1 FROM invoice_items ii
+                   JOIN invoices i ON i.id = ii.invoice_id JOIN documents d ON d.id = i.document_id
+                   WHERE ii.material_class_id = :cls AND d.project_id = t.project_id)
+           OR EXISTS (SELECT 1 FROM reference_prices rp
+                      WHERE rp.material_class_id = :cls AND rp.project_id = t.project_id))
 """
 
 
@@ -56,14 +77,20 @@ def _merge_into(conn, target: int, source: int) -> None:
 def move_mortar_classes(conn) -> None:
     """Перенести классы «Прочего», все позиции которых — раствор, в тип mortar.
 
-    Класс с тем же именем в mortar уже есть → слияние в него (уникальность (тип, имя)).
+    Класс с тем же именем в mortar уже есть → слияние в него (уникальность (тип, имя)),
+    действуют правила коридоров победителя. Иначе наследуемое правило типа other
+    сначала закрепляется на классе — компенсация после переноса не меняется.
     """
     other, mortar = _type_id(conn, "other"), _type_id(conn, "mortar")
-    for mc in conn.execute(sa.text(_MORTAR_CLASSES_SQL), {"other": other}).all():
+    candidates = conn.execute(sa.text(_MORTAR_CLASSES_SQL), {"other": other, "mortar_re": _MORTAR_ITEM_RE}).all()
+    for mc in candidates:
         target = conn.execute(sa.text(
             "SELECT id FROM material_classes WHERE material_type_id = :m AND name = :n"
         ), {"m": mortar, "n": mc.name}).scalar()
         if target is None:
+            kept = conn.execute(sa.text(_MATERIALIZE_INHERITED_SQL), {"cls": mc.id, "other": other}).rowcount
+            if kept:
+                logger.info(f"mortar: правило типа «Прочее» закреплено на классе {mc.id} в {kept} проект(ах)")
             conn.execute(sa.text("UPDATE material_classes SET material_type_id = :m WHERE id = :id"),
                          {"m": mortar, "id": mc.id})
         else:

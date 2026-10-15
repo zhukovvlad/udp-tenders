@@ -83,3 +83,66 @@ def test_restore_other_refuses_on_name_clash(db_session, factories, migration):
 
     with pytest.raises(RuntimeError, match="М200"):
         migration.restore_other(db_session.connection())
+
+
+@pytest.mark.parametrize("raw_names", [
+    ("Растворитель 646", "Растворитель Р-4"),          # «раствор» внутри другого слова
+    ("Растворонасос СО-49",),
+    ("Добавка для раствора противоморозная",),          # раствор — не сам товар
+    ("Противоморозная добавка для раствора",),
+    ("Раствор М150", "Растворитель 646"),               # настоящий раствор вперемешку
+])
+def test_ambiguous_names_stay_in_other(db_session, factories, migration, raw_names):
+    """Совпадение подстроки «раствор» не доказывает, что товар — строительный раствор."""
+    mc = _other(factories, "Х1", *raw_names)
+    mc_id = mc.id
+
+    migration.move_mortar_classes(db_session.connection())
+
+    assert _type_code(db_session, mc_id) == "other"
+
+
+def test_mortar_names_with_adjectives_are_moved(db_session, factories, migration):
+    """«Раствор …», «Цементный раствор …», «Цементно-песчаный раствор …» — строительный раствор."""
+    mc = _other(factories, "М150", "Раствор цементный М150", "Цементный раствор М150 ПК3",
+                "Цементно-песчаный раствор М150", "Готовый кладочный раствор М150")
+    mc_id = mc.id
+
+    migration.move_mortar_classes(db_session.connection())
+
+    assert _type_code(db_session, mc_id) == "mortar"
+
+
+def _used_in(factories, project, mc, raw_name="Раствор М200"):
+    """Позиция класса mc в документе проекта project."""
+    doc = factories.DocumentFactory.create(project=project)
+    inv = factories.InvoiceFactory.create(document=doc)
+    factories.InvoiceItemFactory.create(invoice=inv, material_class_id=mc.id, raw_name=raw_name)
+
+
+def test_inherited_other_corridor_is_materialized_on_class(db_session, factories, migration):
+    """Класс наследовал правило типа «Прочее» → после переноса правило закреплено на классе."""
+    from decimal import Decimal
+
+    from models import CompensationCorridor
+
+    other_id = db_session.query(MaterialType).filter_by(code="other").one().id
+    used, unused, overridden = (factories.ProjectFactory.create() for _ in range(3))
+    for p in (used, unused, overridden):
+        factories.CompensationCorridorFactory.create(
+            project_id=p.id, material_type_id=other_id, material_class_id=None,
+            is_compensable=True, corridor_pct=Decimal("7.50"))
+    mc = factories.MaterialClassFactory.create(name="М200", material_type_code="other")
+    _used_in(factories, used, mc)
+    _used_in(factories, overridden, mc)
+    factories.CompensationCorridorFactory.create(
+        project_id=overridden.id, material_class_id=mc.id, is_compensable=False, corridor_pct=None)
+    mc_id = mc.id
+
+    migration.move_mortar_classes(db_session.connection())
+    db_session.expire_all()
+
+    rows = {r.project_id: r for r in db_session.query(CompensationCorridor).filter_by(material_class_id=mc_id)}
+    assert set(rows) == {used.id, overridden.id}
+    assert (rows[used.id].is_compensable, rows[used.id].corridor_pct) == (True, Decimal("7.50"))
+    assert rows[overridden.id].is_compensable is False   # своё правило класса не трогаем
