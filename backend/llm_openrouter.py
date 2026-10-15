@@ -87,6 +87,11 @@ class OpenRouterProvider:
                                    retryable=True) from exc
 
         if response.status_code != 200:
+            # Тело ошибки — единственный источник причины (лимит размера, страниц, модели);
+            # обрезаем, чтобы HTML-страница прокси не раздула лог.
+            logger.warning(f"OpenRouter: HTTP {response.status_code}, "
+                           f"payload {len(response.request.content) / 1e6:.1f} МБ, "
+                           f"тело: {response.text[:1000]!r}")
             retryable = response.status_code >= 500 or response.status_code in (408, 429)
             raise LLMProviderError(f"OpenRouter API ошибка: {response.status_code}",
                                    retryable=retryable)

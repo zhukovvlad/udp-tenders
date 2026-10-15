@@ -15,6 +15,7 @@ import pikepdf
 import pypdfium2 as pdfium
 
 import llm
+from pdfium_sync import open_pdfium, render_page_to
 from processing import PermanentError, TransientError
 
 logger = logging.getLogger(__name__)
@@ -54,10 +55,9 @@ def _page_to_image_pdf(src_pdf: pdfium.PdfDocument, index: int, render_rotation:
     `render(rotation=...)` (по часовой стрелке). target_dpi используется ДВАЖДЫ: как scale
     рендера и как resolution записи image→PDF, иначе Pillow пишет 72 DPI/пиксель и mediabox раздувается.
     """
-    page = src_pdf[index]
-    img = page.render(scale=target_dpi / 72.0, rotation=render_rotation, grayscale=True).to_pil()
     out = io.BytesIO()
-    img.save(out, format="PDF", resolution=float(target_dpi))
+    render_page_to(src_pdf, index, lambda img: img.save(out, format="PDF", resolution=float(target_dpi)),
+                   scale=target_dpi / 72.0, rotation=render_rotation, grayscale=True)
     return out.getvalue()
 
 
@@ -65,24 +65,25 @@ def apply_rotations(pdf_bytes: bytes, rotations: list[int]) -> bytes:
     """Селективная raster-коррекция. `rotations[i]` — НА СКОЛЬКО градусов по часовой стрелке
     страница повёрнута (выход detect_rotations); чтобы её выпрямить, рендерим с ОТМЕНЯЮЩИМ
     поворотом (360 - r) % 360 (pypdfium2.render крутит по часовой). Прямые (r==0) переносим
-    как есть. Пересобираем смешанный документ через pikepdf."""
+    как есть. Пересобираем смешанный документ через pikepdf. PDFium — под глобальным локом
+    (pdfium_sync): весь цикл внутри open_pdfium, рендер перемежается с pikepdf."""
     src_pikepdf = pikepdf.open(io.BytesIO(pdf_bytes))
-    src_pdfium = pdfium.PdfDocument(pdf_bytes)
     result = pikepdf.new()
     keepalive = []  # foreign-PDF должны жить до result.save() (иначе copy_foreign может оборваться)
-    for i, page in enumerate(src_pikepdf.pages):
-        detected = rotations[i] % 360 if i < len(rotations) else 0
-        if detected == 0:
-            result.pages.append(page)  # как есть, без перерисовки
-            continue
-        render_rotation = (360 - detected) % 360  # отменяем поворот страницы
-        target_dpi = _target_dpi(page)
-        img_pdf = pikepdf.open(io.BytesIO(_page_to_image_pdf(src_pdfium, i, render_rotation, target_dpi)))
-        keepalive.append(img_pdf)
-        result.pages.append(img_pdf.pages[0])
-        last = result.pages[-1]
-        if "/Rotate" in last:          # пиксели уже прямые — флаг не нужен
-            del last["/Rotate"]        # словарный интерфейс (надёжнее атрибутного)
+    with open_pdfium(pdf_bytes) as src_pdfium:
+        for i, page in enumerate(src_pikepdf.pages):
+            detected = rotations[i] % 360 if i < len(rotations) else 0
+            if detected == 0:
+                result.pages.append(page)  # как есть, без перерисовки
+                continue
+            render_rotation = (360 - detected) % 360  # отменяем поворот страницы
+            target_dpi = _target_dpi(page)
+            img_pdf = pikepdf.open(io.BytesIO(_page_to_image_pdf(src_pdfium, i, render_rotation, target_dpi)))
+            keepalive.append(img_pdf)
+            result.pages.append(img_pdf.pages[0])
+            last = result.pages[-1]
+            if "/Rotate" in last:          # пиксели уже прямые — флаг не нужен
+                del last["/Rotate"]        # словарный интерфейс (надёжнее атрибутного)
     buf = io.BytesIO()
     result.save(buf)
     return buf.getvalue()
@@ -105,18 +106,17 @@ def render_pages_for_detect(pdf_bytes: bytes, long_side: int = 768) -> list[byte
     detect_rotations успевает отклонить его 413-м (FIX 2). Проверка в detect_rotations
     остаётся как defense-in-depth (безвредный дублирующий guard).
     """
-    pdf = pdfium.PdfDocument(pdf_bytes)
-    if len(pdf) > MAX_DESKEW_PAGES:
-        raise PermanentError(f"Слишком много страниц для коррекции (> {MAX_DESKEW_PAGES})",
-                             http_status=413)
     images: list[bytes] = []
-    for page in pdf:
-        w, h = page.get_size()
-        scale = long_side / max(w, h)
-        img = page.render(scale=scale, grayscale=True).to_pil()
-        out = io.BytesIO()
-        img.convert("L").save(out, format="JPEG", quality=70)
-        images.append(out.getvalue())
+    with open_pdfium(pdf_bytes) as pdf:  # PDFium — под глобальным локом (pdfium_sync)
+        if len(pdf) > MAX_DESKEW_PAGES:
+            raise PermanentError(f"Слишком много страниц для коррекции (> {MAX_DESKEW_PAGES})",
+                                 http_status=413)
+        for i in range(len(pdf)):
+            w, h = pdf.get_page_size(i)
+            out = io.BytesIO()
+            render_page_to(pdf, i, lambda img, out=out: img.convert("L").save(out, format="JPEG", quality=70),
+                           scale=long_side / max(w, h), grayscale=True)
+            images.append(out.getvalue())
     return images
 
 

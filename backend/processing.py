@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import weakref
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from config import settings
 from crud.materials import VALID_CALC_ROLES, UnknownMaterialType, get_or_create_material_class
 from crud.suppliers import get_or_create_supplier
 from crud.units import load_alias_map, normalize_item
@@ -30,6 +32,20 @@ if TYPE_CHECKING:  # только для типизации — не вызыв�
 logger = logging.getLogger(__name__)
 
 _LAST_ERROR_MAXLEN = 500
+
+# Семафор на event loop: asyncio-примитив привязан к loop, а в тестах loop'ов несколько.
+_processing_slots: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _processing_slot() -> asyncio.Semaphore:
+    """Семафор фоновых обработок текущего event loop (лимит settings.PROCESSING_CONCURRENCY)."""
+    loop = asyncio.get_running_loop()
+    slot = _processing_slots.get(loop)
+    if slot is None:
+        slot = _processing_slots[loop] = asyncio.Semaphore(settings.PROCESSING_CONCURRENCY)
+    return slot
 
 
 class ProcessingError(Exception):
@@ -464,8 +480,12 @@ async def process_document(doc_id: int, *, mode: str, pdf_bytes: bytes | None = 
         session_factory = get_processing_session_factory()
     accounting = {"cost_usd": Decimal(0), "paid_calls": 0}
     try:
-        await run_processing_attempt(session_factory, doc_id, mode=mode, pdf_bytes=pdf_bytes,
-                                     accounting=accounting)
+        # Лимит параллелизма: без него массовая загрузка запускала все обработки разом
+        # (пул БД, память под pdf_bytes, обрывы у LLM-провайдера). Ожидание слота —
+        # внутри try: отмена в очереди тоже даёт терминальный error.
+        async with _processing_slot():
+            await run_processing_attempt(session_factory, doc_id, mode=mode, pdf_bytes=pdf_bytes,
+                                         accounting=accounting)
     except ProcessingError as exc:
         logger.warning(f"[doc={doc_id}] обработка завершилась ошибкой: {exc.message}")
         write_processing_error(session_factory, doc_id, exc.message,

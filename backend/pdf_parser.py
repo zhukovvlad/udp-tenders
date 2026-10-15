@@ -4,9 +4,11 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
+import anyio
 import httpx
 
 import llm
+import pdf_compress
 from config import resolved_llm_parse_max_tokens, settings
 from processing import PermanentError, ProcessingError, TransientError
 
@@ -155,6 +157,23 @@ SYSTEM_PROMPT = """Ты — парсер счетов-фактур и УПД (у
 """
 
 
+async def _fit_for_llm(file_data: bytes, *, document_id: int) -> bytes:
+    """Ужать PDF под лимит запроса LLM (в потоке); не вышло → PermanentError без платного вызова."""
+    try:
+        fitted = await anyio.to_thread.run_sync(pdf_compress.fit_for_llm, file_data)
+    except pdf_compress.PdfTooLargeError as exc:
+        raise PermanentError(
+            f"PDF слишком большой для распознавания даже после сжатия ({exc.size / 1e6:.0f} МБ, "
+            f"предел {pdf_compress.LLM_MAX_PDF_BYTES / 1e6:.0f} МБ) — разделите документ на части"
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 — битый PDF из pdfium/pikepdf
+        logger.warning(f"[doc={document_id}] не удалось сжать PDF: {exc!r}")
+        raise PermanentError("Не удалось подготовить PDF к распознаванию (файл повреждён?)") from exc
+    if fitted is not file_data:
+        logger.info(f"[doc={document_id}] Фаза A: PDF сжат {len(file_data)} → {len(fitted)} байт")
+    return fitted
+
+
 async def parse_pdf(file_data: bytes, *, document_id: int) -> ParseOutcome:
     """Чистая фаза A: вызвать OpenRouter, разобрать ответ, вернуть ParseOutcome.
 
@@ -165,6 +184,8 @@ async def parse_pdf(file_data: bytes, *, document_id: int) -> ParseOutcome:
     cost = Decimal(0)
     paid_calls = 0
     logger.info(f"[doc={document_id}] Фаза A: старт парсинга, {len(file_data)} байт")
+
+    file_data = await _fit_for_llm(file_data, document_id=document_id)
 
     max_tokens = resolved_llm_parse_max_tokens(settings)
     try:

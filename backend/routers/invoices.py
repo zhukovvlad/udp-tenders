@@ -94,6 +94,21 @@ def _avg_confidence(doc) -> float | None:
     return round(sum(confs) / len(confs), 2)
 
 
+def _serialize_and_release(db: Session, doc_id: int) -> dict:
+    """Сериализовать документ и вернуть соединение запроса в пул до старта фоновой обработки.
+
+    FastAPI закрывает зависимость get_db только ПОСЛЕ BackgroundTasks, поэтому без явного
+    завершения транзакции сессия запроса держала бы соединение всё время фоновой обработки
+    (LLM-вызов — десятки секунд), и массовая загрузка исчерпывала QueuePool. rollback, а не
+    close: несохранённого нет (guard уже закоммичен), соединение уходит в пул, а сессия
+    остаётся пригодной для зависимостей, которые ещё держат её объекты.
+    """
+    db.expire_all()
+    result = _serialize_document(get_document(db, doc_id))
+    db.rollback()
+    return result
+
+
 def _serialize_document(doc) -> dict:
     """Полная сериализация документа со счетами-фактурами и позициями.
     Используется в GET /documents/{id}, POST /upload, POST /reparse —
@@ -215,8 +230,7 @@ async def reparse_document(
     from processing import process_document
     background_tasks.add_task(process_document, doc_id, mode="parse", session_factory=session_factory)
 
-    db.expire_all()
-    return _serialize_document(get_document(db, doc_id))
+    return _serialize_and_release(db, doc_id)
 
 
 @router.post("/documents/{doc_id}/deskew-reparse", status_code=202)
@@ -241,8 +255,7 @@ async def deskew_reparse_document(
     from processing import process_document
     background_tasks.add_task(process_document, doc_id, mode="deskew", session_factory=session_factory)
 
-    db.expire_all()
-    return _serialize_document(get_document(db, doc_id))
+    return _serialize_and_release(db, doc_id)
 
 
 @router.post("/upload", status_code=202)
@@ -272,6 +285,10 @@ async def upload_pdf(
         response.status_code = 200
         return {**_serialize_document(existing), "duplicate": True}
 
+    # Не держим соединение (auth + дедуп-запрос) на время сетевой загрузки в S3:
+    # транзакция только читала, commit возвращает соединение в пул, create_document
+    # возьмёт его заново.
+    db.commit()
     now = datetime.now(UTC)
     object_name = f"{now.year}/{now.month:02d}/{uuid.uuid4().hex}_{file.filename}"
     try:
@@ -289,24 +306,26 @@ async def upload_pdf(
         winner = (db.query(Document)
                   .filter(Document.project_id == project_id, Document.file_hash == file_hash)
                   .first())
+        winner_body = {**_serialize_document(winner), "duplicate": True} if winner else None
+        db.commit()  # транзакция только читала — соединение в пул до сетевого удаления из S3
         try:
             await delete_file_async(object_name)  # наш S3-объект осиротел — best-effort очистка
         except Exception:
             logger.warning(f"Дедуп-гонка: не удалось удалить S3-сироту {object_name}")
-        if winner is None:
+        if winner_body is None:
             raise  # IntegrityError был НЕ про uq_documents_project_file_hash — не маскируем под дубликат
         response.status_code = 200
-        return {**_serialize_document(winner), "duplicate": True}
+        return winner_body
 
     if not try_acquire_processing(db, doc.id):
         raise HTTPException(status_code=409, detail="Документ уже обрабатывается")
 
+    # pdf_bytes не передаём: ждущая слота PROCESSING_CONCURRENCY таска держала бы весь PDF
+    # в памяти; обработка скачает его из S3 сама, уже получив слот.
     from processing import process_document
-    background_tasks.add_task(process_document, doc.id, mode="parse",
-                              pdf_bytes=file_bytes, session_factory=session_factory)
+    background_tasks.add_task(process_document, doc.id, mode="parse", session_factory=session_factory)
 
-    db.expire_all()
-    return {**_serialize_document(get_document(db, doc.id)), "duplicate": False}
+    return {**_serialize_and_release(db, doc.id), "duplicate": False}
 
 
 @router.put("/{invoice_id}")
