@@ -33,7 +33,9 @@ def test_upload_enqueues_via_background_tasks(client, factories, in_memory_s3,
     assert calls[0]["func"] is processing.process_document
     assert calls[0]["args"][0] == d["id"]
     assert calls[0]["kwargs"]["mode"] == "parse"
-    assert calls[0]["kwargs"]["pdf_bytes"] is not None
+    # Байты не передаём: ждущая слота таска держала бы весь PDF в памяти — обработка
+    # скачает его из S3 сама, уже получив слот.
+    assert "pdf_bytes" not in calls[0]["kwargs"]
     # Таска не исполнялась → документ в БД остался processing (ответ не ждал обработку):
     g = client.get(f"/api/invoices/documents/{d['id']}")
     assert g.json()["status"] == "processing"
@@ -123,6 +125,30 @@ def test_request_session_released_before_background_processing(
 
     assert r.status_code == 202
     assert r.json()["status"] == "processing"
+    assert seen == [False]
+
+
+def test_upload_releases_db_connection_before_s3_upload(
+    client, factories, in_memory_s3, sample_pdf_bytes, db_session, monkeypatch,
+):
+    """Во время await загрузки в S3 сессия запроса не держит соединение из пула."""
+    import io
+
+    import routers.invoices as inv
+
+    seen: list[bool] = []
+
+    async def fake_upload(file_bytes, object_name):
+        """Фиксирует, держит ли сессия транзакцию в момент сетевой загрузки."""
+        seen.append(db_session.in_transaction())
+        in_memory_s3[object_name] = file_bytes
+    monkeypatch.setattr(inv, "upload_file_async", fake_upload)
+
+    project = factories.ProjectFactory.create()
+    files = {"file": ("a.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+    r = client.post("/api/invoices/upload", data={"project_id": project.id}, files=files)
+
+    assert r.status_code == 202
     assert seen == [False]
 
 

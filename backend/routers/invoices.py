@@ -285,6 +285,10 @@ async def upload_pdf(
         response.status_code = 200
         return {**_serialize_document(existing), "duplicate": True}
 
+    # Не держим соединение (auth + дедуп-запрос) на время сетевой загрузки в S3:
+    # транзакция только читала, commit возвращает соединение в пул, create_document
+    # возьмёт его заново.
+    db.commit()
     now = datetime.now(UTC)
     object_name = f"{now.year}/{now.month:02d}/{uuid.uuid4().hex}_{file.filename}"
     try:
@@ -302,21 +306,24 @@ async def upload_pdf(
         winner = (db.query(Document)
                   .filter(Document.project_id == project_id, Document.file_hash == file_hash)
                   .first())
+        winner_body = {**_serialize_document(winner), "duplicate": True} if winner else None
+        db.commit()  # транзакция только читала — соединение в пул до сетевого удаления из S3
         try:
             await delete_file_async(object_name)  # наш S3-объект осиротел — best-effort очистка
         except Exception:
             logger.warning(f"Дедуп-гонка: не удалось удалить S3-сироту {object_name}")
-        if winner is None:
+        if winner_body is None:
             raise  # IntegrityError был НЕ про uq_documents_project_file_hash — не маскируем под дубликат
         response.status_code = 200
-        return {**_serialize_document(winner), "duplicate": True}
+        return winner_body
 
     if not try_acquire_processing(db, doc.id):
         raise HTTPException(status_code=409, detail="Документ уже обрабатывается")
 
+    # pdf_bytes не передаём: ждущая слота PROCESSING_CONCURRENCY таска держала бы весь PDF
+    # в памяти; обработка скачает его из S3 сама, уже получив слот.
     from processing import process_document
-    background_tasks.add_task(process_document, doc.id, mode="parse",
-                              pdf_bytes=file_bytes, session_factory=session_factory)
+    background_tasks.add_task(process_document, doc.id, mode="parse", session_factory=session_factory)
 
     return {**_serialize_and_release(db, doc.id), "duplicate": False}
 
