@@ -37,11 +37,11 @@ import { StatusPill } from "@/components/ui-domain/StatusPill";
 
 import { useMaterialClasses, useCreateMaterialClass, useDeleteMaterialClass } from "@/services/queries";
 import { formatDate } from "@/lib/format";
-
-const TYPE_LABELS: Record<string, string> = { concrete: "Бетон", rebar: "Арматура", other: "Прочее" };
+import { useMaterialTypeLabels } from "@/lib/materialTypes";
 
 export default function Materials() {
   const list = useMaterialClasses();
+  const { label: materialTypeLabel, options: typeOptions } = useMaterialTypeLabels();
   const create = useCreateMaterialClass();
   const remove = useDeleteMaterialClass();
   const navigate = useNavigate();
@@ -76,9 +76,9 @@ export default function Materials() {
                   <Select value={type} onValueChange={(v: string | null) => setType(v ?? "concrete")}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="concrete">Бетон</SelectItem>
-                      <SelectItem value="rebar">Арматура</SelectItem>
-                      <SelectItem value="other">Прочее</SelectItem>
+                      {typeOptions.map((t) => (
+                        <SelectItem key={t.code} value={t.code}>{t.name}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -140,7 +140,7 @@ export default function Materials() {
                   >
                     <TableCell className="font-medium">{c.name}</TableCell>
                     <TableCell>
-                      <StatusPill tone="neutral" label={TYPE_LABELS[c.material_type] ?? c.material_type} />
+                      <StatusPill tone="neutral" label={materialTypeLabel(c.material_type)} />
                     </TableCell>
                     <TableCell className="text-fg-secondary">{formatDate(c.created_at)}</TableCell>
                     <TableCell>

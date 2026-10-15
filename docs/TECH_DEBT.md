@@ -163,12 +163,12 @@
   добавить вариант `primary` / `danger`, обновить CSS-переменные — и удалить `ui-domain/Button.tsx`.
   Все ~11 import-точек переключить на `@/components/ui/button`.
 
-- [ ] **`window.confirm` остаётся в `MaterialClasses.tsx`, `Materials.tsx`, `ReferencePrices.tsx`**
+- [ ] **`window.confirm` остаётся в `Materials.tsx`, `ReferencePrices.tsx`**
   Проектный паттерн подтверждающих диалогов — shadcn `AlertDialog` (см. пункт про `ui-domain/Button`
   выше и коммит `9a48aba`, которым `Review.tsx` был переведён на `AlertDialog` в рамках Ступени 1
-  async processing — `docs/devlog/2026-07-19-async-processing-stage-1.md`). Эти три страницы всё
+  async processing — `docs/devlog/2026-07-19-async-processing-stage-1.md`). Эти две страницы всё
   ещё используют нативный `window.confirm` для подтверждения удаления.
-  **Решение:** заменить `window.confirm` на `AlertDialog` во всех трёх файлах по образцу
+  **Решение:** заменить `window.confirm` на `AlertDialog` в обоих файлах по образцу
   `Review.tsx` (коммит `9a48aba`).
 
 - [ ] **`lib/api.ts`: глобальный onError показывает сырое axios-сообщение вместо серверного `detail`**

@@ -14,7 +14,7 @@ class TestSeedData:
 
     def test_material_types_seeded(self, db_session):
         codes = {m.code for m in db_session.query(MaterialType).all()}
-        assert {"concrete", "rebar", "other"} == codes
+        assert {"concrete", "rebar", "mortar", "other"} == codes
 
     def test_aliases_resolve_to_base(self, db_session):
         amap = load_alias_map(db_session)

@@ -203,7 +203,7 @@ class MaterialType(Base):
     __tablename__ = "material_types"
 
     id = Column(Integer, primary_key=True)
-    code = Column(String, nullable=False, unique=True)   # concrete / rebar / other
+    code = Column(String, nullable=False, unique=True)   # concrete / rebar / mortar / other
     name = Column(String, nullable=False)
     default_unit_id = Column(
         Integer, ForeignKey("units_of_measure.id", ondelete="RESTRICT"), nullable=True

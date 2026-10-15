@@ -324,4 +324,5 @@ export const sampleMaterialTypes = [
   { id: 1, code: "concrete", name: "Бетон", default_unit: { id: 3, code: "M3", symbol: "м³" } },
   { id: 2, code: "rebar", name: "Арматура", default_unit: { id: 1, code: "TON", symbol: "т" } },
   { id: 3, code: "other", name: "Прочее", default_unit: null },
+  { id: 4, code: "mortar", name: "Раствор", default_unit: { id: 3, code: "M3", symbol: "м³" } },
 ];

@@ -15,7 +15,7 @@ router = APIRouter()
 
 class MaterialClassCreate(BaseModel):
     name: str
-    material_type: str  # concrete / rebar / other
+    material_type: str  # concrete / rebar / mortar / other
 
 
 @router.get("")

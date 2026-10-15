@@ -466,3 +466,22 @@ def test_dashboard_invoices_directions_field(client, factories):
     by_number = {r["number"]: r for r in rows}
     assert sorted(by_number["MIX"]["directions"]) == ["concrete", "rebar"]
     assert by_number["ORPHAN"]["directions"] == []
+
+
+def test_mortar_is_a_direction_with_cubic_volume(client, factories):
+    """Тип «Раствор» (mortar) — отдельное направление сводки с объёмом в м³."""
+    project = factories.ProjectFactory.create()
+    mortar = factories.MaterialClassFactory.create(name="М200", material_type_code="mortar")
+    doc = factories.DocumentFactory.create(project=project)
+    inv = factories.InvoiceFactory.create(document=doc, date=date(2026, 9, 8))
+    factories.InvoiceItemFactory.create(
+        invoice=inv, material_class=mortar, item_type="material",
+        raw_name="Раствор М200Пк3F50", quantity=16, unit_price=5000, amount=80000)
+
+    summary = client.get(f"/api/dashboard/summary?project_id={project.id}").json()
+
+    [direction] = summary["directions"]
+    assert (direction["code"], direction["name"]) == ("mortar", "Раствор")
+    assert direction["volume"] == 16.0 and direction["volume_unit"] == "м³"
+    rows = client.get(f"/api/dashboard/calculations?project_id={project.id}&direction=mortar").json()
+    assert [r["material_class_name"] for r in rows] == ["М200"]
