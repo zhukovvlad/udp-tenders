@@ -106,6 +106,9 @@ class SupplierFactory(_BaseFactory):
 class MaterialClassFactory(_BaseFactory):
     class Meta:
         model = MaterialClass
+        # uq_material_classes_type_name: повторный create с тем же (тип, имя) — тот же класс,
+        # как и get_or_create_material_class в приложении.
+        sqlalchemy_get_or_create = ("material_type_id", "name")
 
     # Default to concrete/В25. Tests override material_type_code to switch type.
     class Params:

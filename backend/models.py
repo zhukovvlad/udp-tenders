@@ -228,6 +228,12 @@ class MaterialClass(Base):
     reference_prices = relationship("ReferencePrice", back_populates="material_class")
     invoice_items = relationship("InvoiceItem", back_populates="material_class")
 
+    # Имя каноническое (crud.materials.normalize_class_name); индекс страхует и от гонки
+    # параллельных обработок, создающих один класс.
+    __table_args__ = (
+        Index("uq_material_classes_type_name", "material_type_id", "name", unique=True),
+    )
+
 
 class ReferencePrice(Base):
     __tablename__ = "reference_prices"
