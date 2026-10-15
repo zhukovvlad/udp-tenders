@@ -222,6 +222,13 @@ def test_render_pages_for_detect_rejects_too_many_pages_before_rendering(monkeyp
             """Не должна вызываться — рендер обязан быть отклонён ДО цикла по страницам."""
             raise AssertionError("PdfDocument был проитерирован — рендер начался до page-limit guard")
 
+        def get_page_size(self, index):
+            """Не должна вызываться — цикл по страницам начинается только после guard."""
+            raise AssertionError("страница открыта до page-limit guard")
+
+        def close(self):
+            """open_pdfium закрывает документ под локом — фейку достаточно no-op."""
+
     monkeypatch.setattr(po.pdfium, "PdfDocument", lambda pdf_bytes: _FakeTooBigDoc())
 
     with pytest.raises(PermanentError) as ei:

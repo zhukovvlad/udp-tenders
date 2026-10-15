@@ -11,6 +11,8 @@ import logging
 import pikepdf
 import pypdfium2 as pdfium
 
+from pdfium_sync import open_pdfium, render_page_to
+
 logger = logging.getLogger(__name__)
 
 # Предел «сырого» PDF: base64 ×4/3 → ~26.7 МБ + промпт, с запасом до 30 МБ.
@@ -34,31 +36,36 @@ def _page_to_jpeg_pdf(src: pdfium.PdfDocument, index: int, dpi: int, quality: in
 
     dpi задаёт и scale рендера, и resolution записи — иначе Pillow пишет 72 DPI/пиксель
     и mediabox раздувается (тот же приём, что в pdf_orientation._page_to_image_pdf).
+    Вызывать только внутри open_pdfium.
     """
-    img = src[index].render(scale=dpi / 72.0, grayscale=True).to_pil()
     out = io.BytesIO()
-    img.save(out, format="PDF", resolution=float(dpi), quality=quality)
+    render_page_to(src, index,
+                   lambda img: img.save(out, format="PDF", resolution=float(dpi), quality=quality),
+                   scale=dpi / 72.0, grayscale=True)
     return out.getvalue()
 
 
 def shrink_pdf(pdf_bytes: bytes, dpi: int, quality: int) -> bytes:
-    """Пересобрать PDF из постраничных grayscale-JPEG; в памяти — только сжатые страницы."""
-    src = pdfium.PdfDocument(pdf_bytes)
+    """Пересобрать PDF из постраничных grayscale-JPEG; в памяти — только сжатые страницы.
+
+    PDFium — под глобальным локом (растр страниц), сборка pikepdf — уже вне его.
+    """
+    with open_pdfium(pdf_bytes) as src:
+        page_pdfs = [_page_to_jpeg_pdf(src, i, dpi, quality) for i in range(len(src))]
     result = pikepdf.new()
     keepalive = []  # foreign-PDF должны жить до result.save()
     try:
-        for i in range(len(src)):
-            page_pdf = pikepdf.open(io.BytesIO(_page_to_jpeg_pdf(src, i, dpi, quality)))
+        for page_bytes in page_pdfs:
+            page_pdf = pikepdf.open(io.BytesIO(page_bytes))
             keepalive.append(page_pdf)
             result.pages.append(page_pdf.pages[0])
         buf = io.BytesIO()
-        result.save(buf)
+        result.save(buf, deterministic_id=True)  # /ID от содержимого, а не от времени — вывод воспроизводим
         return buf.getvalue()
     finally:
         for page_pdf in keepalive:
             page_pdf.close()
         result.close()
-        src.close()
 
 
 def fit_for_llm(pdf_bytes: bytes) -> bytes:
