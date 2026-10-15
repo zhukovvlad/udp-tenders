@@ -1,0 +1,19 @@
+{
+  "id": "gen-test-mortar",
+  "model": "anthropic/claude-sonnet-4.6",
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "{\"doc_type\": \"invoice\", \"invoices\": [{\"number\": \"СФ-202\", \"date\": \"2026-09-08\", \"supplier_name\": \"ООО Растворный узел\", \"supplier_inn\": \"0000000000\", \"vat_rate\": 20, \"doc_total_without_vat\": 110000.0, \"doc_total_with_vat\": 132000.0, \"confidence\": 0.95, \"confidence_reason\": \"все поля читаются чётко\", \"items\": [{\"raw_name\": \"Раствор М200Пк3F50\", \"item_type\": \"material\", \"calc_role\": \"base\", \"material_class\": \"М200\", \"material_type\": \"mortar\", \"quantity\": 16.0, \"unit\": \"м3\", \"unit_price\": 5000.0, \"amount\": 80000.0, \"vat_amount\": 16000.0, \"confidence\": 0.95}, {\"raw_name\": \"Кирпич керамический М150 одинарный\", \"item_type\": \"material\", \"calc_role\": \"base\", \"material_class\": \"Кирпич М150\", \"material_type\": \"other\", \"quantity\": 1000.0, \"unit\": \"шт\", \"unit_price\": 30.0, \"amount\": 30000.0, \"vat_amount\": 6000.0, \"confidence\": 0.95}]}]}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 100,
+    "completion_tokens": 200,
+    "total_tokens": 300,
+    "cost": 0.0021
+  }
+}

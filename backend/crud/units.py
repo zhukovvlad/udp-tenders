@@ -84,6 +84,8 @@ ALIASES_SEED: dict[str, str] = {
     "шт": "PCS", "штук": "PCS", "pcs": "PCS",
 }
 
+# Снимок на ревизию e1f2a3b4c5d6 (она импортирует его при upgrade) — НЕ дополнять:
+# новые типы добавляются своими ревизиями (mortar — 216a3d19213d).
 MATERIAL_TYPES_SEED: list[dict] = [
     {"code": "concrete", "name": "Бетон",    "default_unit_code": "M3"},
     {"code": "rebar",    "name": "Арматура", "default_unit_code": "TON"},

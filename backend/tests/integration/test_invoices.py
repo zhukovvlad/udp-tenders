@@ -180,6 +180,22 @@ def test_upload_creates_document_with_invoices(client, factories, sample_pdf_byt
     assert len(body["invoices"][0]["items"]) == 1
 
 
+def test_upload_mortar_and_other_material_classes(client, factories, sample_pdf_bytes, mock_openrouter, db_session):
+    """Раствор → класс-марка «М200» типа mortar; прочий материал → «Кирпич М150» типа other."""
+    from models import MaterialClass
+
+    mock_openrouter.use_scenario("mortar")
+    project = factories.ProjectFactory.create()
+    r = client.post("/api/invoices/upload", data={"project_id": project.id},
+                    files={"file": ("m.pdf", sample_pdf_bytes, "application/pdf")})
+    assert client.get(f"/api/invoices/documents/{r.json()['id']}").json()["status"] == "parsed"
+
+    db_session.expire_all()
+    types = {mc.name: mc.material_type.code for mc in db_session.query(MaterialClass)}
+    assert types["М200"] == "mortar"
+    assert types["Кирпич М150"] == "other"
+
+
 def test_upload_unparseable_marks_doc_type_unknown(
     client, factories, sample_pdf_bytes, mock_openrouter,
 ):

@@ -20,6 +20,7 @@ class TestUnitsApi:
         resp = client.get("/api/material-types")
         assert resp.status_code == 200
         by_code = {m["code"]: m for m in resp.json()}
-        assert set(by_code) == {"concrete", "rebar", "other"}
+        assert set(by_code) == {"concrete", "rebar", "mortar", "other"}
         assert by_code["concrete"]["default_unit"]["code"] == "M3"
+        assert by_code["mortar"]["default_unit"]["code"] == "M3"
         assert by_code["other"]["default_unit"] is None
