@@ -25,7 +25,7 @@ def _material_type_id_by_code(db: Session, code: str) -> int:
 # --- Material Classes ---
 
 # Латинские двойники кириллицы: модель пишет то «B60», то «В60» — визуально одно и то же.
-_LATIN_TO_CYRILLIC = str.maketrans("ABCEHKMOPTXYaceopxyk", "АВСЕНКМОРТХУасеорхук")
+_LATIN_TO_CYRILLIC = str.maketrans("ABCEHKMOPTXYaceopxykt", "АВСЕНКМОРТХУасеорхукт")
 # Код класса: 1–3 буквы, число (дробь через точку или запятую), суффикс до 2 букв —
 # «В25», «В7,5», «А500С», «Ат800», «М200». Всё прочее (добавки, exclude-имена,
 # полные спецификации вроде «B25 W8 F200») кодом не считается.
@@ -37,8 +37,9 @@ _CLASS_CODE_RE = re.compile(
 def normalize_class_name(name: str) -> str:
     """Канон имени класса: схлопнуть пробелы; для кода класса — кириллица, точка, без пробелов.
 
-    Для кода латинские двойники заменяются кириллицей, первая буква — заглавная (регистр
-    остальных сохраняется: «Ат800» по ГОСТ), дробная часть — через точку («В7.5»).
+    Для кода: первая буква префикса и суффикс — заглавные (регистр остального префикса
+    сохраняется: «Ат800» по ГОСТ), затем латинские двойники → кириллица, дробная часть —
+    через точку («В7.5»). Результат — неподвижная точка (повторный вызов не меняет).
     Не-коды не транслитерируются — латинское торговое имя добавки остаётся как есть.
     """
     collapsed = " ".join(name.split())
@@ -46,8 +47,10 @@ def normalize_class_name(name: str) -> str:
     if not match:
         return collapsed
     prefix, number, suffix = match.groups()
-    prefix = prefix.translate(_LATIN_TO_CYRILLIC)
-    return prefix[0].upper() + prefix[1:] + number.replace(",", ".") + suffix.translate(_LATIN_TO_CYRILLIC)
+    # Сначала регистр, потом транслитерация: строчных «b»/«m» в таблице нет, и «b25»
+    # иначе остался бы латинским «B25» — дублем «В25» и не неподвижной точкой.
+    code = prefix[0].upper() + prefix[1:] + number.replace(",", ".") + suffix.upper()
+    return code.translate(_LATIN_TO_CYRILLIC)
 
 
 def _find_class(db: Session, name: str, material_type_id: int) -> MaterialClass | None:

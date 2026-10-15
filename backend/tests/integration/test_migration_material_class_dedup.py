@@ -59,6 +59,24 @@ def test_merge_three_spellings_and_rename_survivor(db_session, factories, migrat
     assert db_session.query(InvoiceItem).filter_by(material_class_id=comma.id).count() == 9
 
 
+def test_merge_lowercase_latin_variants(db_session, factories, migration):
+    """Строчная латиница («b25», «m200») сливается с кириллическим каноном."""
+    cyr = factories.MaterialClassFactory.create(name="В25")
+    lat_upper = factories.MaterialClassFactory.create(name="B25")
+    lat_lower = factories.MaterialClassFactory.create(name="b25")
+    _items(factories, cyr, 2)
+    other_cyr = factories.MaterialClassFactory.create(name="М200", material_type_code="other")
+    other_lat = factories.MaterialClassFactory.create(name="m200", material_type_code="other")
+    _items(factories, other_cyr, 1)
+    lat_ids = {lat_upper.id, lat_lower.id, other_lat.id}
+
+    migration.merge_duplicate_classes(db_session.connection())
+
+    names = _names(db_session)
+    assert names[cyr.id] == "В25" and names[other_cyr.id] == "М200"
+    assert not lat_ids & names.keys()
+
+
 def test_merge_tie_keeps_smaller_id(db_session, factories, migration):
     """При равном числе позиций побеждает меньший id."""
     first = factories.MaterialClassFactory.create(name="В20")

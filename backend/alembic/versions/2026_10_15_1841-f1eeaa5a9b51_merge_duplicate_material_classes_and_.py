@@ -24,7 +24,7 @@ logger = logging.getLogger("alembic.runtime.migration")
 
 # Замороженная копия crud.materials.normalize_class_name на момент ревизии: миграция
 # не импортирует код приложения, который может измениться после неё.
-_LATIN_TO_CYRILLIC = str.maketrans("ABCEHKMOPTXYaceopxyk", "АВСЕНКМОРТХУасеорхук")
+_LATIN_TO_CYRILLIC = str.maketrans("ABCEHKMOPTXYaceopxykt", "АВСЕНКМОРТХУасеорхукт")
 _CLASS_CODE_RE = re.compile(
     r"^([A-Za-zА-Яа-яЁё]{1,3})\s*(\d+(?:[.,]\d+)?)\s*([A-Za-zА-Яа-яЁё]{0,2})$"
 )
@@ -37,8 +37,10 @@ def _normalize(name: str) -> str:
     if not match:
         return collapsed
     prefix, number, suffix = match.groups()
-    prefix = prefix.translate(_LATIN_TO_CYRILLIC)
-    return prefix[0].upper() + prefix[1:] + number.replace(",", ".") + suffix.translate(_LATIN_TO_CYRILLIC)
+    # Сначала регистр, потом транслитерация: строчных «b»/«m» в таблице нет, и «b25»
+    # иначе остался бы латинским «B25» — дублем «В25» и не неподвижной точкой.
+    code = prefix[0].upper() + prefix[1:] + number.replace(",", ".") + suffix.upper()
+    return code.translate(_LATIN_TO_CYRILLIC)
 
 
 def _merge_reference_prices(conn, survivor: int, loser: int) -> None:

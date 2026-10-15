@@ -18,6 +18,11 @@ from crud.materials import normalize_class_name
     ("A240", "А240"),
     ("M200", "М200"),
     ("Ат800", "Ат800"),        # регистр ГОСТ-обозначения сохраняется
+    ("At800", "Ат800"),        # латинская t внутри префикса → кириллическая т
+    ("b25", "В25"),            # строчная латиница: сначала регистр, потом транслитерация
+    ("m200", "М200"),
+    ("A500c", "А500С"),        # суффикс — заглавный
+    ("а500с", "А500С"),
 ])
 def test_class_codes_are_canonicalized(raw, expected):
     """Коды классов (буквы + число + суффикс) приводятся к единому кириллическому виду."""
@@ -34,3 +39,13 @@ def test_class_codes_are_canonicalized(raw, expected):
 def test_non_code_names_only_collapse_whitespace(raw, expected):
     """Не-коды (добавки, exclude-имена, торговые марки) не транслитерируются."""
     assert normalize_class_name(raw) == expected
+
+
+@pytest.mark.parametrize("raw", [
+    "b25", "B25", "В25", "m200", "M200", "A500c", "а500с", "At800", "В7,5", "B 7.5",
+    "Цементное молоко", "Penetron Admix", "B25 W8 F200",
+])
+def test_normalization_is_idempotent(raw):
+    """Канон — неподвижная точка: повторная нормализация ничего не меняет."""
+    once = normalize_class_name(raw)
+    assert normalize_class_name(once) == once
