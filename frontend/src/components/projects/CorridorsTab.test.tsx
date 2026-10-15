@@ -55,6 +55,27 @@ describe("CorridorsTab", () => {
     expect(screen.getByText("(наследовано)")).toBeInTheDocument();
   });
 
+  it("labels the mortar type as «Раствор»", async () => {
+    server.use(
+      http.get("/api/projects/:projectId/corridors", () =>
+        HttpResponse.json({
+          types: [{ material_type: "mortar", is_compensable: null, corridor_pct: null, has_rule: false }],
+          classes: [
+            {
+              material_class_id: 3, material_class_name: "М200", material_type: "mortar",
+              is_compensable: false, corridor_pct: null, level: "default", has_override: false,
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<CorridorsTab projectId={42} />);
+
+    expect(await screen.findByText("Раствор")).toBeInTheDocument();
+    expect(screen.queryByText("mortar")).not.toBeInTheDocument();
+  });
+
   it("with direction='concrete' rebar type and class rows are not rendered (спека §3.3)", async () => {
     server.use(
       http.get("/api/projects/:projectId/corridors", () => HttpResponse.json(MATRIX_WITH_DATA)),

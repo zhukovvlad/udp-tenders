@@ -14,6 +14,7 @@ import {
 } from "@/services/queries";
 import type { ID } from "@/types/common";
 import type { CorridorClassResolved } from "@/types/compensationCorridor";
+import { useMaterialTypeLabels } from "@/lib/materialTypes";
 
 interface Props {
   projectId: ID;
@@ -21,14 +22,9 @@ interface Props {
   direction?: string;
 }
 
-const TYPE_LABELS: Record<string, string> = {
-  concrete: "Бетон",
-  rebar: "Арматура",
-  other: "Прочее",
-};
-
 export function CorridorsTab({ projectId, direction }: Props) {
   const { data: matrix, isLoading } = useCorridors(projectId);
+  const { label: materialTypeLabel } = useMaterialTypeLabels();
   const setType = useSetTypeCorridor(projectId);
   const deleteType = useDeleteTypeCorridor(projectId);
   const setClass = useSetClassCorridor(projectId);
@@ -112,7 +108,7 @@ export function CorridorsTab({ projectId, direction }: Props) {
             const rule = typeMap.get(mt);
             const classes = grouped.get(mt) ?? [];
             const isEditingThisType = editingType === mt;
-            const label = TYPE_LABELS[mt] ?? mt;
+            const label = materialTypeLabel(mt);
 
             return (
               <>

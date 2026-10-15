@@ -11,8 +11,8 @@ import { StatusPill } from "@/components/ui-domain/StatusPill";
 
 import { useMaterialClasses, useReferencePrices } from "@/services/queries";
 import { formatDate } from "@/lib/format";
+import { useMaterialTypeLabels } from "@/lib/materialTypes";
 
-const TYPE_LABELS: Record<string, string> = { concrete: "Бетон", rebar: "Арматура", other: "Прочее" };
 
 export default function MaterialPage() {
   const { id } = useParams<{ id: string }>();
@@ -20,6 +20,7 @@ export default function MaterialPage() {
   const materialId = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 
   const classesQ = useMaterialClasses();
+  const { label: materialTypeLabel } = useMaterialTypeLabels();
   const material = classesQ.data?.find((c) => c.id === materialId) ?? null;
   const rpQ = useReferencePrices(undefined, {
     materialClassId: materialId ?? undefined,
@@ -36,7 +37,7 @@ export default function MaterialPage() {
       <Breadcrumbs items={[{ label: "Номенклатура", to: "/materials" }, { label: material.name }]} />
       <div className="flex items-center gap-3 mt-2">
         <PageHeader serif title={material.name} />
-        <StatusPill tone="neutral" label={TYPE_LABELS[material.material_type] ?? material.material_type} />
+        <StatusPill tone="neutral" label={materialTypeLabel(material.material_type)} />
       </div>
 
       <Tabs defaultValue="overview" className="mt-6">
