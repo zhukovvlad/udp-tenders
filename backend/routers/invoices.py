@@ -94,6 +94,21 @@ def _avg_confidence(doc) -> float | None:
     return round(sum(confs) / len(confs), 2)
 
 
+def _serialize_and_release(db: Session, doc_id: int) -> dict:
+    """Сериализовать документ и вернуть соединение запроса в пул до старта фоновой обработки.
+
+    FastAPI закрывает зависимость get_db только ПОСЛЕ BackgroundTasks, поэтому без явного
+    завершения транзакции сессия запроса держала бы соединение всё время фоновой обработки
+    (LLM-вызов — десятки секунд), и массовая загрузка исчерпывала QueuePool. rollback, а не
+    close: несохранённого нет (guard уже закоммичен), соединение уходит в пул, а сессия
+    остаётся пригодной для зависимостей, которые ещё держат её объекты.
+    """
+    db.expire_all()
+    result = _serialize_document(get_document(db, doc_id))
+    db.rollback()
+    return result
+
+
 def _serialize_document(doc) -> dict:
     """Полная сериализация документа со счетами-фактурами и позициями.
     Используется в GET /documents/{id}, POST /upload, POST /reparse —
@@ -215,8 +230,7 @@ async def reparse_document(
     from processing import process_document
     background_tasks.add_task(process_document, doc_id, mode="parse", session_factory=session_factory)
 
-    db.expire_all()
-    return _serialize_document(get_document(db, doc_id))
+    return _serialize_and_release(db, doc_id)
 
 
 @router.post("/documents/{doc_id}/deskew-reparse", status_code=202)
@@ -241,8 +255,7 @@ async def deskew_reparse_document(
     from processing import process_document
     background_tasks.add_task(process_document, doc_id, mode="deskew", session_factory=session_factory)
 
-    db.expire_all()
-    return _serialize_document(get_document(db, doc_id))
+    return _serialize_and_release(db, doc_id)
 
 
 @router.post("/upload", status_code=202)
@@ -305,8 +318,7 @@ async def upload_pdf(
     background_tasks.add_task(process_document, doc.id, mode="parse",
                               pdf_bytes=file_bytes, session_factory=session_factory)
 
-    db.expire_all()
-    return {**_serialize_document(get_document(db, doc.id)), "duplicate": False}
+    return {**_serialize_and_release(db, doc.id), "duplicate": False}
 
 
 @router.put("/{invoice_id}")

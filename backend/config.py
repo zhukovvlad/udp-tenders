@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     GATEWAY_BASE_URL: str = ""
     GATEWAY_MODEL: str = ""
 
+    # Сколько документов обрабатывается в фоне одновременно (на процесс); остальные ждут
+    # слота в статусе processing. Бережёт пул БД, память и лимиты LLM-провайдера.
+    PROCESSING_CONCURRENCY: int = Field(default=4, ge=1)
+
     # Логирование
     LOG_LEVEL: str = "INFO"
 

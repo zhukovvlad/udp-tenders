@@ -91,6 +91,41 @@ def test_deskew_reparse_enqueues_via_background_tasks(client, factories, in_memo
     assert g.json()["status"] == "processing"
 
 
+@pytest.mark.parametrize("endpoint", ["upload", "reparse", "deskew-reparse"])
+def test_request_session_released_before_background_processing(
+    client, factories, in_memory_s3, sample_pdf_bytes, db_session, monkeypatch, endpoint,
+):
+    """Сессия запроса не держит соединение из пула, пока идёт фоновая обработка.
+
+    FastAPI закрывает get_db только ПОСЛЕ BackgroundTasks; без явного освобождения
+    каждая фоновая обработка (долгий LLM-вызов) держала соединение запроса, и массовая
+    загрузка исчерпывала QueuePool (инцидент 2026-10-14).
+    """
+    import io
+
+    import processing
+
+    seen: list[bool] = []
+
+    async def fake_process_document(doc_id, **kwargs):
+        """Фиксирует, держит ли сессия запроса транзакцию (= соединение) в момент фона."""
+        seen.append(db_session.in_transaction())
+    monkeypatch.setattr(processing, "process_document", fake_process_document)
+
+    if endpoint == "upload":
+        project = factories.ProjectFactory.create()
+        files = {"file": ("a.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+        r = client.post("/api/invoices/upload", data={"project_id": project.id}, files=files)
+    else:
+        doc = factories.DocumentFactory.create(s3_key="k/s.pdf", status="parsed")
+        in_memory_s3["k/s.pdf"] = b"%PDF"
+        r = client.post(f"/api/invoices/documents/{doc.id}/{endpoint}")
+
+    assert r.status_code == 202
+    assert r.json()["status"] == "processing"
+    assert seen == [False]
+
+
 def test_upload_rejects_non_pdf(client, factories):
     project = factories.ProjectFactory.create()
     response = client.post(
