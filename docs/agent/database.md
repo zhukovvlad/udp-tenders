@@ -11,7 +11,7 @@ User → RefreshTokens (много, отзываемые, 14 дней)
 
 UnitOfMeasure (id, code, name, symbol, dimension, base_unit_id self-FK, to_base_multiplier)
 UnitAlias (raw_text unique → unit_id FK)
-MaterialType (code: concrete/rebar/other, default_unit_id FK → UnitOfMeasure)
+MaterialType (code: concrete/rebar/mortar/other, default_unit_id FK → UnitOfMeasure)
 MaterialClass.material_type_id FK → MaterialType (ON DELETE RESTRICT, indexed)
 InvoiceItem: raw_unit (сырая строка из PDF), normalized_unit_id FK → UnitOfMeasure (nullable),
              normalized_quantity NUMERIC(20,6), normalized_unit_price NUMERIC(24,6)
@@ -25,7 +25,7 @@ CompensationCorridor.material_type_id FK → MaterialType
 
 **`unit_aliases`** — сопоставление сырых строк из PDF с единицами: `raw_text` UNIQUE → `unit_id` FK. Ключ нормализуется через `normalize_unit_key` (NFKC, lowercase, collapse whitespace, strip trailing dots) — единый источник правды в `crud/units.py`.
 
-**`material_types`** — типы материалов: `code` (`concrete`/`rebar`/`other`), `default_unit_id` FK → `units_of_measure`. Используется для определения ожидаемой размерности при создании базовых цен и для коридоров компенсации.
+**`material_types`** — типы материалов: `code` (`concrete`/`rebar`/`mortar`/`other`), `default_unit_id` FK → `units_of_measure`. Используется для определения ожидаемой размерности при создании базовых цен и для коридоров компенсации. Каждый тип, кроме `other`, — направление дашборда/экспорта; фронт берёт подписи типов из `/api/material-types` (`useMaterialTypeLabels`), так что новый тип в UI не требует правки фронта. `MATERIAL_TYPES_SEED` (`crud/units.py`) — снимок на ревизию `e1f2a3b4c5d6`, которая его импортирует: не дополнять, новые типы — своими ревизиями. `mortar` («Раствор», м³) добавлен ревизией `216a3d19213d`: она же перенесла из `other` классы, у которых ВСЕ позиции — раствор (`raw_name ILIKE '%раствор%'`). Правило промпта: класс раствора — марка (`М200`); base-материал типа `other` — «материал + марка» (`Кирпич М150`), голая марка недопустима — иначе разные материалы одной марки сольются в один класс.
 
 ## MaterialClass
 
