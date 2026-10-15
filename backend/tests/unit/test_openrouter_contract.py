@@ -124,6 +124,29 @@ async def test_http_status_classification():
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_http_error_logs_status_size_and_truncated_body(caplog, monkeypatch):
+    """Не-200 → warning с кодом, размером payload и обрезанным телом ответа (диагностика 400)."""
+    import logging
+
+    # alembic/env.py → fileConfig(disable_existing_loggers=True) в тестах с миграциями
+    # гасит уже созданные логгеры; включаем обратно, иначе caplog пуст в полном прогоне.
+    monkeypatch.setattr(logging.getLogger("llm_openrouter"), "disabled", False)
+    body ={"error": {"code": 400, "message": "request too large " + "x" * 3000}}
+    respx.post(URL).mock(return_value=httpx.Response(400, json=body))
+    p = _provider()
+    with caplog.at_level("WARNING", logger="llm_openrouter"), pytest.raises(llm.LLMProviderError):
+        await p.vision_completion(system=None, user_text="x",
+                                  attachment=llm.PdfAttachment(data=b"%PDF-1.4", filename="a.pdf"),
+                                  max_tokens=200, timeout=httpx.Timeout(30))
+    [rec] = [r for r in caplog.records if r.name == "llm_openrouter"]
+    assert "HTTP 400" in rec.getMessage()
+    assert "payload" in rec.getMessage()
+    assert "request too large" in rec.getMessage()
+    assert len(rec.getMessage()) < 1500
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_broken_envelope_keeps_billing():
     """HTTP 200 без choices → LLMProviderError(retryable=False, paid_calls=1, cost)."""
     respx.post(URL).mock(return_value=httpx.Response(200, json={"usage": {"cost": 0.02}}))
